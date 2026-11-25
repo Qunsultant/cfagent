@@ -434,6 +434,7 @@ import type {
 } from "../src/workflows/screenerCollation";
 import type { WorkflowJobCommand, WorkflowPort } from "../src/workflows/workflowPorts";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 
 function screenFullResult(universe: string) {
   return {
@@ -635,6 +636,10 @@ function makeTradeHarness() {
     SERVICE_USER_LOGIN: "svc-background",
     TRADING_AGENT_PROVIDERS: "fakeg18",
     TRADING_AGENT_DEFAULT_PROVIDER: "fakeg18",
+    // #6102: the approval door's blocking audits resolve from
+    // env.AGENT_DB — a fresh mock per harness (the port is
+    // memoized per env object).
+    AGENT_DB: new MockD1Database(),
   };
 
   const agent: any = Object.create(TradingAgent.prototype);

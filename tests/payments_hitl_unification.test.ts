@@ -68,6 +68,10 @@ vi.mock("agents/x402", () => {
 import { OrchestratorAgent } from "../src/agents/orchestrator";
 import { MockSqlStorage } from "./mock-sql";
 import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 import { DatabaseORM } from "../src/orm";
 import { DraftPaymentCommand, ConfirmPaymentDraftCommand } from "../src/mcps/openaimp/commands";
 import type { McpToolContext } from "../src/patterns/interfaces";
@@ -115,7 +119,11 @@ describe("POST /payments/create — HITL-draft canonical flow (#1690)", () => {
       waitUntil: vi.fn(),
     };
     const agent = new OrchestratorAgent(ctx as any, env);
-    return { agent, sql };
+    // #6102: read audit rows from the same mock bound as AGENT_DB.
+    const d1Store = new D1AuditEventStore(
+      createD1AuditEventDb((env as any).AGENT_DB as never),
+    );
+    return { agent, sql, d1Store };
   };
 
   const post = (agent: OrchestratorAgent, path: string, body: Record<string, unknown>) =>
@@ -129,25 +137,36 @@ describe("POST /payments/create — HITL-draft canonical flow (#1690)", () => {
 
   const allTx = (sql: MockSqlStorage) =>
     Array.from(sql.exec("SELECT * FROM mas_transactions")) as any[];
-  const auditsOf = (sql: MockSqlStorage, type: string) =>
-    Array.from(sql.exec("SELECT * FROM mas_events WHERE type = ?", type)) as any[];
+  // #6102: audit rows land in D1 now (the DO mas_events table is
+  // frozen history). The orchestrator's audit() is sync
+  // fire-and-forget, so poll briefly until the row lands.
+  const auditsOf = (d1Store: D1AuditEventStore, type: string) =>
+    d1Store.findMany({ where: { type } });
+  async function pollAuditEvents(d1Store: D1AuditEventStore, type: string) {
+    let rows = await auditsOf(d1Store, type);
+    for (let i = 0; i < 50 && rows.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      rows = await auditsOf(d1Store, type);
+    }
+    return rows;
+  }
 
   // The agent lazily seeds two ledger rows on its first request
   // (pay_init_stripe / pay_init_paypal); diff against the baseline.
   const SEED_IDS = new Set(["pay_init_stripe", "pay_init_paypal"]);
-  const baseline = (sql: MockSqlStorage) => ({
+  const baseline = async (d1Store: D1AuditEventStore, sql: MockSqlStorage) => ({
     txIds: new Set(allTx(sql).map((r) => r.id as string)),
-    awaiting: auditsOf(sql, "payment.awaiting_confirmation").length,
-    created: auditsOf(sql, "payment.created").length,
-    confirmed: auditsOf(sql, "payment.confirmed").length,
-    rejected: auditsOf(sql, "payment.rejected").length,
+    awaiting: (await auditsOf(d1Store, "payment.awaiting_confirmation")).length,
+    created: (await auditsOf(d1Store, "payment.created")).length,
+    confirmed: (await auditsOf(d1Store, "payment.confirmed")).length,
+    rejected: (await auditsOf(d1Store, "payment.rejected")).length,
   });
   const newTx = (sql: MockSqlStorage, base: { txIds: Set<string> }) =>
     allTx(sql).filter((r) => !base.txIds.has(r.id) && !SEED_IDS.has(r.id));
 
   it("stripe create stores awaiting_confirmation with NO checkoutUrl/gatewayRef and NO gateway call", async () => {
-    const { agent, sql } = makeAgent(makeEnv());
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv());
+    const base = await baseline(d1Store, sql);
     const res = await post(agent, "/payments/create", {
       amount: 25, customer: "Acme Corp", gateway: "stripe",
     });
@@ -163,14 +182,14 @@ describe("POST /payments/create — HITL-draft canonical flow (#1690)", () => {
     expect(rows[0].status).toBe("awaiting_confirmation");
     expect(rows[0].checkout_url).toBe("");
     expect(rows[0].gateway_ref).toBe("");
-    expect(auditsOf(sql, "payment.awaiting_confirmation")).toHaveLength(base.awaiting + 1);
-    expect(auditsOf(sql, "payment.created")).toHaveLength(base.created);
+    expect(await pollAuditEvents(d1Store, "payment.awaiting_confirmation")).toHaveLength(base.awaiting + 1);
+    expect(await auditsOf(d1Store, "payment.created")).toHaveLength(base.created);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("sandbox create likewise drafts without checkout; note is empty when no description is supplied (#514 preserved)", async () => {
-    const { agent, sql } = makeAgent(makeEnv());
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv());
+    const base = await baseline(d1Store, sql);
     const res = await post(agent, "/payments/create", {
       amount: 25, customer: "Acme Corp", gateway: "sandbox",
     });
@@ -185,8 +204,8 @@ describe("POST /payments/create — HITL-draft canonical flow (#1690)", () => {
   });
 
   it("create with a description stores it unchanged", async () => {
-    const { agent, sql } = makeAgent(makeEnv());
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv());
+    const base = await baseline(d1Store, sql);
     const res = await post(agent, "/payments/create", {
       amount: 25, customer: "Acme Corp", gateway: "sandbox",
       description: "Q3 consulting engagement",
@@ -198,8 +217,8 @@ describe("POST /payments/create — HITL-draft canonical flow (#1690)", () => {
   });
 
   it("create keeps #524 amount 400 and #156 gateway 400-before-row-write", async () => {
-    const { agent, sql } = makeAgent(makeEnv());
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv());
+    const base = await baseline(d1Store, sql);
     const badAmount = await post(agent, "/payments/create", { customer: "Acme Corp", gateway: "sandbox" });
     expect(badAmount.status).toBe(400);
     const badGateway = await post(agent, "/payments/create", {
@@ -210,12 +229,12 @@ describe("POST /payments/create — HITL-draft canonical flow (#1690)", () => {
     expect(badJson.code).toBe("UNSUPPORTED_GATEWAY");
     expect(badJson.error).toContain("stripe, paypal, lemonsqueezy, sandbox");
     expect(newTx(sql, base)).toHaveLength(0);
-    expect(auditsOf(sql, "payment.awaiting_confirmation")).toHaveLength(base.awaiting);
+    expect(await auditsOf(d1Store, "payment.awaiting_confirmation")).toHaveLength(base.awaiting);
   });
 
   it("confirm on a missing draft returns 404 for approved AND rejected (no silent success)", async () => {
-    const { agent, sql } = makeAgent(makeEnv());
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv());
+    const base = await baseline(d1Store, sql);
     const approved = await post(agent, "/payments/confirm", {
       draftId: "pay_doesnotexist", decision: "approved",
     });
@@ -225,13 +244,13 @@ describe("POST /payments/create — HITL-draft canonical flow (#1690)", () => {
     });
     expect(rejected.status).toBe(404);
     expect(newTx(sql, base)).toHaveLength(0);
-    expect(auditsOf(sql, "payment.confirmed")).toHaveLength(base.confirmed);
-    expect(auditsOf(sql, "payment.rejected")).toHaveLength(base.rejected);
+    expect(await auditsOf(d1Store, "payment.confirmed")).toHaveLength(base.confirmed);
+    expect(await auditsOf(d1Store, "payment.rejected")).toHaveLength(base.rejected);
   });
 
   it("confirm approved charge creates checkout via the facade (sandbox URL + ref on the row)", async () => {
-    const { agent, sql } = makeAgent(makeEnv());
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv());
+    const base = await baseline(d1Store, sql);
     const created = await post(agent, "/payments/create", {
       amount: 25, customer: "Acme Corp", gateway: "sandbox",
     });
@@ -250,12 +269,12 @@ describe("POST /payments/create — HITL-draft canonical flow (#1690)", () => {
     expect(row.checkout_url).toContain("/checkout/sandbox");
     expect(row.gateway_ref).toContain("sandbox_");
     expect(row.note).toBe("Approved by human authorizer");
-    expect(auditsOf(sql, "payment.confirmed")).toHaveLength(base.confirmed + 1);
+    expect(await pollAuditEvents(d1Store, "payment.confirmed")).toHaveLength(base.confirmed + 1);
   });
 
   it("confirm approved OVERWRITES a pre-existing checkoutUrl (unconditional checkout; old-flow rows get a fresh checkout)", async () => {
-    const { agent, sql } = makeAgent(makeEnv());
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv());
+    const base = await baseline(d1Store, sql);
     const created = await post(agent, "/payments/create", {
       amount: 25, customer: "Acme Corp", gateway: "sandbox",
     });
@@ -272,8 +291,8 @@ describe("POST /payments/create — HITL-draft canonical flow (#1690)", () => {
   });
 
   it("confirm rejected marks the draft rejected with the command note text", async () => {
-    const { agent, sql } = makeAgent(makeEnv());
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv());
+    const base = await baseline(d1Store, sql);
     const created = await post(agent, "/payments/create", {
       amount: 25, customer: "Acme Corp", gateway: "sandbox",
     });
@@ -285,12 +304,12 @@ describe("POST /payments/create — HITL-draft canonical flow (#1690)", () => {
     const row = newTx(sql, base)[0];
     expect(row.status).toBe("rejected");
     expect(row.note).toBe("Rejected by human reviewer");
-    expect(auditsOf(sql, "payment.rejected")).toHaveLength(base.rejected + 1);
+    expect(await pollAuditEvents(d1Store, "payment.rejected")).toHaveLength(base.rejected + 1);
   });
 
   it("confirm approved refund executes a refund (sandbox refund ref on the row)", async () => {
-    const { agent, sql } = makeAgent(makeEnv());
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv());
+    const base = await baseline(d1Store, sql);
     const created = await post(agent, "/payments/create", {
       amount: 25, customer: "Acme Corp", gateway: "sandbox", action: "refund",
     });

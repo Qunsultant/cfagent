@@ -72,6 +72,11 @@ vi.mock("agents/x402", () => {
 
 import { OrchestratorAgent } from "../src/agents/orchestrator";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 import { handlePaymentsRoutes } from "../src/agents/routes/payments";
 import {
   levelsForPaymentsFlowMode,
@@ -86,6 +91,9 @@ const makeEnv = (overrides: Record<string, unknown> = {}): Env =>
     AI_SEARCH_ENDPOINT: "https://mock.search",
     ORCHESTRATOR_AGENT: {} as any,
     AGENT_SESSIONS: {} as any,
+    // #6102: audit rows land in D1 now — a fresh mock per makeEnv
+    // call, so each test's agent gets its own audit table.
+    AGENT_DB: new MockD1Database() as any,
     STRIPE_SECRET_KEY: "sk_test_mock",
     PAYPAL_CLIENT_ID: "paypal-client-id-1735",
     PAYPAL_CLIENT_SECRET: "paypal-secret-1735",
@@ -214,7 +222,11 @@ describe("POST /payments/create + /payments/confirm under scoped carriers (#1735
     };
     const agent = new OrchestratorAgent(ctx as any, env);
     if (scoped !== undefined) (agent as any).scopedPaymentsFlowModes = scoped;
-    return { agent, sql };
+    // #6102: read audit rows from the same mock bound as AGENT_DB.
+    const d1Store = new D1AuditEventStore(
+      createD1AuditEventDb((env as any).AGENT_DB as never),
+    );
+    return { agent, sql, d1Store };
   };
 
   const post = (agent: OrchestratorAgent, path: string, body: Record<string, unknown>) =>
@@ -227,27 +239,38 @@ describe("POST /payments/create + /payments/confirm under scoped carriers (#1735
     );
 
   const allTx = (sql: MockSqlStorage) => Array.from(sql.exec("SELECT * FROM mas_transactions")) as any[];
-  const auditsOf = (sql: MockSqlStorage, type: string) =>
-    Array.from(sql.exec("SELECT * FROM mas_events WHERE type = ?", type)) as any[];
+  // #6102: audit rows land in D1 now (the DO mas_events table is
+  // frozen history). The orchestrator's audit() is sync
+  // fire-and-forget, so poll briefly until the row lands.
+  const auditsOf = (d1Store: D1AuditEventStore, type: string) =>
+    d1Store.findMany({ where: { type } });
+  async function pollAuditEvents(d1Store: D1AuditEventStore, type: string) {
+    let rows = await auditsOf(d1Store, type);
+    for (let i = 0; i < 50 && rows.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      rows = await auditsOf(d1Store, type);
+    }
+    return rows;
+  }
   const SEED_IDS = new Set(["pay_init_stripe", "pay_init_paypal"]);
-  const baseline = (sql: MockSqlStorage) => ({
+  const baseline = async (d1Store: D1AuditEventStore, sql: MockSqlStorage) => ({
     txIds: new Set(allTx(sql).map((r) => r.id as string)),
-    awaiting: auditsOf(sql, "payment.awaiting_confirmation").length,
-    created: auditsOf(sql, "payment.created").length,
-    configError: auditsOf(sql, "payment.config_error").length,
+    awaiting: (await auditsOf(d1Store, "payment.awaiting_confirmation")).length,
+    created: (await auditsOf(d1Store, "payment.created")).length,
+    configError: (await auditsOf(d1Store, "payment.config_error")).length,
   });
   const createBody = { amount: 25, customer: "Acme Corp", gateway: "sandbox" };
 
   it("session immediate, env unset → immediate (pending_checkout, payment.created, no draft)", async () => {
-    const { agent, sql } = makeAgent(makeEnv(), { session: { flow: "immediate" } });
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv(), { session: { flow: "immediate" } });
+    const base = await baseline(d1Store, sql);
     const res = await post(agent, "/payments/create", createBody);
     expect(res.status).toBe(200);
     const json = (await res.json()) as any;
     expect(json.transaction.status).toBe("pending_checkout");
     expect(json.transaction.checkoutUrl).toBeTruthy();
-    expect(auditsOf(sql, "payment.created")).toHaveLength(base.created + 1);
-    expect(auditsOf(sql, "payment.awaiting_confirmation")).toHaveLength(base.awaiting);
+    expect(await pollAuditEvents(d1Store, "payment.created")).toHaveLength(base.created + 1);
+    expect(await auditsOf(d1Store, "payment.awaiting_confirmation")).toHaveLength(base.awaiting);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -259,16 +282,16 @@ describe("POST /payments/create + /payments/confirm under scoped carriers (#1735
   });
 
   it("session hitl beats user immediate and env immediate → hitl draft", async () => {
-    const { agent, sql } = makeAgent(makeEnv({ PAYMENTS_FLOW_MODE: "immediate" }), {
+    const { agent, sql, d1Store } = makeAgent(makeEnv({ PAYMENTS_FLOW_MODE: "immediate" }), {
       session: { flow: "hitl" },
       user: { flow: "immediate" },
     });
-    const base = baseline(sql);
+    const base = await baseline(d1Store, sql);
     const res = await post(agent, "/payments/create", createBody);
     const json = (await res.json()) as any;
     expect(json.transaction.status).toBe("awaiting_confirmation");
     expect(json.transaction.checkoutUrl).toBe("");
-    expect(auditsOf(sql, "payment.awaiting_confirmation")).toHaveLength(base.awaiting + 1);
+    expect(await pollAuditEvents(d1Store, "payment.awaiting_confirmation")).toHaveLength(base.awaiting + 1);
   });
 
   it("user hitl beats env immediate → hitl draft", async () => {
@@ -286,17 +309,17 @@ describe("POST /payments/create + /payments/confirm under scoped carriers (#1735
   });
 
   it("invalid session value fails closed to hitl with a payment.config_error audit, never immediate", async () => {
-    const { agent, sql } = makeAgent(makeEnv(), {
+    const { agent, sql, d1Store } = makeAgent(makeEnv(), {
       session: { flow: "bogus-mode" },
       user: { flow: "immediate" },
     });
-    const base = baseline(sql);
+    const base = await baseline(d1Store, sql);
     const res = await post(agent, "/payments/create", createBody);
     const json = (await res.json()) as any;
     expect(json.transaction.status).toBe("awaiting_confirmation");
     expect(json.transaction.checkoutUrl).toBe("");
-    expect(auditsOf(sql, "payment.config_error")).toHaveLength(base.configError + 1);
-    const err = auditsOf(sql, "payment.config_error").at(-1) as any;
+    expect(await pollAuditEvents(d1Store, "payment.config_error")).toHaveLength(base.configError + 1);
+    const err = (await auditsOf(d1Store, "payment.config_error")).at(-1) as any;
     const payload = typeof err?.payload === "string" ? JSON.parse(err.payload) : err?.payload;
     expect(JSON.stringify(payload)).toContain("bogus-mode");
   });
@@ -324,14 +347,14 @@ describe("POST /payments/create + /payments/confirm under scoped carriers (#1735
   });
 
   it("SECURITY: request body flowMode=immediate does NOT flip the flow (env unset → hitl draft)", async () => {
-    const { agent, sql } = makeAgent(makeEnv());
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv());
+    const base = await baseline(d1Store, sql);
     const res = await post(agent, "/payments/create", { ...createBody, flowMode: "immediate" });
     expect(res.status).toBe(200);
     const json = (await res.json()) as any;
     expect(json.transaction.status).toBe("awaiting_confirmation");
     expect(json.transaction.checkoutUrl).toBe("");
-    expect(auditsOf(sql, "payment.awaiting_confirmation")).toHaveLength(base.awaiting + 1);
+    expect(await pollAuditEvents(d1Store, "payment.awaiting_confirmation")).toHaveLength(base.awaiting + 1);
   });
 
   it("SECURITY: query ?flowMode=immediate does NOT flip the flow (env unset → hitl draft)", async () => {

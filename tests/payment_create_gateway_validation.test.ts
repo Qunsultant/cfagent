@@ -91,6 +91,11 @@ vi.mock("agents/x402", () => {
 import { PaymentGatewayService, type SupportedGateway } from "../src/services/payments";
 import { OrchestratorAgent } from "../src/agents/orchestrator";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 import type { Env } from "../src/types";
 
 // Source pins read via cwd-relative paths (vitest runs at the repo root).
@@ -102,6 +107,9 @@ const makeEnv = (overrides: Record<string, unknown> = {}): Env =>
     AI_SEARCH_ENDPOINT: "https://mock.search",
     ORCHESTRATOR_AGENT: {} as any,
     AGENT_SESSIONS: {} as any,
+    // #6102: audit rows land in D1 now — a fresh mock per makeEnv
+    // call, so each test's agent gets its own audit table.
+    AGENT_DB: new MockD1Database() as any,
     STRIPE_SECRET_KEY: "sk_test_mock",
     PAYPAL_CLIENT_ID: "paypal-client-id-156",
     PAYPAL_CLIENT_SECRET: "paypal-secret-156",
@@ -163,7 +171,11 @@ describe("POST /payments/create — gateway validated at creation (#156)", () =>
       waitUntil: vi.fn(),
     };
     const agent = new OrchestratorAgent(ctx as any, env);
-    return { agent, sql };
+    // #6102: read audit rows from the same mock bound as AGENT_DB.
+    const d1Store = new D1AuditEventStore(
+      createD1AuditEventDb((env as any).AGENT_DB as never),
+    );
+    return { agent, sql, d1Store };
   };
 
   const postCreate = (agent: OrchestratorAgent, body: Record<string, unknown>) =>
@@ -180,8 +192,19 @@ describe("POST /payments/create — gateway validated at creation (#156)", () =>
 
   // #1690: the create audit is now the draft command's
   // payment.awaiting_confirmation (payment.created no longer exists).
-  const createdAudits = (sql: MockSqlStorage) =>
-    Array.from(sql.exec("SELECT * FROM mas_events WHERE type = ?", "payment.awaiting_confirmation")) as any[];
+  // #6102: audit rows land in D1 now (the DO mas_events table is
+  // frozen history). The orchestrator's audit() is sync
+  // fire-and-forget, so poll briefly until the row lands.
+  const createdAudits = (d1Store: D1AuditEventStore) =>
+    d1Store.findMany({ where: { type: "payment.awaiting_confirmation" } });
+  async function pollAuditEvents(d1Store: D1AuditEventStore, type: string) {
+    let rows = await d1Store.findMany({ where: { type } });
+    for (let i = 0; i < 50 && rows.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      rows = await d1Store.findMany({ where: { type } });
+    }
+    return rows;
+  }
 
   // The agent lazily seeds two ledger rows on its first request
   // (pay_init_stripe / pay_init_paypal — #175's territory), so assertions
@@ -189,16 +212,16 @@ describe("POST /payments/create — gateway validated at creation (#156)", () =>
   // seed ids: "no row written" means no NEW row, and "created" means
   // exactly one new row.
   const SEED_IDS = new Set(["pay_init_stripe", "pay_init_paypal"]);
-  const baseline = (sql: MockSqlStorage) => ({
+  const baseline = async (d1Store: D1AuditEventStore, sql: MockSqlStorage) => ({
     txIds: new Set(allTx(sql).map((r) => r.id as string)),
-    audits: createdAudits(sql).length,
+    audits: (await createdAudits(d1Store)).length,
   });
   const newTx = (sql: MockSqlStorage, base: { txIds: Set<string> }) =>
     allTx(sql).filter((r) => !base.txIds.has(r.id) && !SEED_IDS.has(r.id));
 
   it("unknown gateway: 400 naming the supported list, and NO transaction row is written", async () => {
-    const { agent, sql } = makeAgent(makeEnv());
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv());
+    const base = await baseline(d1Store, sql);
     const res = await postCreate(agent, { amount: 25, customer: "Acme Corp", gateway: "boguspay" });
     expect(res.status).toBe(400);
     const json = (await res.json()) as any;
@@ -207,20 +230,22 @@ describe("POST /payments/create — gateway validated at creation (#156)", () =>
     expect(json.error).toContain('Unsupported payment gateway: "boguspay"');
     expect(json.error).toContain("stripe, paypal, lemonsqueezy, sandbox");
     expect(newTx(sql, base)).toHaveLength(0);
-    expect(createdAudits(sql)).toHaveLength(base.audits);
+    // A rejected create writes no audit (direct read: nothing is
+    // in flight for this type on a fresh D1).
+    expect(await createdAudits(d1Store)).toHaveLength(base.audits);
   });
 
   it("uppercase garbage is still garbage after normalization: 400, no row", async () => {
-    const { agent, sql } = makeAgent(makeEnv());
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv());
+    const base = await baseline(d1Store, sql);
     const res = await postCreate(agent, { amount: 25, customer: "Acme Corp", gateway: "BOGUSPAY" });
     expect(res.status).toBe(400);
     expect(newTx(sql, base)).toHaveLength(0);
   });
 
   it("a non-string gateway is rejected, not crashed on: 400, no row", async () => {
-    const { agent, sql } = makeAgent(makeEnv());
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv());
+    const base = await baseline(d1Store, sql);
     const res = await postCreate(agent, { amount: 25, customer: "Acme Corp", gateway: 123 });
     expect(res.status).toBe(400);
     const json = (await res.json()) as any;
@@ -229,8 +254,8 @@ describe("POST /payments/create — gateway validated at creation (#156)", () =>
   });
 
   it("explicit sandbox drafts as before, stored as sandbox (awaiting_confirmation, no checkout at create)", async () => {
-    const { agent, sql } = makeAgent(makeEnv());
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv());
+    const base = await baseline(d1Store, sql);
     const res = await postCreate(agent, { amount: 25, customer: "Acme Corp", gateway: "sandbox" });
     expect(res.status).toBe(200);
     const json = (await res.json()) as any;
@@ -242,12 +267,12 @@ describe("POST /payments/create — gateway validated at creation (#156)", () =>
     expect(rows[0].status).toBe("awaiting_confirmation");
     expect(rows[0].checkout_url).toBe("");
     expect(rows[0].gateway_ref).toBe("");
-    expect(createdAudits(sql)).toHaveLength(base.audits + 1);
+    expect(await pollAuditEvents(d1Store, "payment.awaiting_confirmation")).toHaveLength(base.audits + 1);
   });
 
   it("stripe drafts without checkout (#1690: stubbed endpoint never fires at create)", async () => {
-    const { agent, sql } = makeAgent(makeEnv());
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv());
+    const base = await baseline(d1Store, sql);
     const res = await postCreate(agent, { amount: 25, customer: "Acme Corp", gateway: "stripe" });
     expect(res.status).toBe(200);
     const json = (await res.json()) as any;
@@ -265,8 +290,8 @@ describe("POST /payments/create — gateway validated at creation (#156)", () =>
   });
 
   it("paypal drafts without checkout (#1690: stubbed endpoints never fire at create)", async () => {
-    const { agent, sql } = makeAgent(makeEnv());
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv());
+    const base = await baseline(d1Store, sql);
     const res = await postCreate(agent, { amount: 25, customer: "Acme Corp", gateway: "paypal" });
     expect(res.status).toBe(200);
     const json = (await res.json()) as any;
@@ -284,8 +309,8 @@ describe("POST /payments/create — gateway validated at creation (#156)", () =>
   });
 
   it("lemonsqueezy drafts without checkout (#1690: stubbed endpoint never fires at create)", async () => {
-    const { agent, sql } = makeAgent(makeEnv());
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv());
+    const base = await baseline(d1Store, sql);
     const res = await postCreate(agent, { amount: 25, customer: "Acme Corp", gateway: "lemonsqueezy" });
     expect(res.status).toBe(200);
     const json = (await res.json()) as any;
@@ -303,8 +328,8 @@ describe("POST /payments/create — gateway validated at creation (#156)", () =>
   });
 
   it("case/whitespace normalization: ' Stripe ' creates a 'stripe' row, matching the webhook verifier", async () => {
-    const { agent, sql } = makeAgent(makeEnv());
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv());
+    const base = await baseline(d1Store, sql);
     const res = await postCreate(agent, { amount: 25, customer: "Acme Corp", gateway: " Stripe " });
     expect(res.status).toBe(200);
     const json = (await res.json()) as any;
@@ -316,8 +341,8 @@ describe("POST /payments/create — gateway validated at creation (#156)", () =>
   });
 
   it("omitted gateway still defaults to stripe, as before", async () => {
-    const { agent, sql } = makeAgent(makeEnv());
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv());
+    const base = await baseline(d1Store, sql);
     const res = await postCreate(agent, { amount: 25, customer: "Acme Corp" });
     expect(res.status).toBe(200);
     const json = (await res.json()) as any;

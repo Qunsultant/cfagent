@@ -28,6 +28,17 @@ import { backgroundDispatchHeadersWithTrace } from "../src/security/backgroundAt
 import { handleScheduledJobOutcomeRoute } from "../src/agents/routes/scheduledJobOutcome";
 import { InMemoryObservabilityAdapter } from "../src/observability/inMemoryObservabilityAdapter";
 import { newTraceContext } from "../src/observability/observabilityPorts";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
+// #6102: static import, not a dynamic import inside the tests —
+// the screenerResearch graph takes 15–22s to load the first time
+// (measured 2026-11-25), which exceeds the 25s per-test timeout
+// when charged inside a test under parallel load. Loading it at
+// file collection keeps both handler tests' timed bodies fast.
+import { handleScreenerResearchRoutes } from "../src/agents/routes/screenerResearch";
 
 const TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736";
 const TRACEPARENT = `00-${TRACE_ID}-00f067aa0ba902b7-01`;
@@ -327,10 +338,10 @@ describe("handler outcome audits (#2037 acceptance: a skip leaves a record)", ()
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-11-07T12:00:00.000Z")); // Saturday
-      const { handleScreenerResearchRoutes } = await import(
-        "../src/agents/routes/screenerResearch"
-      );
-      const rows: Array<Record<string, unknown>> = [];
+      // #6102: the tick outcome writes to D1 now — bind a fresh mock
+      // AGENT_DB and read the row back from the store.
+      const d1Mock = new MockD1Database();
+      const d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
       const ctx = {
         getScreenerAgent: () => {
           throw new Error("unused");
@@ -338,17 +349,10 @@ describe("handler outcome audits (#2037 acceptance: a skip leaves a record)", ()
         getScreenerExecutionContext: async () => undefined,
         getResearchAgent: () => null,
         runResearchAndPublish: vi.fn(async () => ({ success: true })),
-        getOrm: () => ({
-          events: {
-            create: (row: Record<string, unknown>) => {
-              rows.push(row);
-            },
-            findMany: () => [],
-          },
-        }),
+        getOrm: () => ({}),
         readSettingRaw: () => null,
         writeSetting: () => {},
-        env: {},
+        env: { AGENT_DB: d1Mock },
         traceId: TRACE_ID,
       } as never;
       const request = new Request("https://agent.internal/research/scheduled-tick", {
@@ -365,10 +369,11 @@ describe("handler outcome audits (#2037 acceptance: a skip leaves a record)", ()
       expect(res?.status).toBe(200);
       const data = (await res!.json()) as Record<string, unknown>;
       expect(data.skipped).toBe(true);
+      const rows = await d1Store.findMany({ where: { type: SCHEDULED_JOB_OUTCOME_TYPE } });
       expect(rows).toHaveLength(1);
       const row = rows[0];
       expect(row.type).toBe(SCHEDULED_JOB_OUTCOME_TYPE);
-      const payload = row.payload as Record<string, unknown>;
+      const payload = JSON.parse(row.payload as unknown as string) as Record<string, unknown>;
       expect(payload.job).toBe("research");
       expect(payload.outcome).toBe("skipped");
       expect(payload.reason).toBe("weekend");
@@ -379,9 +384,6 @@ describe("handler outcome audits (#2037 acceptance: a skip leaves a record)", ()
   });
 
   it("an adaptation run that already ran this week audits a skipped outcome", async () => {
-    const { handleScreenerResearchRoutes } = await import(
-      "../src/agents/routes/screenerResearch"
-    );
     const { isoWeekKey, WEIGHTS_LAST_RUN_WEEK_KEY } = await import(
       "../src/services/strategyWeightsV2"
     );
@@ -389,7 +391,10 @@ describe("handler outcome audits (#2037 acceptance: a skip leaves a record)", ()
     try {
       const now = new Date("2026-11-02T12:00:00.000Z"); // Monday
       vi.setSystemTime(now);
-      const rows: Array<Record<string, unknown>> = [];
+      // #6102: the tick outcome writes to D1 now — bind a fresh mock
+      // AGENT_DB and read the row back from the store.
+      const d1Mock = new MockD1Database();
+      const d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
       const settings = new Map<string, string>([
         [WEIGHTS_LAST_RUN_WEEK_KEY, isoWeekKey(now)],
       ]);
@@ -403,19 +408,12 @@ describe("handler outcome audits (#2037 acceptance: a skip leaves a record)", ()
           getResearchConfig: async () => null,
         }),
         runResearchAndPublish: vi.fn(async () => ({ success: true })),
-        getOrm: () => ({
-          events: {
-            create: (row: Record<string, unknown>) => {
-              rows.push(row);
-            },
-            findMany: () => [],
-          },
-        }),
+        getOrm: () => ({}),
         readSettingRaw: (key: string) => settings.get(key) ?? null,
         writeSetting: (key: string, value: string) => {
           settings.set(key, value);
         },
-        env: {},
+        env: { AGENT_DB: d1Mock },
         traceId: TRACE_ID,
       } as never;
       const request = new Request("https://agent.internal/adaptation/weights/run", {
@@ -433,8 +431,9 @@ describe("handler outcome audits (#2037 acceptance: a skip leaves a record)", ()
       expect(res?.status).toBe(200);
       const data = (await res!.json()) as Record<string, unknown>;
       expect(data.skipped).toBe("already ran this week");
+      const rows = await d1Store.findMany({ where: { type: SCHEDULED_JOB_OUTCOME_TYPE } });
       expect(rows).toHaveLength(1);
-      const payload = rows[0].payload as Record<string, unknown>;
+      const payload = JSON.parse(rows[0].payload as unknown as string) as Record<string, unknown>;
       expect(payload.job).toBe("adaptation");
       expect(payload.outcome).toBe("skipped");
       expect(payload.traceId).toBe(TRACE_ID);

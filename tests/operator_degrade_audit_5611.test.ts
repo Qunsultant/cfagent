@@ -30,6 +30,10 @@ import {
   type AuditRouteContext,
 } from "../src/agents/routes/audit";
 import { COMMERCIAL_DEFAULTS } from "../src/config/commercialDefaults";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 
 /** Minimal D1Database stand-in over node:sqlite (mirrors store_operators_ports). */
 class MockD1Database {
@@ -263,20 +267,27 @@ const auditCtx = (overrides: Partial<AuditRouteContext> = {}): AuditRouteContext
     ensureTables: () => makeSql({}),
     audit: vi.fn(),
     recordAudit: vi.fn(),
+    env: {},
     ...overrides,
   }) as AuditRouteContext;
 
 const auditReq = (path: string) => new Request(`https://agent.internal${path}`, { method: "GET" });
 
-function auditRows(n: number) {
-  return Array.from({ length: n }, (_, i) => ({
-    id: `e${i}`,
-    session_id: "s",
-    type: "t",
-    agent: "trading",
-    payload: JSON.stringify({ k: i }),
-    created_at: `2026-10-19T${String(i % 24).padStart(2, "0")}:00:00Z`,
-  }));
+/** #6102: seed `n` audit rows into a fresh D1 and return its store. */
+async function seedAuditD1(n: number): Promise<{ d1Mock: MockD1Database; auditStore: D1AuditEventStore }> {
+  const d1Mock = new MockD1Database();
+  const auditStore = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
+  for (let i = 0; i < n; i++) {
+    await auditStore.create({
+      id: `e${i}`,
+      sessionId: "s",
+      type: "t",
+      agent: "trading",
+      payload: { k: i },
+      createdAt: new Date(Date.UTC(2026, 9, 19, 0, i)).toISOString(),
+    });
+  }
+  return { d1Mock, auditStore };
 }
 
 describe("audit pagination default is externalized (#5611 G-14)", () => {
@@ -285,7 +296,10 @@ describe("audit pagination default is externalized (#5611 G-14)", () => {
   });
 
   it("GET /audit with no limit returns the COMMERCIAL_DEFAULTS default", async () => {
-    const ctx = auditCtx({ ensureTables: () => makeSql({ mas_events: auditRows(150) }) });
+    // #6102: GET /audit reads D1 through the port now — seed 150
+    // rows into a fresh mock AGENT_DB and bind it in the route ctx.
+    const { d1Mock } = await seedAuditD1(150);
+    const ctx = auditCtx({ env: { AGENT_DB: d1Mock } });
     const res = await handleAuditRoutes(auditReq("/api/audit"), new URL("https://x/api/audit"), "/api/audit", "s", ctx);
     expect(res).not.toBeNull();
     const body = await res!.json();
@@ -294,7 +308,8 @@ describe("audit pagination default is externalized (#5611 G-14)", () => {
   });
 
   it("an explicit limit is unchanged", async () => {
-    const ctx = auditCtx({ ensureTables: () => makeSql({ mas_events: auditRows(150) }) });
+    const { d1Mock } = await seedAuditD1(150);
+    const ctx = auditCtx({ env: { AGENT_DB: d1Mock } });
     const res = await handleAuditRoutes(
       auditReq("/api/audit?limit=10"),
       new URL("https://x/api/audit?limit=10"),

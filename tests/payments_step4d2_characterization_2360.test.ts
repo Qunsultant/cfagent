@@ -55,6 +55,7 @@ import { PaymentGatewayService } from "../src/services/payments";
 import { computeHmacSha256Hex } from "../src/services/cryptoUtils";
 import { SHARED_TABLE_DDL } from "../src/data/ormSchema";
 import { InMemoryAuditPolicyAdapter } from "../src/data/inMemoryAuditPolicyAdapter";
+import { MockD1Database } from "./mock-d1";
 
 const SESSION = "user-session-2360";
 const SENTINEL = "2000-01-01T00:00:00.000Z";
@@ -143,6 +144,10 @@ function makeCtx(
       APP_BASE_URL: "https://agent.internal",
       PAYMENTS_FLOW_MODE: "immediate",
       STRIPE_WEBHOOK_SECRET: WH_SECRET,
+      // #6102: the money-gate's blocking audit write goes to D1;
+      // without a bound AGENT_DB it throws and the route 500s.
+      // Fresh per makeCtx call, so each test gets its own table.
+      AGENT_DB: new MockD1Database() as any,
       ...envOverrides,
     },
     ensureTables: () => storage as any,

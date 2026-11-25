@@ -100,6 +100,11 @@ import { DatabaseORM } from "../src/orm";
 import { createStoreKv, type DoNamespaceLike } from "../src/data/durableKv";
 import { computeHmacSha256Hex } from "../src/services/cryptoUtils";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 import type { Env } from "../src/types";
 
 const STRIPE_WH_SECRET = "whsec_unit_test_932";
@@ -194,17 +199,26 @@ interface World {
   store: FakeSessionStore;
   ns: FakeAgentNamespace;
   agents: Map<string, { agent: OrchestratorAgent; sql: MockSqlStorage }>;
+  // #6102: all four instances share ONE env (hence one memoized
+  // audit port and one D1); rows are told apart by sessionId.
+  d1Store: D1AuditEventStore;
 }
 
 function makeWorld(): World {
   const store = new FakeSessionStore();
   const ns = new FakeAgentNamespace();
+  const d1Mock = new MockD1Database();
+  const d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
   const env = {
     AI: {} as any,
     AI_SEARCH_ENDPOINT: "https://mock.search",
     ORCHESTRATOR_AGENT: ns as any,
     SESSION_STORE: store as any,
     AGENT_SESSIONS: {} as any,
+    // #6102: audit rows land in D1 now — one mock for the whole
+    // world (the shared env memoizes one port); fresh per world,
+    // so each test gets its own audit table.
+    AGENT_DB: d1Mock as any,
     STRIPE_SECRET_KEY: "sk_test_mock",
     STRIPE_WEBHOOK_SECRET: STRIPE_WH_SECRET,
   } as Env;
@@ -221,7 +235,7 @@ function makeWorld(): World {
     agents.set(identity, { agent, sql });
     ns.agents.set(identity, agent);
   }
-  return { env, store, ns, agents };
+  return { env, store, ns, agents, d1Store };
 }
 
 /** Fetch stubbed at the gateways' real endpoints, as in the #156 tests. */
@@ -251,8 +265,22 @@ async function stripeSignature(body: string, secret: string, ts = Math.floor(Dat
 const txRow = (sql: MockSqlStorage, draftId: string) =>
   (Array.from(sql.exec("SELECT * FROM mas_transactions WHERE id = ?", draftId)) as any[])[0];
 
-const auditsOf = (sql: MockSqlStorage, type: string) =>
-  Array.from(sql.exec("SELECT * FROM mas_events WHERE type = ?", type)) as any[];
+// #6102: audit rows land in D1 now (the DO mas_events table is
+// frozen history), one table shared by the world's four instances
+// — filter by the writing instance's sessionId. The orchestrator's
+// audit() is sync fire-and-forget, so poll briefly until the row lands.
+const auditsOf = async (world: World, identity: string, type: string) =>
+  (await world.d1Store.findMany({ where: { type } })).filter(
+    (r) => r.sessionId === identity,
+  );
+async function pollAuditsOf(world: World, identity: string, type: string) {
+  let rows = await auditsOf(world, identity, type);
+  for (let i = 0; i < 50 && rows.length === 0; i++) {
+    await new Promise((r) => setTimeout(r, 20));
+    rows = await auditsOf(world, identity, type);
+  }
+  return rows;
+}
 
 /** Create a draft through the real POST /payments/create route in `identity`'s instance. */
 async function createDraftViaRoute(world: World, identity: string): Promise<string> {
@@ -349,15 +377,15 @@ describe("gateway webhook settlement routes to the draft-owning instance (#932)"
     // the #148 assertion style) and the settled audit landed THERE.
     const aliceSql = world.agents.get(ALICE)!.sql;
     expect(txRow(aliceSql, draftId)?.updated_at).not.toBe(SENTINEL_TS);
-    const settled = auditsOf(aliceSql, "payment.settled_webhook");
+    const settled = await pollAuditsOf(world, ALICE, "payment.settled_webhook");
     expect(settled).toHaveLength(1);
-    expect(JSON.parse(settled[0].payload).draftId).toBe(draftId);
+    expect(JSON.parse(settled[0].payload as unknown as string).draftId).toBe(draftId);
 
     // The receiver audited no settlement of its own, and no other
     // instance was touched.
-    expect(auditsOf(world.agents.get(RECEIVER)!.sql, "payment.settled_webhook")).toHaveLength(0);
+    expect(await auditsOf(world, RECEIVER, "payment.settled_webhook")).toHaveLength(0);
     expect(txRow(world.agents.get(BOB)!.sql, draftId)).toBeUndefined();
-    expect(auditsOf(world.agents.get(BOB)!.sql, "payment.settled_webhook")).toHaveLength(0);
+    expect(await auditsOf(world, BOB, "payment.settled_webhook")).toHaveLength(0);
   });
 
   it("an unmatched settlement is loud: 404, unmatched audit in the receiver, structured error event, nothing settled", async () => {
@@ -398,10 +426,10 @@ describe("gateway webhook settlement routes to the draft-owning instance (#932)"
     expect(unmatchedEvent?.fields.draftId).toBe("pay_no_such_draft");
     expect(String(unmatchedEvent?.fields.message ?? "")).toContain("webhook settlement unmatched");
 
-    const unmatched = auditsOf(world.agents.get(RECEIVER)!.sql, "payment.settled_webhook_unmatched");
+    const unmatched = await pollAuditsOf(world, RECEIVER, "payment.settled_webhook_unmatched");
     expect(unmatched).toHaveLength(1);
-    expect(JSON.parse(unmatched[0].payload).draftId).toBe("pay_no_such_draft");
-    expect(auditsOf(world.agents.get(RECEIVER)!.sql, "payment.settled_webhook")).toHaveLength(0);
+    expect(JSON.parse(unmatched[0].payload as unknown as string).draftId).toBe("pay_no_such_draft");
+    expect(await auditsOf(world, RECEIVER, "payment.settled_webhook")).toHaveLength(0);
   });
 
   it("a registered owner whose row is missing is loud at the owner, and the receiver propagates it", async () => {
@@ -420,10 +448,10 @@ describe("gateway webhook settlement routes to the draft-owning instance (#932)"
     expect(json.received).toBe(false);
     expect(json.unmatched).toBe(true);
 
-    const unmatched = auditsOf(world.agents.get(DAVE)!.sql, "payment.settled_webhook_unmatched");
+    const unmatched = await pollAuditsOf(world, DAVE, "payment.settled_webhook_unmatched");
     expect(unmatched).toHaveLength(1);
-    expect(JSON.parse(unmatched[0].payload).reason).toBe("owner_row_missing");
-    expect(auditsOf(world.agents.get(DAVE)!.sql, "payment.settled_webhook")).toHaveLength(0);
+    expect(JSON.parse(unmatched[0].payload as unknown as string).reason).toBe("owner_row_missing");
+    expect(await auditsOf(world, DAVE, "payment.settled_webhook")).toHaveLength(0);
   });
 
   it("tenant isolation, both directions: each webhook settles only its own tenant's draft", async () => {
@@ -437,8 +465,8 @@ describe("gateway webhook settlement routes to the draft-owning instance (#932)"
     expect(resBob.status).toBe(200);
     expect(txRow(bobSql, bobDraft)?.updated_at).not.toBe(SENTINEL_TS);
     expect(txRow(aliceSql, aliceDraft)?.updated_at).toBe(SENTINEL_TS);
-    expect(auditsOf(aliceSql, "payment.settled_webhook")).toHaveLength(0);
-    expect(auditsOf(bobSql, "payment.settled_webhook")).toHaveLength(1);
+    expect(await auditsOf(world, ALICE, "payment.settled_webhook")).toHaveLength(0);
+    expect(await pollAuditsOf(world, BOB, "payment.settled_webhook")).toHaveLength(1);
 
     // Alice's settlement then settles Alice's row only.
     const resAlice = await postStripeWebhook(world, RECEIVER, aliceDraft);
@@ -461,10 +489,10 @@ describe("gateway webhook settlement routes to the draft-owning instance (#932)"
     expect(json.received).toBe(false);
     expect(json.settled).toBe(false);
     expect(txRow(aliceSql, aliceDraft)?.updated_at).toBe(SENTINEL_TS);
-    expect(auditsOf(aliceSql, "payment.settled_webhook")).toHaveLength(0);
-    const unmatched = auditsOf(aliceSql, "payment.settled_webhook_unmatched");
+    expect(await auditsOf(world, ALICE, "payment.settled_webhook")).toHaveLength(0);
+    const unmatched = await pollAuditsOf(world, ALICE, "payment.settled_webhook_unmatched");
     expect(unmatched).toHaveLength(1);
-    expect(JSON.parse(unmatched[0].payload).reason).toBe("misrouted");
+    expect(JSON.parse(unmatched[0].payload as unknown as string).reason).toBe("misrouted");
   });
 
   it("a draft in the receiving instance itself still settles locally (ownership by possession)", async () => {
@@ -475,7 +503,7 @@ describe("gateway webhook settlement routes to the draft-owning instance (#932)"
     expect(json.settled).toBe(true);
     const receiverSql = world.agents.get(RECEIVER)!.sql;
     expect(txRow(receiverSql, draftId)?.updated_at).not.toBe(SENTINEL_TS);
-    expect(auditsOf(receiverSql, "payment.settled_webhook")).toHaveLength(1);
+    expect(await pollAuditsOf(world, RECEIVER, "payment.settled_webhook")).toHaveLength(1);
   });
 });
 

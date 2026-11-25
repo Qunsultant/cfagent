@@ -299,6 +299,11 @@ vi.mock("ai", async (importOriginal) => {
 
 import { OrchestratorAgent } from "../src/agents/orchestrator";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 
 const SESSION_KEY = "durable-turn-session-1";
 
@@ -322,7 +327,13 @@ function makeCtx() {
 }
 
 function makeAgent(ctx: unknown) {
-  return new OrchestratorAgent(ctx as never, { AI: {} } as never) as any;
+  // #6102: the turn's audits write to D1 now, resolved from
+  // env.AGENT_DB — a fresh mock per agent (the port is memoized
+  // per env object). The DO mas_events table is frozen history.
+  const d1Mock = new MockD1Database();
+  const d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
+  const agent = new OrchestratorAgent(ctx as never, { AI: {}, AGENT_DB: d1Mock } as never) as any;
+  return { agent, d1Store };
 }
 
 function readMessages(sql: MockSqlStorage) {
@@ -333,14 +344,29 @@ function readMessages(sql: MockSqlStorage) {
   }>;
 }
 
-function readEvents(sql: MockSqlStorage) {
-  return (
-    Array.from(sql.exec("SELECT type, agent, payload FROM mas_events")) as Array<{
-      type: string;
-      agent: string;
-      payload: string;
-    }>
-  ).map((e) => ({ ...e, payload: JSON.parse(e.payload) }));
+type AuditRow = { type: string; agent: string; payload: any };
+
+/**
+ * Read audit rows from the D1 store. audit() is fire-and-forget
+ * (no waitUntil on the test ctx), so poll briefly until a row of
+ * the awaited type lands, then return every row. The payload reads
+ * back as JSON TEXT, exactly as the DO port returned it.
+ */
+async function readEvents(d1Store: D1AuditEventStore, waitForType?: string): Promise<AuditRow[]> {
+  let rows = await d1Store.findMany({});
+  for (
+    let i = 0;
+    i < 50 && (waitForType ? !rows.some((r) => r.type === waitForType) : rows.length === 0);
+    i++
+  ) {
+    await new Promise((r) => setTimeout(r, 20));
+    rows = await d1Store.findMany({});
+  }
+  return rows.map((r) => ({
+    type: r.type,
+    agent: r.agent,
+    payload: JSON.parse(r.payload as unknown as string),
+  }));
 }
 
 const TURN = {
@@ -359,7 +385,7 @@ describe("#2566 — chat turn submission through Think's durable submission queu
 
   it("completes a submitted turn and keeps the {result, route} contract with exactly-once side effects", async () => {
     const { ctx, sql } = makeCtx();
-    const agent = makeAgent(ctx);
+    const { agent, d1Store } = makeAgent(ctx);
     const { result, route } = await agent.runAgenticChatTurn({ ...TURN });
     expect(await result.text).toBe("Stub assistant reply.");
     expect(Object.keys(route).sort()).toEqual(["agent", "confidence", "needsConfirmation", "reason"]);
@@ -367,14 +393,14 @@ describe("#2566 — chat turn submission through Think's durable submission queu
     const session = await agent.getPortMessages();
     expect(session.map((m: any) => m.role)).toEqual(["user", "assistant"]);
     expect(readMessages(sql).map((m) => m.role)).toEqual(["user", "assistant"]);
-    const events = readEvents(sql);
+    const events = await readEvents(d1Store, "response.evaluated");
     expect(events.filter((e) => e.type === "route.decided")).toHaveLength(1);
     expect(events.filter((e) => e.type === "response.evaluated")).toHaveLength(1);
   });
 
   it("survives an instance restart: a fresh instance completes the persisted pending turn", async () => {
     const { ctx, sql } = makeCtx();
-    const first = makeAgent(ctx);
+    const { agent: first } = makeAgent(ctx);
     const handle = await first.submitChatTurn({ ...TURN });
     // Nothing has executed yet: the submission is a durable row, the
     // user message is in the canonical transcript, no turn ran.
@@ -384,7 +410,7 @@ describe("#2566 — chat turn submission through Think's durable submission queu
     expect((await first.getPortMessages()).map((m: any) => m.role)).toEqual(["user"]);
 
     // "Restart": a brand-new agent instance over the same storage.
-    const second = makeAgent(ctx);
+    const { agent: second } = makeAgent(ctx);
     const { result, route } = await second.awaitChatTurnSubmission(handle);
     expect(await result.text).toBe("Stub assistant reply.");
     expect(Object.keys(route).sort()).toEqual(["agent", "confidence", "needsConfirmation", "reason"]);
@@ -396,7 +422,7 @@ describe("#2566 — chat turn submission through Think's durable submission queu
 
   it("duplicate submission under one idempotency key executes exactly one turn", async () => {
     const { ctx, sql } = makeCtx();
-    const agent = makeAgent(ctx);
+    const { agent, d1Store } = makeAgent(ctx);
     const opts = { ...TURN, submissionKey: "chat-turn:dup-key-1" };
     const first = await agent.runAgenticChatTurn(opts);
     const second = await agent.runAgenticChatTurn(opts);
@@ -407,12 +433,18 @@ describe("#2566 — chat turn submission through Think's durable submission queu
     expect(session.filter((m: any) => m.role === "user")).toHaveLength(1);
     expect(session.filter((m: any) => m.role === "assistant")).toHaveLength(1);
     expect(readMessages(sql).filter((m) => m.role === "assistant")).toHaveLength(1);
-    expect(readEvents(sql).filter((e) => e.type === "route.decided")).toHaveLength(1);
+    expect(
+      (await readEvents(d1Store, "route.decided")).filter((e) => e.type === "route.decided"),
+    ).toHaveLength(1);
+    // The deduped second turn must not land a second decision
+    // audit even after the fire-and-forget writes settle.
+    await new Promise((r) => setTimeout(r, 100));
+    expect((await readEvents(d1Store)).filter((e) => e.type === "route.decided")).toHaveLength(1);
   });
 
   it("stamps the turn with the submitting user's login, not the session fallback", async () => {
     const { ctx } = makeCtx();
-    const agent = makeAgent(ctx);
+    const { agent } = makeAgent(ctx);
     let loginDuringTurn: unknown;
     const origBeforeTurn = agent.portBeforeTurn.bind(agent);
     agent.portBeforeTurn = async (turnCtx: any) => {
@@ -427,7 +459,7 @@ describe("#2566 — chat turn submission through Think's durable submission queu
 
   it("re-send of the history tail runs a fresh turn without duplicating the user message or record", async () => {
     const { ctx, sql } = makeCtx();
-    const agent = makeAgent(ctx);
+    const { agent } = makeAgent(ctx);
     await agent.runAgenticChatTurn({ ...TURN });
     await agent.runAgenticChatTurn({ ...TURN });
     const session = await agent.getPortMessages();
@@ -439,17 +471,17 @@ describe("#2566 — chat turn submission through Think's durable submission queu
 
   it("a terminally failed turn rethrows the engine error and fires the error aspect exactly once", async () => {
     const { ctx, sql } = makeCtx();
-    const agent = makeAgent(ctx);
+    const { agent, d1Store } = makeAgent(ctx);
     thinkStubControl.failNext = true;
     await expect(agent.runAgenticChatTurn({ ...TURN })).rejects.toThrow("stub model failure");
-    const events = readEvents(sql);
+    const events = await readEvents(d1Store, "chatstream.uistreamerror.error");
     expect(events.filter((e) => e.type === "chatstream.uistreamerror.error")).toHaveLength(1);
     expect(readMessages(sql).filter((m) => m.role === "assistant")).toEqual([]);
   });
 
   it("memory reset mid-turn: the cancelled submission lands the aborted shape and no stale side effects", async () => {
     const { ctx, sql } = makeCtx();
-    const agent = makeAgent(ctx);
+    const { agent, d1Store } = makeAgent(ctx);
     thinkStubControl.entered = false;
     let release!: () => void;
     thinkStubControl.deferred = {
@@ -482,7 +514,7 @@ describe("#2566 — chat turn submission through Think's durable submission queu
       expect(Object.keys(route).sort()).toEqual(["agent", "confidence", "needsConfirmation", "reason"]);
       expect(await agent.getPortMessages()).toEqual([]);
       expect(readMessages(sql).filter((m) => m.role === "assistant")).toEqual([]);
-      const events = readEvents(sql);
+      const events = await readEvents(d1Store, "route.decided");
       expect(events.filter((e) => e.type === "route.decided")).toHaveLength(1);
       expect(events.filter((e) => e.type === "response.evaluated")).toEqual([]);
     } finally {

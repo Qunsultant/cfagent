@@ -61,6 +61,7 @@ import {
 import { AGENT_CARDS } from "../src/a2a/agent-cards";
 import { OPERATION_CATALOG } from "../src/orchestrate";
 import type { Env } from "../src/types";
+import { MockD1Database } from "./mock-d1";
 
 const env = { SERVICE_USER_LOGIN: "svc-trader" } as Env;
 
@@ -623,7 +624,9 @@ describe("TradingAgent stock trading + approval door (#291 T3)", () => {
   it("the approval door executes with an explicit authorizer, and refuses without one", async () => {
     const { TradingAgent } = await import("../src/agents/trading-agent");
     const agent: any = Object.create(TradingAgent.prototype);
-    agent.env = env;
+    // #6102: the door's blocking audits resolve from env.AGENT_DB —
+    // a fresh mock per test (the port is memoized per env object).
+    agent.env = { ...env, AGENT_DB: new MockD1Database() } as Env;
     agent.config = () => tradeConfig;
     // Issue #2178 (Q7 S2): the door audits through the agent ORM —
     // main's #2375 ctx below supplies the real one (MockSqlStorage).
@@ -735,7 +738,8 @@ describe("TradingAgent options trading service (#291 T4)", () => {
   it("the shared approval door places the options draft by id", async () => {
     const { TradingAgent } = await import("../src/agents/trading-agent");
     const agent: any = Object.create(TradingAgent.prototype);
-    agent.env = env;
+    // #6102: see the stock approval-door test — fresh AGENT_DB per test.
+    agent.env = { ...env, AGENT_DB: new MockD1Database() } as Env;
     agent.config = () => optConfig;
     // #2375: see the stock approval-door test — the settle threads
     // the instance ORM now.

@@ -29,11 +29,28 @@ vi.mock("../src/services/scheduledTasks", () => ({
 }));
 
 import { autonomousMarketScreen } from "../src/agents/orchestrator/scheduledCallbacks";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 
-function makeCtx(orm: any) {
+/** A D1 whose every statement throws — the throwing-audit-store seam (#6102). */
+function throwingD1(message: string): unknown {
+  const boom = async () => {
+    throw new Error(message);
+  };
+  return {
+    prepare: () => ({ bind: () => ({ run: boom, all: boom, first: boom, raw: boom }) }),
+    batch: boom,
+  };
+}
+
+function makeCtx(orm: any, d1Mock: unknown) {
   const store = new Map<string, unknown>();
   return {
-    env: {},
+    // #6102: the failure record writes to D1 now — bind the mock here.
+    env: { AGENT_DB: d1Mock },
     agentCtx: {
       storage: {
         get: async (key: string) => store.get(key),
@@ -54,32 +71,33 @@ function makeCtx(orm: any) {
 
 describe("scheduled report store failure (#2178 S2)", () => {
   it("a null canonical store writes a failure audit row naming the run", async () => {
-    const created: any[] = [];
+    const d1Mock = new MockD1Database();
+    const d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
     const orm = {
       storeCanonicalReport: () => null,
-      events: { create: (record: any) => { created.push(record); return record; } },
     };
-    await autonomousMarketScreen(makeCtx(orm), { trigger: "manual", userLogin: "alice", universe: "NASDAQ100" });
-    const failures = created.filter((r) => r.type === "screener.report_store_failed");
+    await autonomousMarketScreen(makeCtx(orm, d1Mock), { trigger: "manual", userLogin: "alice", universe: "NASDAQ100" });
+    // #6102: the failure record writes to D1 now (payload is JSON text).
+    const failures = await d1Store.findMany({ where: { type: "screener.report_store_failed" } });
     expect(failures).toHaveLength(1);
-    expect(failures[0].payload.runId).toBe("screener:2026-10-30T12:00:00.000Z");
-    expect(failures[0].payload.userLogin).toBe("alice");
+    const payload = JSON.parse(failures[0].payload as unknown as string) as Record<string, unknown>;
+    expect(payload.runId).toBe("screener:2026-10-30T12:00:00.000Z");
+    expect(payload.userLogin).toBe("alice");
   });
 
   it("a stored report writes no failure row", async () => {
-    const created: any[] = [];
+    const d1Mock = new MockD1Database();
+    const d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
     const orm = {
       storeCanonicalReport: () => ({ reportId: "r1", created: true }),
-      events: { create: (record: any) => { created.push(record); return record; } },
     };
-    await autonomousMarketScreen(makeCtx(orm), { trigger: "manual", userLogin: "alice", universe: "NASDAQ100" });
-    expect(created.filter((r) => r.type === "screener.report_store_failed")).toHaveLength(0);
+    await autonomousMarketScreen(makeCtx(orm, d1Mock), { trigger: "manual", userLogin: "alice", universe: "NASDAQ100" });
+    expect(await d1Store.findMany({ where: { type: "screener.report_store_failed" } })).toHaveLength(0);
   });
 
   it("a failing audit write still never throws out of the callback", async () => {
     const orm = {
       storeCanonicalReport: () => null,
-      events: { create: () => { throw new Error("audit store unavailable"); } },
     };
     // Issue #3515 S3: the callback logs through the S2 structured
     // logger, whose sink writes one JSON line per event via
@@ -91,7 +109,8 @@ describe("scheduled report store failure (#2178 S2)", () => {
       // The no-throw contract this test pins is unchanged: the call
       // still resolves, and the audit failure still surfaces via the
       // error path rather than a throw.
-      const outcome = await autonomousMarketScreen(makeCtx(orm), { trigger: "manual", userLogin: "alice", universe: "NASDAQ100" });
+      // #6102: the failing audit store is a throwing D1 now.
+      const outcome = await autonomousMarketScreen(makeCtx(orm, throwingD1("audit store unavailable")), { trigger: "manual", userLogin: "alice", universe: "NASDAQ100" });
       expect(outcome.outcome).toBe("success");
       const events = info.mock.calls
         .flatMap((args) => args.map(String))

@@ -13,6 +13,7 @@ import {
   submitAsyncJob,
   type AsyncJobsContext,
 } from "../src/agents/orchestrator/asyncJobs";
+import { MockD1Database } from "./mock-d1";
 import {
   createReportConfirmation,
   getReportDispatchHitl,
@@ -103,7 +104,9 @@ function makeCtx(
 ): AsyncJobsContext {
   const storage = sql as unknown as AsyncJobsContext["agentCtx"]["storage"]["sql"];
   return {
-    env: { SLACK_WEBHOOK_URL: "https://hooks.slack.com/x" },
+    // #6102: the followup.deliver blocking audit writes to D1 now —
+    // bind a fresh mock per ctx (a null port fails the job).
+    env: { SLACK_WEBHOOK_URL: "https://hooks.slack.com/x", AGENT_DB: new MockD1Database() },
     agentCtx: { storage: { sql: storage } },
     ensureTables: () => storage,
     sessionKey: () => "session-1",

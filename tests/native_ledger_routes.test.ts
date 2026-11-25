@@ -16,7 +16,6 @@
  * unmarked events keep the existing loud-unmatched behavior.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { DatabaseSync } from "node:sqlite";
 
 vi.mock("../src/services/agenticPayments", () => ({
   ETradeAgenticPaymentService: class {
@@ -33,54 +32,11 @@ import {
   D1NativeLedgerAdapter,
   ensureNativeLedgerSchema,
 } from "../src/data/d1NativeLedgerAdapter";
-
-/** Minimal D1Database stand-in over node:sqlite (test-only; mirrors the journal test). */
-class MockD1Database {
-  readonly sqlite = new DatabaseSync(":memory:");
-  prepare(sql: string) {
-    const db = this.sqlite;
-    return {
-      bind(...params: unknown[]) {
-        return {
-          async run() {
-            const info = db.prepare(sql).run(...(params as any[]));
-            return {
-              success: true,
-              meta: { changes: info.changes, last_row_id: info.lastInsertRowid },
-              results: [],
-            };
-          },
-          async all() {
-            return { results: db.prepare(sql).all(...(params as any[])) };
-          },
-          async first() {
-            return db.prepare(sql).get(...(params as any[])) ?? null;
-          },
-          async raw() {
-            return db
-              .prepare(sql)
-              .all(...(params as any[]))
-              .map((row: any) => Object.values(row));
-          },
-        };
-      },
-    };
-  }
-  async batch(statements: any[]) {
-    const results: any[] = [];
-    this.sqlite.exec("BEGIN");
-    try {
-      for (const stmt of statements) {
-        results.push(await stmt.run());
-      }
-      this.sqlite.exec("COMMIT");
-    } catch (err) {
-      this.sqlite.exec("ROLLBACK");
-      throw err;
-    }
-    return results;
-  }
-}
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 
 const baseCtx = (overrides: Partial<AgenticPaymentsRouteContext> = {}): AgenticPaymentsRouteContext =>
   ({
@@ -275,19 +231,33 @@ async function stripeSignature(body: string, secret: string, ts = Math.floor(Dat
   return `t=${ts},v1=${v1}`;
 }
 
-const auditsOf = (sql: MockSqlStorage, type: string) =>
-  Array.from(sql.exec("SELECT * FROM mas_events WHERE type = ?", type)) as any[];
+// #6102: audit rows land in D1 now (the DO mas_events table is
+// frozen history). The orchestrator's audit() is sync
+// fire-and-forget, so poll briefly until the row lands.
+const auditsOf = (d1Store: D1AuditEventStore, type: string) =>
+  d1Store.findMany({ where: { type } });
+async function pollAuditEvents(d1Store: D1AuditEventStore, type: string) {
+  let rows = await auditsOf(d1Store, type);
+  for (let i = 0; i < 50 && rows.length === 0; i++) {
+    await new Promise((r) => setTimeout(r, 20));
+    rows = await auditsOf(d1Store, type);
+  }
+  return rows;
+}
 
 describe("POST /payments/webhook native branch (#2192)", () => {
   let agent: OrchestratorAgent;
   let sql: MockSqlStorage;
   let mockD1: MockD1Database;
+  let d1Store: D1AuditEventStore;
   let errorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     const store = new FakeSessionStore();
     const ns = new FakeAgentNamespace();
     mockD1 = new MockD1Database();
+    // #6102: read audit rows from the same mock bound as AGENT_DB.
+    d1Store = new D1AuditEventStore(createD1AuditEventDb(mockD1 as never));
     const env = {
       AI: {} as any,
       ORCHESTRATOR_AGENT: ns as any,
@@ -381,9 +351,9 @@ describe("POST /payments/webhook native branch (#2192)", () => {
     });
     // mas_transactions untouched: the native row lives in D1 only.
     expect(Array.from(sql.exec("SELECT * FROM mas_transactions"))).toHaveLength(0);
-    const settled = auditsOf(sql, "payment.settled_webhook");
+    const settled = await pollAuditEvents(d1Store, "payment.settled_webhook");
     expect(settled).toHaveLength(1);
-    expect(JSON.parse(settled[0].payload)).toMatchObject({ draftId: "run-1", native: true });
+    expect(JSON.parse(settled[0].payload as unknown as string)).toMatchObject({ draftId: "run-1", native: true });
   });
 
   it("replays a native webhook as a duplicate, never a second row", async () => {
@@ -407,9 +377,9 @@ describe("POST /payments/webhook native branch (#2192)", () => {
       recorded: false,
     });
     expect(await nativeRows()).toHaveLength(0);
-    const settled = auditsOf(sql, "payment.settled_webhook");
+    const settled = await pollAuditEvents(d1Store, "payment.settled_webhook");
     expect(settled).toHaveLength(1);
-    expect(JSON.parse(settled[0].payload)).toMatchObject({ kind: "subscription", native: true });
+    expect(JSON.parse(settled[0].payload as unknown as string)).toMatchObject({ kind: "subscription", native: true });
   });
 
   it("an unmarked event keeps the existing loud-unmatched behavior", async () => {
@@ -430,8 +400,8 @@ describe("POST /payments/webhook native branch (#2192)", () => {
     const json = (await res.json()) as any;
     expect(json).toMatchObject({ received: true, native: true, recorded: false });
     expect(await nativeRows()).toHaveLength(0);
-    const unrecorded = auditsOf(sql, "payment.settled_webhook_native_unrecorded");
+    const unrecorded = await pollAuditEvents(d1Store, "payment.settled_webhook_native_unrecorded");
     expect(unrecorded).toHaveLength(1);
-    expect(JSON.parse(unrecorded[0].payload).reason).toContain("family");
+    expect(JSON.parse(unrecorded[0].payload as unknown as string).reason).toContain("family");
   });
 });

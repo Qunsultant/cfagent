@@ -56,18 +56,42 @@ vi.mock("agents/x402", () => {
 import { OrchestratorAgent } from "../src/agents/orchestrator";
 import { MockSqlStorage } from "./mock-sql";
 import type { Env } from "../src/types";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 
 const src = (rel: string) => readFileSync(`src/${rel}`, "utf8");
 
-const makeEnv = (overrides: Record<string, unknown> = {}): Env =>
-  ({
+const makeEnv = (overrides: Record<string, unknown> = {}): Env => {
+  // #6102: audit rows land in D1 now — one fresh mock per env (the
+  // agent's audit() is sync fire-and-forget into the D1 port).
+  const d1Mock = new MockD1Database();
+  const auditStore = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
+  const env = {
     AI: {} as any,
     AI_SEARCH_ENDPOINT: "https://mock.search",
     ORCHESTRATOR_AGENT: {} as any,
     AGENT_SESSIONS: {} as any,
     APP_ENV: "TEST",
+    AGENT_DB: d1Mock,
     ...overrides,
-  }) as Env;
+  } as Env;
+  (env as unknown as { __auditStore: D1AuditEventStore }).__auditStore = auditStore;
+  return env;
+};
+
+/** Poll the D1 audit store until `expected` rows of `type` land. */
+async function pollAuditEvents(store: D1AuditEventStore, type: string, expected = 1) {
+  let rows: Awaited<ReturnType<D1AuditEventStore["findMany"]>> = [];
+  for (let i = 0; i < 50; i++) {
+    rows = await store.findMany({ where: { type } });
+    if (rows.length >= expected) break;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  return rows;
+}
 
 const seedAgent = (env: Env) => {
   const sql = new MockSqlStorage();
@@ -77,7 +101,8 @@ const seedAgent = (env: Env) => {
     waitUntil: vi.fn(),
   };
   const agent = new OrchestratorAgent(ctx as any, env);
-  return { agent, sql };
+  const auditStore = (env as unknown as { __auditStore: D1AuditEventStore }).__auditStore;
+  return { agent, sql, auditStore };
 };
 
 const post = (agent: OrchestratorAgent, path: string, body: unknown) =>
@@ -209,16 +234,16 @@ describe("Issue #4782 S3 — pipeline-policy settings route", () => {
   });
 
   it("POST writes an audit row naming the changed keys", async () => {
-    const { agent, sql } = seedAgent(makeEnv());
+    const { agent, auditStore } = seedAgent(makeEnv());
     const res = await post(agent, ROUTE, {
       settings: { "pipeline.retry.report.attempts": "1" },
     });
     expect(res.status).toBe(200);
-    const audits = Array.from(
-      sql.exec("SELECT * FROM mas_events WHERE type = ?", "pipeline_policy.changed")
-    ) as any[];
+    // #6102: the audit writes to D1 now (fire-and-forget from the
+    // agent's audit funnel) — poll the store; payload is JSON text.
+    const audits = await pollAuditEvents(auditStore, "pipeline_policy.changed");
     expect(audits.length).toBe(1);
-    expect(JSON.parse(audits[0].payload).settings).toEqual({
+    expect(JSON.parse(audits[0].payload as unknown as string).settings).toEqual({
       "pipeline.retry.report.attempts": "1",
     });
   });

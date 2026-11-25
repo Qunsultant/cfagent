@@ -435,9 +435,13 @@ const ORCH = "agents/orchestrator.ts";
  *  src/config/scheduleFrequencyFloor.ts; the class gains no logic) —
  *  measured 4,112 lines / 189,365 B on the rebased tree, so budget
  *  lines rise to 4120 and bytes rise to 189_900, which keeps headroom
- *  for the next delegating wrapper rather than a 35 B margin. */
-const BUDGET_LINES = 4120;
-const BUDGET_BYTES = 189_900;
+ *  for the next delegating wrapper rather than a 35 B margin.
+ *  #6102 (mas_events D1 replacement) makes recordAudit async via the
+ *  audit event port + the waitUntil fire-and-forget in audit() —
+ *  measured 4,125 lines / 190,149 B on the rebased tree, so budget
+ *  lines rise to 4140 and bytes rise to 190_700. */
+const BUDGET_LINES = 4140;
+const BUDGET_BYTES = 190_700;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;

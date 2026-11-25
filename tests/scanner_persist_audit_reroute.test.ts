@@ -82,6 +82,11 @@ vi.mock("agents", () => {
 import { OrchestratorAgent } from "../src/agents/orchestrator";
 import { AGENT_DIDS } from "../src/agents/did";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 
 const ORCH_SESSION = "scanner-audit-orchestrator-instance";
 const JOB_ID = "3f6b0f3a-5d2c-4c1e-9a8b-7d6e5f4a3b2c";
@@ -123,8 +128,12 @@ function makeOrchestrator() {
   const sql = new MockSqlStorage();
   const agent: any = Object.create(OrchestratorAgent.prototype);
   agent.ctx = { storage: { sql }, id: { toString: () => ORCH_SESSION } };
-  agent.env = { APP_ENV: "TEST" };
-  return { agent, sql };
+  // #6102: the orchestrator's audit rows land in D1 now — bind a
+  // fresh mock per instance and read rows back from the store.
+  const d1Mock = new MockD1Database();
+  const auditStore = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
+  agent.env = { APP_ENV: "TEST", AGENT_DB: d1Mock };
+  return { agent, sql, auditStore };
 }
 
 interface AuditRow {
@@ -136,14 +145,31 @@ interface AuditRow {
   created_at: string;
 }
 
-function auditRows(sql: MockSqlStorage): AuditRow[] {
-  return Array.from(
-    sql.exec("SELECT id, session_id, type, agent, payload, created_at FROM mas_events")
-  ) as AuditRow[];
+/** #6102: map a D1 audit record onto the old mas_events row shape. */
+function toAuditRow(r: {
+  id: string;
+  sessionId: string;
+  type: string;
+  agent: string;
+  payload: unknown;
+  createdAt: string;
+}): AuditRow {
+  return {
+    id: r.id,
+    session_id: r.sessionId,
+    type: r.type,
+    agent: r.agent,
+    payload: r.payload as string,
+    created_at: r.createdAt,
+  };
 }
 
-function paidRows(sql: MockSqlStorage): AuditRow[] {
-  return auditRows(sql).filter((r) => r.type === "CF_WALLET_SCANNER_PAID");
+async function auditRows(auditStore: D1AuditEventStore): Promise<AuditRow[]> {
+  return (await auditStore.findMany({})).map(toAuditRow);
+}
+
+async function paidRows(auditStore: D1AuditEventStore): Promise<AuditRow[]> {
+  return (await auditStore.findMany({ where: { type: "CF_WALLET_SCANNER_PAID" } })).map(toAuditRow);
 }
 
 /**
@@ -225,7 +251,7 @@ describe("OptionsScannerMCP persistAudit reroute (#700 point 2)", () => {
     expect(body.success).toBe(true);
     expect(body.jobId).toBe(JOB_ID);
 
-    const rows = paidRows(orchestrator.sql);
+    const rows = await paidRows(orchestrator.auditStore);
     expect(rows).toHaveLength(1);
     const row = rows[0];
     expect(row.agent).toBe("payments");
@@ -266,7 +292,7 @@ describe("OptionsScannerMCP persistAudit reroute (#700 point 2)", () => {
 
   it("a broad scan records underlying as all_exchange_listings", async () => {
     const { orchestrator } = await runPaidScan({ args: {} });
-    const rows = paidRows(orchestrator.sql);
+    const rows = await paidRows(orchestrator.auditStore);
     expect(rows).toHaveLength(1);
     expect(JSON.parse(rows[0].payload).underlying).toBe("all_exchange_listings");
   });
@@ -275,7 +301,7 @@ describe("OptionsScannerMCP persistAudit reroute (#700 point 2)", () => {
     const orchestrator = makeOrchestrator();
     const { scanner } = makeScanner(orchestrator);
     await (scanner as any).persistAudit("MSFT", 7, JOB_ID);
-    const rows = paidRows(orchestrator.sql);
+    const rows = await paidRows(orchestrator.auditStore);
     expect(rows).toHaveLength(1);
     const payload = JSON.parse(rows[0].payload);
     expect(payload.underlying).toBe("MSFT");
@@ -291,7 +317,7 @@ describe("OptionsScannerMCP persistAudit reroute (#700 point 2)", () => {
     const body = JSON.parse(result.content[0].text);
     expect(body.success).toBe(true);
     expect(body.jobId).toBe(JOB_ID);
-    expect(auditRows(orchestrator.sql)).toHaveLength(0);
+    expect(await auditRows(orchestrator.auditStore)).toHaveLength(0);
     const events = structuredLogEvents(infoSpy);
     expect(events.some((e) => e.operation === "options_scanner.audit_persist_failed")).toBe(true);
     const logged = events.map((e) => String(e.fields?.message ?? "")).join("\n");
@@ -306,7 +332,7 @@ describe("OptionsScannerMCP persistAudit reroute (#700 point 2)", () => {
     const body = JSON.parse(result.content[0].text);
     expect(body.success).toBe(true);
     expect(body.jobId).toBe(JOB_ID);
-    expect(auditRows(orchestrator.sql)).toHaveLength(0);
+    expect(await auditRows(orchestrator.auditStore)).toHaveLength(0);
     const events = structuredLogEvents(infoSpy);
     expect(events.some((e) => e.operation === "options_scanner.audit_persist_failed")).toBe(true);
     const logged = events.map((e) => String(e.fields?.message ?? "")).join("\n");
