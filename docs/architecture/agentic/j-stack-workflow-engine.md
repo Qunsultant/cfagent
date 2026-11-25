@@ -971,8 +971,11 @@ therefore the next step's input:
 - `{ outcome: "event", event, payload }` when the event arrives;
 - `{ outcome: "timeout", event }` when the bound expires.
 
-A timeout is an OUTCOME, never a failed run: the job branches on it. The
-wait is never wrapped in the journal — Rules of Workflows forbid
+A timeout is an OUTCOME, never a failed run: the job branches on it. A
+stage that contains a wait is not bounded by the stage deadline (a 600s
+default would kill an approval wait at ten minutes): the wait is bounded
+by its own declaration, or by the host's maximum when none is declared.
+The wait is never wrapped in the journal — Rules of Workflows forbid
 `waitForEvent` inside `step.do`, and a journaled wait would replay as a
 completed step instead of re-arming — so the engine calls the host's
 channel (`JobPipelineDeps.waitForEvent`) outside it, under a name the
