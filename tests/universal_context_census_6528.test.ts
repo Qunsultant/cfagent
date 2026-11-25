@@ -6,7 +6,7 @@
  * result SHRINK-ONLY against the baseline recorded below, seeded from
  * main at `e5541ff` (2026-11-25, Phase 1):
  *  - a `*Context` definition that is NOT in the baseline fails;
- *  - the app-created context total above its baselined 209 fails;
+ *  - the app-created context total above its baselined 210 fails;
  *  - decreases and vanished rows pass — that is the shrink the programme
  *    wants, and retiring a definition means lowering or removing its
  *    baseline entry in the same PR.
@@ -32,27 +32,40 @@
  * NOT copied from the `3e516f1c` survey — the recount is
  * `~/workspace/6528-recount.md`; the seed reconciliation is
  * `docs/architecture/survey/6528-census-seed.md`):
- * - app-created: 209 = 129 itemized `*Context` rows (this baseline) − 1
+ * - app-created: 210 = 130 itemized `*Context` rows (this baseline) − 1
  *   alias row (`BrokerOrderRouteContext`, a type alias, not a shape) − 2
  *   config-named rows (counted inside the 77 instead) + 1
  *   `PlatformIdentity` (a counted non-`*Context*` name) + 77 config
  *   objects + 3 client React contexts + 2 unitemized Tier A companion
  *   shapes (recorded allowance — see below).
+ *
+ * Phase 2 (#6540, 2026-11-25) raises the baseline 209 → 210 with ONE
+ * row: `UniversalEnvContext` (`src/config/environment.ts`, CANONICAL) —
+ * the one universal env context the programme adds (survey
+ * `target-state-counts.md` §2, `per-domain-end-state.md` D1). Its
+ * nested dimension types (`UniversalPlatformDimension`,
+ * `UniversalTenantDimension`, `UniversalUserDimension`,
+ * `UniversalSettingSources`) and its input (`ResolveUniversalInput`)
+ * deliberately carry no `Context` name, so they are not separate
+ * contexts (survey §1.1: nested sections are not contexts) and add
+ * no further rows. The `OfferContext` judgment call below still
+ * holds: counting the excluded server `OfferContext` would make the
+ * total 211.
  * - platform-provided: 3 types (Workers `ExecutionContext` at
  *   `scheduled`/`queue`/`email`, `DurableObjectState` at 3 constructors,
  *   Agents-SDK `AgentContext`) — 5 rows in the survey's §1.6 table, 7
  *   check sites in this pin.
  * - test-only: 0.
  *
- * JUDGMENT CALL — server `OfferContext` (DECISION: EXCLUDED, total stays 209):
+ * JUDGMENT CALL — server `OfferContext` (DECISION: EXCLUDED, total stays 210):
  * a second, distinct `OfferContext` definition exists at
  * `src/services/upgradeOffers.ts:758` (`{ trigger, shownAtMs? }`, the
  * audit-only payload the client passes to the mint routes; the counted
  * client one is `src/client/commercialApi.ts:572`). It predates the
  * baseline — the survey missed it, it is not new. Under §0 as written it
  * is an *input* not listed in the services/security rows, so the survey's
- * applied practice excludes it and the total stays 209. If it were
- * counted, the total would be 210. The row is in EXCLUDED below with this
+ * applied practice excludes it and the total stays 210. If it were
+ * counted, the total would be 211. The row is in EXCLUDED below with this
  * reason, so the decision is visible in the pin, not hidden. (Recount
  * §1.3; census seed §2.)
  *
@@ -78,11 +91,11 @@
  * be satisfied from the survey as written. Itemizing the 2 companions is
  * follow-up census work, not a silent "unknown" row.
  *
- * Why a pure regex cannot reproduce 209: the anchored regex finds 174
+ * Why a pure regex cannot reproduce 210: the anchored regex finds 175
  * `*Context` definitions in `src/`; 45 of those are EXCLUDED boundary
  * rows (inputs/results, deny-codes, domain-internal parameter objects,
- * shapes of counted items, UI prop types), leaving 129 counted rows;
- * the remaining 80 of the 209 are non-`*Context*` entries (77 config +
+ * shapes of counted items, UI prop types), leaving 130 counted rows;
+ * the remaining 80 of the 210 are non-`*Context*` entries (77 config +
  * `PlatformIdentity` + 3 React consts, which are `const` declarations,
  * not types) plus the 2 unitemized Tier A shapes, minus the alias and
  * the 2 config-named rows (see the formula above). The pin's authority
@@ -128,9 +141,9 @@ const DISPOSITIONS: ReadonlySet<string> = new Set([
 /** Recorded census data (see the header — 77 and 2 are recorded, not recomputed). */
 const RECORDED_CONFIG_TOTAL = 77;
 const RECORDED_UNITEMIZED_TIER_A = 2;
-const RECORDED_APP_CREATED_TOTAL = 209;
+const RECORDED_APP_CREATED_TOTAL = 210;
 
-/** [file, name, kind, disposition] — shrink-only baseline (129 rows). */
+/** [file, name, kind, disposition] — shrink-only baseline (130 rows). */
 const BASELINE: Array<[string, string, Kind, Disposition]> = [
   ["src/agentic/chainExecutor.ts", "ChainExecutionContext", "execution-identity", "CANONICAL"],
   ["src/agents/chatErrorFallback.ts", "ChatErrorFallbackContext", "di-ports", "CANONICAL"],
@@ -229,6 +242,7 @@ const BASELINE: Array<[string, string, Kind, Disposition]> = [
   ["src/client/platformContextStore.ts", "PlatformContext", "client-data", "CANONICAL"],
   ["src/client/scheduledOptionsManager/ScheduleCard.tsx", "ScheduleRowContext", "client-data", "CANONICAL"],
   ["src/client/trading/tradeOrderContext.ts", "TradeOrderContext", "client-data", "CANONICAL"],
+  ["src/config/environment.ts", "UniversalEnvContext", "config-env", "CANONICAL"],
   ["src/config/platformContext.ts", "PlatformContextCacheLimits", "config-env", "CONFIG-ENTRY"],
   ["src/features/featureFlagPorts.ts", "FeatureEvaluationContext", "config-env", "CONFIG-ENTRY"],
   ["src/mcps/openaimp/handler.ts", "OpenaimpMcpHandlerContext", "mcp", "CANONICAL"],
@@ -304,7 +318,7 @@ const EXCLUDED: Array<[string, string, Kind, string]> = [
   ["src/services/recommendationKernel.ts", "RankingContext", "security", "domain-internal parameter object (recommendation kernel), not a counted context (recount §1.3)"],
   ["src/services/researchGates.ts", "GateContext", "security", "domain-internal parameter object (research gates), not a counted context (recount §1.3)"],
   ["src/services/screenerFollowups.ts", "StageChainPlanContext", "security", "domain-internal parameter object (screener followups), not a counted context (recount §1.3)"],
-  ["src/services/upgradeOffers.ts", "OfferContext", "client-data", "DECISION (see header): server-side mint-route payload input ({ trigger, shownAtMs? }); §0 counts inputs only where listed in the services/security rows, so this second OfferContext is excluded and the total stays 209. The counted OfferContext is the client one (src/client/commercialApi.ts:572). Counting this one would make the total 210."],
+  ["src/services/upgradeOffers.ts", "OfferContext", "client-data", "DECISION (see header): server-side mint-route payload input ({ trigger, shownAtMs? }); §0 counts inputs only where listed in the services/security rows, so this second OfferContext is excluded and the total stays 210. The counted OfferContext is the client one (src/client/commercialApi.ts:572). Counting this one would make the total 211."],
   ["src/trading/dataProviders/contract.ts", "DataRunContext", "security", "domain-internal parameter object (data-provider contract), not a counted context (recount §1.3)"],
   ["src/trading/options/llmIdeas.ts", "ContextLimitedRawOptionsIdeasInput", "security", "§0 input type, not listed in the services/security rows (recount §1.3)"],
   ["src/trading/options/strategies/types.ts", "StrategyContext", "security", "domain-internal parameter object (options strategies), not a counted context (recount §1.3)"],
@@ -713,7 +727,7 @@ describe("universal context census (#6528 Phase 1)", () => {
     for (const [, , , reason] of EXCLUDED) {
       expect(reason.length).toBeGreaterThan(0);
     }
-    expect(BASELINE.length).toBe(129);
+    expect(BASELINE.length).toBe(130);
     expect(EXCLUDED.length).toBe(45);
   });
 });

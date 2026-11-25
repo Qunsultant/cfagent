@@ -240,3 +240,57 @@ So this PR lands the shrink-only ceiling (`≤` the seeded totals: live
 assertion replaces the ceiling in the Phase 3 PR that moves the vars
 into the file — the PR that can actually turn it green. The pin asserts
 the cap constant (64), not the total.
+
+## 10. Phase 2 (#6540, 2026-11-25) — census delta 209 → 210 / 595 → 596
+
+Phase 2 defines the one universal env context and its single resolver
+(`src/config/environment.ts`); the pins are updated in the same PR
+(gitops §7 rule 1). No other census number moves: worker vars stay
+51 live / 91 deployed, platform-provided contexts stay 3 types,
+test-only contexts stay 0.
+
+| Census | Before | After | Delta |
+|---|---:|---:|---|
+| Contexts, app-created | 209 | **210** | +1 |
+| Resolvers | 595 | **596** | +1 |
+
+### 10.1 Context +1 — `UniversalEnvContext` (CANONICAL)
+
+The new row is `src/config/environment.ts` / `UniversalEnvContext`,
+disposition CANONICAL: the one universal env context the programme
+adds (survey `target-state-counts.md` §2,
+`per-domain-end-state.md` D1). Its nested dimension types
+(`UniversalPlatformDimension`, `UniversalTenantDimension`,
+`UniversalUserDimension`, `UniversalSettingSources`) and its input
+(`ResolveUniversalInput`) deliberately carry no `Context` name, so
+they are not separate contexts (survey §1.1: nested sections are not
+contexts) and add no further rows. The `OfferContext` exclusion
+(§2.1) still holds: counting the excluded server `OfferContext`
+would now make the total 211.
+
+### 10.2 Resolver +1 — `resolveUniversalContext` (CANONICAL)
+
+The new row is `src/config/environment.ts` /
+`resolveUniversalContext`, standalone, disposition CANONICAL: the one
+universal resolver, a NEW resolver that calls
+`resolveEnvironmentConfig` (reuse first) rather than an extension of
+it, so the old resolver's row is untouched and the count grows by
+exactly one. The source helpers it uses
+(`sourceOfEnvironmentName`, `sourceOfBrokerBaseUrl`) are not
+`resolve*`-named and are internal to the universal-resolution module,
+hence 0 separate resolvers by the §2.1 counting rule (target-state
+§2.1). Implied copies move 275–310 → 276–311
+(596 − 320 … 596 − 285); the distinct-question range (285–320,
+central 306) is unchanged — the universal resolver answers the one
+config question, it does not add a question.
+
+### 10.3 Neutrality pin — `environment.ts` brand row 51 → 56
+
+The new resolver records the resolution source per setting, so it
+names the provider's own environment bindings and reads the core
+broker credentials — 6 new brand lines, 1 removed (the old cascade
+comment's brand line is now broker-neutral). Dispositioned
+INTEGRATION in `tests/neutrality_census_3525.test.ts`: naming the
+provider is the config module's job — it resolves the provider's own
+env bindings, and neutralizing the binding names would falsify the
+source record. No other neutrality row moves.
