@@ -33,7 +33,7 @@ import {
 } from "../../workflows/optionsWorkflowHost";
 import { panelResultToPipelineResult } from "../../workflows/strategyScreenPorts";
 import type { PanelDiscoveryResult } from "../../services/recommendationKernel";
-import { DEFAULT_AI_MODEL } from "../model";
+import { resolveAiModelName } from "../model";
 import type { ETradeService } from "../../services/etrade";
 import type { DatabaseORM } from "../../orm";
 import type { Env, ETradeOptionChain, ETradeOptionExpireDate } from "../../types";
@@ -439,7 +439,7 @@ export async function executeLlmIdeasEvaluation(args: {
     }
   }
   const llmStatus = llmJudgment ? "complete" as const : "error" as const;
-  const llmModel = llmJudgment?.model || ctx.env.AI_MODEL || DEFAULT_AI_MODEL;
+  const llmModel = llmJudgment?.model || resolveAiModelName(ctx.env);
   const llmErrorText = llmError ?? "The quant pipeline produced no candidates for this symbol.";
   // Issue #1640 (doc §2): the rankings field is the quant order with
   // LLM judgments attached as annotations only — annotateQuantRanking
@@ -580,7 +580,7 @@ export async function rankOptionsCompareCandidates(ctx: EtradeOptionsRouteContex
       },
       llm: {
         status: "error",
-        model: ctx.env.AI_MODEL || DEFAULT_AI_MODEL,
+        model: resolveAiModelName(ctx.env),
         error: err instanceof Error ? err.message : "LLM ranking failed.",
       },
       ...common,

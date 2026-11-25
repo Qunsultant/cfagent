@@ -81,6 +81,7 @@
  * fields are optional and the legacy fields are unchanged.
  */
 import type { Env, SessionData } from "../types";
+import { resolveEnvironmentConfig } from "../config/environment";
 import {
   buildLoginFailureAuditEventInput,
   buildLoginSuccessAuditEventInput,
@@ -751,7 +752,7 @@ export async function completeWiredLogin(
   try {
     const platformListed = await isPlatformBootstrapListed(
       store,
-      env.IAAA_BOOTSTRAP_ADMINS,
+      resolveEnvironmentConfig(env).workerSettings.iaaa.bootstrapAdmins,
       bindingResult.binding.internalUserId,
       migrationDeps.aliasKv,
     );
@@ -771,7 +772,7 @@ export async function completeWiredLogin(
     // remains the audited surface.
     if (
       platformListed &&
-      resolveStaleCleanupMode(env.IAAA_STALE_CLEANUP_MODE) === "execute"
+      resolveStaleCleanupMode(resolveEnvironmentConfig(env).workerSettings.iaaa.staleCleanupMode) === "execute"
     ) {
       const cleanupAuditStore = options?.auditStore;
       const cleanupAuditTenantId = options?.auditTenantId;
@@ -932,7 +933,7 @@ export async function completeWiredLogin(
           internalUserId: bindingResult.binding.internalUserId,
           providerIssuer: bindingResult.binding.providerIssuer,
           providerSubject: bindingResult.binding.providerSubject,
-          bootstrapRaw: env.IAAA_BOOTSTRAP_ADMINS,
+          bootstrapRaw: resolveEnvironmentConfig(env).workerSettings.iaaa.bootstrapAdmins,
           tenantId: options.auditTenantId ?? resolveIaaaTenant(env),
           nowMs,
           idpAttributes: options?.idpAttributes ?? null,

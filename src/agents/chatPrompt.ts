@@ -87,6 +87,7 @@
  * were re-pointed to the new line in the same PR.
  */
 import type { Env } from "../types";
+import { resolveEnvironmentConfig } from "../config/environment";
 import { BROKER_CATALOG, isBrokerId, type AccountBindingTuple } from "../trading";
 import { neutralPromptToolName, promptToolName } from "../shared/brokerToolNames";
 import { maskAccountId } from "../config/accountBindings";
@@ -353,12 +354,17 @@ Agentic Best Practices & Workflow Rules:
 
 /**
  * The manual loop's step clamp, verbatim:
- * Math.max(1, Math.min(10, Number(env.MAS_MAX_STEPS || 6))).
- * Non-numeric MAS_MAX_STEPS propagates NaN — today's behavior,
- * preserved here exactly (the shadow sanitizes; see below).
+ * Math.max(1, Math.min(10, <resolved MAS_MAX_STEPS>)).
+ * Phase 3 (#6550): MAS_MAX_STEPS now lives in environment.config.json
+ * (defaults.ai.masMaxSteps, 2 in production); a still-set env var
+ * wins. Non-numeric values propagate NaN — today's behavior,
+ * preserved here exactly (the shadow sanitizes; see below). The old
+ * `|| 6` fallback for a blank env is gone: the file always provides
+ * the value now.
  */
 export function resolveMasMaxSteps(env: Partial<Env>): number {
-  return Math.max(1, Math.min(10, Number(env.MAS_MAX_STEPS || 6)));
+  const steps = resolveEnvironmentConfig(env).workerSettings.ai.masMaxSteps;
+  return Math.max(1, Math.min(10, steps));
 }
 
 /**

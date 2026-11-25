@@ -35,6 +35,7 @@ import { validateReturnTarget } from "../../security/returnTarget";
 import { getProviderByIssuer } from "../../security/providers";
 import { renderLandingPage } from "../../landing";
 import { resolvePollingConfigFromEnv } from "../../pollingConfig";
+import { resolveEnvironmentConfig } from "../../config/environment";
 import { SERVER_PALETTE } from "../../theme/serverPalette";
 
 // Slice 8 (#2902): ensureBreakerDurability imports (moved from src/server.ts).
@@ -369,7 +370,10 @@ export async function handleCoreLateRoutes(request: Request, env: Env, url: URL,
         const landingTarget = validateReturnTarget(
           `${url.pathname}${url.search}`
         );
-        return new Response(renderLandingPage(env.APP_NAME, resolvePollingConfigFromEnv(env), landingTarget && landingTarget !== "/" ? landingTarget : undefined), {
+        // Phase 3 (#6550): the app name and the 8 moved polling cadences
+        // resolve from environment.config.json; a still-set env var wins.
+        const resolvedEnv = resolveEnvironmentConfig(env);
+        return new Response(renderLandingPage(resolvedEnv.workerSettings.app.name, resolvePollingConfigFromEnv(env, resolvedEnv.workerSettings.polling), landingTarget && landingTarget !== "/" ? landingTarget : undefined), {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
             // Auth HTML must never be replayed from a cache: a stale landing

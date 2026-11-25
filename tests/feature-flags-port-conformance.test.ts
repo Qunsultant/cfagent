@@ -217,17 +217,29 @@ describe("FeatureFlagPort Conformance Suite (Issue #1815)", () => {
       expect(await enabled.isEnabled("goal_workflow")).toBe(true);
     });
 
-    it("uses the single monetization default (OFF) in a bare env while explicit Flagship/env ON/OFF controls it (#2043, #4613)", async () => {
+    it("uses the file value (ON) in a bare env while explicit Flagship/env ON/OFF controls it (#2043, #4613)", async () => {
       // #4613: monetization has a single shared default across Flagship and Env
       // (DEFAULT_MONETIZATION_FLAG_VALUE = false, fail-closed). Explicit overrides still win.
+      // Phase 3 (#6550): FEATURE_MONETIZATION moved to
+      // environment.config.json (defaults.features.monetization, "1"),
+      // so a bare env now resolves to the FILE value (ON), not the
+      // shared default. The shared default applies only where the
+      // file carries no value — for monetization it never does now.
       const bare = new EnvFeatureFlagAdapter({});
-      expect(await bare.isEnabled("monetization")).toBe(false);
+      expect(await bare.isEnabled("monetization")).toBe(true);
+      const explicitOff = new EnvFeatureFlagAdapter({ FEATURE_MONETIZATION: "0" });
+      expect(await explicitOff.isEnabled("monetization")).toBe(false);
       const bulk = new EnvFeatureFlagAdapter({
         FEATURE_FLAGS: JSON.stringify({ monetization: true }),
       });
       expect(await bulk.isEnabled("monetization")).toBe(true);
       const direct = new EnvFeatureFlagAdapter({ FEATURE_MONETIZATION: "1" });
       expect(await direct.isEnabled("monetization")).toBe(true);
+      // Phase 3 (#6550): the legacy MONETIZATION_ENABLED env var
+      // still beats the file default — FEATURE_MONETIZATION now
+      // carries "1" in the file, but an explicitly-set legacy env
+      // var wins over the file, exactly as it beat the old code
+      // default. Env-wins; the file is the default, not an override.
       const legacy = new EnvFeatureFlagAdapter({ MONETIZATION_ENABLED: "true" });
       expect(await legacy.isEnabled("monetization")).toBe(true);
       const legacyOff = new EnvFeatureFlagAdapter({ MONETIZATION_ENABLED: "false" });

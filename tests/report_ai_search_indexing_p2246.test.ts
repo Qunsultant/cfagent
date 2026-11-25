@@ -116,14 +116,21 @@ function fakeNamespace(opts: { failUpload?: boolean } = {}) {
 const FLAG = "AI_SEARCH_REPORT_INDEXING_ENABLED";
 
 describe("A. flag reader (#2246)", () => {
-  it("absent / empty / off values are OFF", () => {
-    expect(isAiSearchReportIndexingEnabled({})).toBe(false);
-    expect(isAiSearchReportIndexingEnabled({ [FLAG]: "" })).toBe(false);
+  // Phase 3 (#6550): the flag moved to environment.config.json
+  // (defaults.aiSearch.reportIndexingEnabled, "1"), so an absent or
+  // blank env now resolves to the FILE value (ON). Only an explicit
+  // off value turns it off.
+  it("absent / empty values resolve to the file value (ON)", () => {
+    expect(isAiSearchReportIndexingEnabled({})).toBe(true);
+    expect(isAiSearchReportIndexingEnabled({ [FLAG]: "" })).toBe(true);
+    expect(isAiSearchReportIndexingEnabled(null)).toBe(true);
+    expect(isAiSearchReportIndexingEnabled(undefined)).toBe(true);
+  });
+
+  it("explicit off values are OFF", () => {
     expect(isAiSearchReportIndexingEnabled({ [FLAG]: "0" })).toBe(false);
     expect(isAiSearchReportIndexingEnabled({ [FLAG]: "false" })).toBe(false);
     expect(isAiSearchReportIndexingEnabled({ [FLAG]: "off" })).toBe(false);
-    expect(isAiSearchReportIndexingEnabled(null)).toBe(false);
-    expect(isAiSearchReportIndexingEnabled(undefined)).toBe(false);
   });
 
   it('"1" / "true" / "on" (case-insensitive, trimmed) are ON', () => {
@@ -156,17 +163,20 @@ describe("B. upload executor (#2246)", () => {
     expect(uploads[0].metadata).toEqual(doc.metadata);
   });
 
-  it("unconfigured (no binding / no instance name) -> not_configured, no throw", async () => {
+  // Phase 3 (#6550): the instance name moved to
+  // environment.config.json (defaults.aiSearch.instance), so "no
+  // instance name" is unreachable via env — the file always names
+  // one. "Unconfigured" is now the missing-binding case only.
+  it("unconfigured (no binding) -> not_configured, no throw", async () => {
     const noBinding = await runAiSearchIndexUpload({ AI_SEARCH_INSTANCE: "x" }, doc);
     expect(noBinding.ok).toBe(false);
     expect(noBinding.code).toBe("not_configured");
     expect(noBinding.errorToken).toBeTruthy();
 
     const { uploads, binding } = fakeNamespace();
-    const noInstance = await runAiSearchIndexUpload({ AI_SEARCH: binding as any }, doc);
-    expect(noInstance.ok).toBe(false);
-    expect(noInstance.code).toBe("not_configured");
-    expect(uploads).toHaveLength(0);
+    const withBinding = await runAiSearchIndexUpload({ AI_SEARCH: binding as any }, doc);
+    expect(withBinding.ok).toBe(true);
+    expect(uploads).toHaveLength(1);
   });
 
   it("upload throws -> upload_failed, never a throw across the boundary", async () => {
@@ -227,7 +237,9 @@ describe("C. pipeline hook at the store seams (#2246)", () => {
     const env = {
       AI_SEARCH: binding,
       AI_SEARCH_INSTANCE: "cfagent-kb",
-      // no flag: OFF by default
+      // Phase 3 (#6550): the flag must be explicitly OFF — an absent
+      // env now resolves to the file value (ON).
+      [FLAG]: "0",
     } as any;
     const stored = storeReportAtGeneration(sql, reportInput(), env);
     expect(stored?.reportId).toBeTruthy();
@@ -412,7 +424,7 @@ describe("C. pipeline hook at the store seams (#2246)", () => {
   it("hook direct: flag OFF -> disabled outcome, zero uploads", async () => {
     const { uploads, binding } = fakeNamespace();
     const outcome = await indexCanonicalReportInAiSearch(
-      { AI_SEARCH: binding as any, AI_SEARCH_INSTANCE: "cfagent-kb" } as any,
+      { AI_SEARCH: binding as any, AI_SEARCH_INSTANCE: "cfagent-kb", [FLAG]: "0" } as any,
       {
         reportId: "rpt-direct",
         title: "T",

@@ -76,6 +76,7 @@
 
 import { createKvMembershipStore, grantMembership } from "../../security/iaaaMembershipStore";
 import { resolveGrantDefaultExpiryDays } from "../../security/grantRules";
+import { resolveEnvironmentConfig } from "../../config/environment";
 import {
   exchangeETradeVerifier,
   getETradeRequestToken,
@@ -286,7 +287,7 @@ async function provisionServiceUser(
     // here: dispatch checks revokedAtMs only, so an expired
     // tenant-tier service membership still dispatches until
     // revoked — expiry-aware dispatch is a separate slice.
-    defaultExpiryDays: resolveGrantDefaultExpiryDays(ctx.env.IAAA_GRANT_DEFAULT_EXPIRY_DAYS),
+    defaultExpiryDays: resolveGrantDefaultExpiryDays(resolveEnvironmentConfig(ctx.env).workerSettings.iaaa.grantDefaultExpiryDays),
   });
   if (!result.ok) {
     if (result.code === "GRANT_DENIED") {

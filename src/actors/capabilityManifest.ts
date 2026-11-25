@@ -72,6 +72,8 @@ import {
   THINK_WEBHOOK_SECRET_ENV,
   resolveThinkWebhookSecret,
 } from "./thinkPortMapping";
+import { fileBackedEnvValue } from "../config/environment";
+import type { Env } from "../types";
 
 // ---------------------------------------------------------------------------
 // The three families and the state vocabulary
@@ -556,11 +558,16 @@ export function resolveAgentCapabilityManifest(
     }
   }
 
+  // Phase 3 (#6550): AGENT_CAPABILITIES_DISABLED lives in
+  // environment.config.json (defaults.agent.capabilitiesDisabled);
+  // a still-set env var wins.
   const raw =
     options.disabledRaw !== undefined
       ? options.disabledRaw
       : env
-        ? (env[AGENT_CAPABILITIES_DISABLED_ENV] as string | undefined)
+        ? (fileBackedEnvValue(env as Partial<Env> | undefined, AGENT_CAPABILITIES_DISABLED_ENV) as
+            | string
+            | undefined)
         : undefined;
   const { entries, issues } = parseCapabilityDisabledList(raw);
   for (const { scope, capability } of entries) {

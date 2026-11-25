@@ -14,6 +14,7 @@ import { getSessionCached, getSessionCachedFetchedAt, invalidateSessionCache } f
 import { resolveIdleTimeoutMs } from "../security/sessionPolicy";
 import { getSession, updateSession } from "../security/session";
 import { resolveWiredFreshnessMs, validateAndTouchWiredSession } from "../security/iaaaEnforcement";
+import { resolveEnvironmentConfig } from "../config/environment";
 import { createResourceUsagePort } from "../telemetry/createResourceUsagePorts";
 import type { ResourceAttribution } from "../telemetry/resourceUsagePorts";
 import { isWiringEnabled } from "../security/providers";
@@ -117,7 +118,7 @@ export async function authenticateRequest(
         {
           idleTimeoutMs,
           fetchedAtMs: fetchedAtMs ?? undefined,
-          freshnessWindowMs: resolveWiredFreshnessMs(env.IAAA_WIRED_FRESHNESS_MS),
+          freshnessWindowMs: resolveWiredFreshnessMs(resolveEnvironmentConfig(env).workerSettings.iaaa.wiredFreshnessMs),
         },
       );
       if (result.wired) {

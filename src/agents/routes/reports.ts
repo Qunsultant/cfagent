@@ -20,6 +20,7 @@ import {
   ensureCommercialSchema,
 } from "../../data/createCommercialPorts";
 import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
+import { resolveEnvironmentConfig } from "../../config/environment";
 import type { SqlStorage } from "../../orm";
 import type { ScreenerAgent } from "../screener-agent";
 import type { RunSummary } from "../../services/runSummaries";
@@ -340,7 +341,10 @@ async function recordReportsBackfillRun(
       env: (ctx.env ?? {}) as unknown as Partial<Env>,
       sql,
       outcomeId: `reports-index-backfill:${args.ranAt}`,
-      userLogin: ctx.env?.SERVICE_USER_LOGIN ?? null,
+      // Phase 3 (#6550): the service login now resolves from
+      // environment.config.json (defaults.service.userLogin); a
+      // still-set env var wins.
+      userLogin: resolveEnvironmentConfig(ctx.env as unknown as Partial<Env>).serviceUserLogin ?? null,
     });
   } catch (err) {
     structuredLog.warn("scheduled_job_outcome.run_record_failed", {
@@ -579,7 +583,13 @@ export async function handleReportsRoutes(
         // finite interval > 0. When env config is unavailable, the
         // defaults below are the fallback, per the task spec.
         const polling = ctx.env
-          ? resolvePollingConfigFromEnv(ctx.env as unknown as PollingEnvVars)
+          ? resolvePollingConfigFromEnv(
+              ctx.env as unknown as PollingEnvVars,
+              // Phase 3 (#6550): the moved polling cadences resolve
+              // from environment.config.json; the auto-refresh keys
+              // below are env-only.
+              resolveEnvironmentConfig(ctx.env as unknown as Partial<Env>).workerSettings.polling,
+            )
           : POLLING_CONFIG_DEFAULTS;
         const storedIntervalS = (await adapter.getTenantAutoRefresh(tenantId)).intervalS;
         const requestedIntervalS =

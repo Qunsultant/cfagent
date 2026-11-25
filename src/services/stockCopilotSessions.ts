@@ -42,6 +42,8 @@
  */
 
 import { round2 } from "./cvarOptimizer";
+import { resolveEnvironmentConfig } from "../config/environment";
+import type { Env } from "../types";
 
 /** The four trading sessions, in canonical (display + storage) order. */
 export const COPILOT_SESSIONS = [
@@ -147,10 +149,17 @@ export interface CopilotSessionReaders {
 export function resolveCopilotSessions(
   readers: CopilotSessionReaders,
 ): CopilotSessionId[] {
+  // Phase 3 (#6550): the around-the-clock switch now resolves from
+  // environment.config.json (defaults.stockCopilot.aroundTheClock,
+  // OFF in production); a still-set env var wins. The other two
+  // env-only switches below stay env reads (not moved vars).
+  const aroundTheClock = resolveEnvironmentConfig(
+    readers.env as Partial<Env> | undefined,
+  ).workerSettings.stockCopilot.aroundTheClock;
   if (
     readers.env?.STOCK_COPILOT_IGNORE_SESSIONS === "true" ||
     readers.env?.STOCK_COPILOT_FORCE_ALL_SESSIONS === "true" ||
-    readers.env?.STOCK_COPILOT_AROUND_THE_CLOCK === "true"
+    aroundTheClock
   ) {
     return [...COPILOT_SESSIONS];
   }
@@ -181,8 +190,15 @@ export function isAroundTheClock(
   readers?: CopilotSessionReaders | null,
 ): boolean {
   if (!readers) return false;
+  // Phase 3 (#6550): the around-the-clock switch resolves from
+  // environment.config.json (defaults.stockCopilot.aroundTheClock);
+  // a still-set env var wins. The other two env-only switches stay
+  // env reads (not moved vars).
+  const aroundTheClock = resolveEnvironmentConfig(
+    readers.env as Partial<Env> | undefined,
+  ).workerSettings.stockCopilot.aroundTheClock;
   if (
-    String(readers.env?.STOCK_COPILOT_AROUND_THE_CLOCK ?? "").toLowerCase() === "true" ||
+    aroundTheClock ||
     String(readers.env?.STOCK_COPILOT_FORCE_ALL_SESSIONS ?? "").toLowerCase() === "true" ||
     String(readers.env?.STOCK_COPILOT_IGNORE_SESSIONS ?? "").toLowerCase() === "true"
   ) {

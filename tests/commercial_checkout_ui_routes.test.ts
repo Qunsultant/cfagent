@@ -131,7 +131,15 @@ afterEach(() => {
 
 describe("checkout UI pricing route (#2137, native rework #2196)", () => {
   it("returns server-truth prices, a derived testnet marker, card-only scope, and the native failure policy", async () => {
-    const res = await call(ctxWith({}), "GET", "/payments/agentic/commercial/pricing", "u1");
+    // Phase 3 (#6550): the off case must set the flag explicitly —
+    // a bare env now resolves monetization ON via the file
+    // (FEATURE_MONETIZATION="1" in environment.config.json).
+    const res = await call(
+      ctxWith({ MONETIZATION_ENABLED: "false" }),
+      "GET",
+      "/payments/agentic/commercial/pricing",
+      "u1",
+    );
     expect(res?.status).toBe(200);
     const body = (await res?.json()) as {
       monetizationEnabled: boolean;

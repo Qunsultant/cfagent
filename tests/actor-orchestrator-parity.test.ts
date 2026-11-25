@@ -189,7 +189,11 @@ describe("#658 R4 — model arm (constructed)", () => {
 
 describe("#658 R5 — step bound parity", () => {
   it("resolves today's clamp for representative env values", () => {
-    expect(resolveMasMaxSteps({})).toBe(6);
+    // Phase 3 (#6550): a bare env now resolves the file value (2 —
+    // the deployed wrangler value), not the old code default (6),
+    // which production never saw (production always carried
+    // MAS_MAX_STEPS="2"). Explicit env values and clamps unchanged.
+    expect(resolveMasMaxSteps({})).toBe(2);
     expect(resolveMasMaxSteps({ MAS_MAX_STEPS: "3" } as never)).toBe(3);
     expect(resolveMasMaxSteps({ MAS_MAX_STEPS: "99" } as never)).toBe(10);
     expect(resolveMasMaxSteps({ MAS_MAX_STEPS: "0" } as never)).toBe(1);
@@ -203,7 +207,8 @@ describe("#658 R5 — step bound parity", () => {
   });
 
   it("the harness carries the resolved bound on the actor's maxSteps", () => {
-    expect(makeHarness({}).maxSteps).toBe(6);
+    // Phase 3 (#6550): bare env resolves the file value (2) — see above.
+    expect(makeHarness({}).maxSteps).toBe(2);
     expect(makeHarness({ MAS_MAX_STEPS: "3" }).maxSteps).toBe(3);
     expect(makeHarness({ MAS_MAX_STEPS: "99" }).maxSteps).toBe(10);
   });

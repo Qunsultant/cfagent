@@ -1,128 +1,74 @@
 // @vitest-environment node
 /**
- * #6528 Phase 1 (Config: census + pins) — the Worker var-count pin.
+ * #6528 Phase 1 (Config: census + pins) — the Worker var-count pin,
+ * as landed by #6550 Phase 3 (Config: move the vars into the file).
  *
- * Reuses #6491's pin design (test (1) only — the var-count test; #6491's
- * own fix, consolidating the text vars into ONE JSON config var plus
- * hydration code, is SUPERSEDED by the owner's fork decision of
- * 2026-11-25, the config-file route: the JSON file
- * (`environment.config.json`, extended) IS the context carrier, NOT the
- * JSON-var packing — see `docs/architecture/survey/target-state-counts.md`
- * and #6528's Related section). #6491's test (2), the hydration-fidelity
- * test, belongs to the superseded fix and is NOT reused: there is no
- * hydration step on the file route.
+ * Phase 1 seeded the shrink-only ceilings (51 live / 53 keys / 91
+ * deployed) because a hard `<= 64` assertion was red on main until
+ * Phase 3 moved the vars. Phase 3 (#6550) is the PR that can turn it
+ * green, so this file now asserts the HARD cap.
  *
- * Seed (re-derived on the PR base, main `e5541ff`, 2026-11-25 — NOT the
- * `3e516f1c` survey numbers):
- * - `wrangler.jsonc` `vars` block: 53 keys = 51 live text vars + 2
- *   `_comment_*` documentation pairs (`_comment_wallet`,
- *   `_comment_stripe`). Cloudflare counts every key-value pair, so the
- *   deploy counts 53; this pin's ceilings count the 51 LIVE vars (the
- *   recount, `~/workspace/6528-recount.md` §4: the survey's own §1.5
- *   inventory sums to 51, and the issue's "52" most likely counts the
- *   commented-out `"STOCK_COPILOT_CADENCE"` line, which is not live).
+ * Phase 3 state (re-derived on the PR base, main `423be698`,
+ * 2026-11-25 — NOT the `3e516f1c` survey numbers):
+ * - `wrangler.jsonc` `vars` block: 1 live key, `CF_DEPLOY_VERSION`.
+ *   The other 50 live text vars moved into `environment.config.json`
+ *   (`defaults.*`) and now survive in `wrangler.jsonc` only as `//`
+ *   comments (name + old value + file location, per the 2026-11-24
+ *   owner ruling). The 2 `_comment_*` documentation pairs became real
+ *   `//` comments. WORKSPACE_ROOT moved too, at the owner's direction
+ *   (reserved for a future PortThink agent capability — see the
+ *   `_workspaceComment` in the file) — it is NOT dropped.
  * - Recorded Worker secrets: 40 (deployed count per Cloudflare error
  *   10055, run 45546276362; 93 total − 53 vars = 40). Secrets are NOT in
  *   the repo — no test can count them from code, and no test may read
  *   secret values. The 40 is recorded data with provenance (see
  *   `docs/architecture/survey/6528-census-seed.md`); if it drifts from
  *   reality, the deploy error — not this pin — is the detector.
- * - Deployed total as this pin counts it: 51 live + 40 recorded = 91.
- *   As Cloudflare counts it (all 53 keys + 40): 93.
+ * - Deployed total as this pin counts it: 1 live + 40 recorded = 41.
+ *   B1 CORRECTION (#6550): the deployed total is 41, NOT 40 — the
+ *   issue's arithmetic missed `CF_DEPLOY_VERSION`, a live text var
+ *   that counts toward the 64 cap (see below). Headroom: 23.
  * - Free-plan cap: 64 (Cloudflare Workers Free limit, error 10055).
  *
- * SHRINK-ONLY CEILING, NOT the hard cap (the decision, and why):
- * a hard assertion `live + secrets <= 64` is RED on main at landing
- * (91 > 64) and stays red until Phase 3 moves the vars into
- * `environment.config.json` — which conflicts with gitops §7 rule 2
- * ("No red pins merge") and §10 (a red pin on main is a stop-the-line
- * event). So this PR lands the shrink-only ceiling (`<=` the seeded
- * totals: no PR can grow the count silently while the programme runs),
- * and the hard `<= 64` assertion replaces the ceiling in the Phase 3
- * PR that moves the vars into the file — the PR that can actually turn
- * it green. This `it` file asserts the cap CONSTANT (64), not the total.
+ * `CF_DEPLOY_VERSION` counts (the evidence): `.github/workflows/
+ * deploy.yml` step "Stamp deploy version into wrangler.jsonc" takes
+ * `DEPLOY_SHA` from `github.event.workflow_run.head_sha || github.sha`,
+ * `sed`-replaces the `<DEPLOY_VERSION>` placeholder in `wrangler.jsonc`
+ * (hard failure if the SHA is absent afterwards), and the deploy then
+ * runs `npx wrangler deploy`, which uploads the `vars` block — so
+ * `CF_DEPLOY_VERSION` IS a plain deployed Worker var. It stays in env
+ * by construction (the issue says so) and it counts.
  *
- * `keep_vars: true` trap (`wrangler.jsonc:14`, #4708 comment): the pin
- * measures the FILE; deleting vars from `wrangler.jsonc` does NOT drop
- * the deployed count while `keep_vars: true` is set — the deployed
- * count only drops when vars are removed out-of-band (dashboard / API,
- * or one `keep_vars: false` deploy). File-count green ≠
- * deployed-count green; live proof remains a deploy reaching
- * Post-deploy QA (#6491's acceptance).
+ * `keep_vars: false` (`wrangler.jsonc`, #6550): the pin measures the
+ * FILE; with `keep_vars: true` the deploy would preserve the
+ * previously-deployed vars server-side and the file count would lie.
+ * Phase 3 flips it to false (secrets are unaffected — the
+ * `sync-secrets` job re-puts them after the deploy). File-count green
+ * ≠ deployed-count green until a deploy with `keep_vars: false`
+ * reaches Post-deploy QA (#6491's acceptance).
  *
  * Hermeticity: the pin reads FILES only — never env, never the network,
  * never git — so CI's injected variables cannot move it. It parses
  * JSONC (comment-stripped, then `JSON.parse`); a naive `JSON.parse` of
  * the raw file fails on comments, and a line-grep would miss multi-line
- * values. `CF_DEPLOY_VERSION` is a real deployed var (the deploy step
- * `sed`-replaces its `<DEPLOY_VERSION>` placeholder) and IS counted.
+ * values.
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const FREE_PLAN_VAR_CAP = 64;
 const RECORDED_SECRETS_COUNT = 40;
-const LIVE_VAR_CEILING = 51;
-const ALL_KEYS_CEILING = 53;
-const DEPLOYED_TOTAL_CEILING = 91;
+// Phase 3 (#6550): the hard cap replaces the Phase 1 shrink-only
+// ceilings (51 live / 53 keys / 91 deployed). Deployed total 41.
+const LIVE_VAR_COUNT = 1;
+const ALL_KEYS_COUNT = 1;
+const DEPLOYED_TOTAL = 41;
 
-/** Live text vars in `wrangler.jsonc` `vars`, alphabetical — the seed list. */
-const VAR_BASELINE: string[] = [
-  "AGENT_CAPABILITIES_DISABLED",
-  "AGENT_CONFIG_PINS",
-  "AI_MODEL",
-  "AI_SEARCH_CACHE_MAX_ENTRIES",
-  "AI_SEARCH_CACHE_TTL_MS",
-  "AI_SEARCH_CORPUS_INDEXING_ENABLED",
-  "AI_SEARCH_INSTANCE",
-  "AI_SEARCH_REPORT_INDEXING_ENABLED",
-  "APP_NAME",
-  "CF_DEPLOY_VERSION",
-  "CF_WALLET_FACILITATOR",
-  "CF_WALLET_NETWORK",
-  "CHAT_AUTO_REFRESH_FLOOR_S",
-  "CHAT_NLQ_MODE",
-  "COMMERCIAL_STORE_OPERATORS",
-  "COPILOT_CHANNELS",
-  "COPILOT_VOICE_BACKEND",
-  "FEATURE_GOAL_WORKFLOW",
-  "FEATURE_MONETIZATION",
-  "FEATURE_OPTIONS_SCREENER",
-  "FEATURE_PAYMENT_ASSURANCE",
-  "FEATURE_SANDBOX",
-  "FEATURE_SCREENER",
-  "FEATURE_WORKSPACE",
-  "GOAL_TRACK_DEADLINE_MS",
-  "GOAL_TRACK_POLL_MS",
-  "IAAA_BOOTSTRAP_ADMINS",
-  "IAAA_ENABLED_PROVIDERS",
-  "IAAA_GRANT_DEFAULT_EXPIRY_DAYS",
-  "IAAA_MEMBERSHIP_INDEX_REPAIR_MODE",
-  "IAAA_PDP_ENABLED",
-  "IAAA_STALE_CLEANUP_MODE",
-  "IAAA_WIRED_FRESHNESS_MS",
-  "IAAA_WIRING_ENABLED",
-  "KNOWLEDGE_SERVING_ENABLED",
-  "MAS_MAX_STEPS",
-  "OPTIONS_FLOWS_POLL_MS",
-  "OPTIONS_LATEST_POLL_MS",
-  "QUOTES_REST_FALLBACK_MS",
-  "QUOTES_WS_RECONNECT_BASE_MS",
-  "QUOTES_WS_RECONNECT_CAP_MS",
-  "SCREENER_ND_MODE",
-  "SERVICE_USER_LOGIN",
-  "SOCIAL_AUTONOMOUS_CHANNELS",
-  "SOCIAL_LIVE_PUBLISHING",
-  "SOCIAL_POSTING_ENABLED",
-  "STOCK_COPILOT_AROUND_THE_CLOCK",
-  "STOCK_COPILOT_PAPER_ENABLED",
-  "TICKER_PUSH_INTERVAL_S",
-  "TICKER_PUSH_STALE_AFTER_INTERVALS",
-  "WORKSPACE_ROOT",
-];
+/** Live text vars in `wrangler.jsonc` `vars` — Phase 3: only the deploy-stamped var remains. */
+const VAR_BASELINE: string[] = ["CF_DEPLOY_VERSION"];
 
-/** Documentation-only pairs in the `vars` block (counted by Cloudflare, not live vars). */
-const COMMENT_KEYS: string[] = ["_comment_stripe", "_comment_wallet"];
+/** Documentation-only pairs in the `vars` block — Phase 3: none; the two `_comment_*` pairs became real `//` comments. */
+const COMMENT_KEYS: string[] = [];
 
 /**
  * Strip `//` and `/* *\/` comments from JSONC, preserving newlines and
@@ -226,46 +172,42 @@ describe("Worker var count (#6528 Phase 1, reusing #6491's pin design)", () => {
     ).toEqual([]);
   });
 
-  it("the live text var count only shrinks (shrink-only ceiling)", () => {
+  it("the live text var count is exactly one (CF_DEPLOY_VERSION)", () => {
     expect(
-      live.length,
-      `live text vars ${live.length} exceeds the seeded ceiling ${LIVE_VAR_CEILING}: ` +
-        "remove a var, or move the setting into environment.config.json (Phase 3, #6528)",
-    ).toBeLessThanOrEqual(LIVE_VAR_CEILING);
+      live,
+      "only CF_DEPLOY_VERSION may live in wrangler.jsonc vars: every other " +
+        "text var belongs in environment.config.json — see #6550",
+    ).toEqual(["CF_DEPLOY_VERSION"]);
+    expect(live.length).toBe(LIVE_VAR_COUNT);
   });
 
-  it("the total key count only shrinks (the _comment_* pairs included)", () => {
-    expect(keys.length).toBeLessThanOrEqual(ALL_KEYS_CEILING);
+  it("the total key count is exactly one (no _comment_* pairs remain)", () => {
+    expect(keys).toEqual(["CF_DEPLOY_VERSION"]);
+    expect(keys.length).toBe(ALL_KEYS_COUNT);
   });
 
-  it("the deployed var total only shrinks (shrink-only ceiling)", () => {
+  it("the deployed var total is 41, under the Free-plan hard cap of 64", () => {
     const total = live.length + RECORDED_SECRETS_COUNT;
+    expect(total).toBe(DEPLOYED_TOTAL);
     expect(
       total,
-      `deployed var total ${total} exceeds the seeded ceiling ${DEPLOYED_TOTAL_CEILING} ` +
-        `(live text vars ${live.length} + recorded secrets ${RECORDED_SECRETS_COUNT}): ` +
-        "remove a var, or move the setting into environment.config.json (Phase 3, #6528)",
-    ).toBeLessThanOrEqual(DEPLOYED_TOTAL_CEILING);
+      `deployed var total ${total} exceeds the Free-plan cap ${FREE_PLAN_VAR_CAP} ` +
+        `(live text vars ${live.length} + recorded secrets ${RECORDED_SECRETS_COUNT})`,
+    ).toBeLessThanOrEqual(FREE_PLAN_VAR_CAP);
   });
 
-  it("the Free-plan cap is recorded as the target (64)", () => {
-    // The HARD `<= 64` assertion on the deployed total lands with the
-    // Phase 3 PR that moves the vars into environment.config.json — the
-    // PR that can actually turn it green. Today the total is 91 > 64, so
-    // asserting it here would land red and violate gitops §7 rule 2.
-    // This `it` asserts the constant, not the total.
+  it("the Free-plan cap is 64 and the deployed total is 41 (headroom 23)", () => {
     expect(FREE_PLAN_VAR_CAP).toBe(64);
-    expect(live.length + RECORDED_SECRETS_COUNT).toBeGreaterThan(FREE_PLAN_VAR_CAP);
+    expect(live.length + RECORDED_SECRETS_COUNT).toBe(41);
+    expect(FREE_PLAN_VAR_CAP - (live.length + RECORDED_SECRETS_COUNT)).toBe(23);
   });
 
-  it("the var baseline is well-formed (unique keys, CF_DEPLOY_VERSION counted)", () => {
-    expect(new Set([...VAR_BASELINE, ...COMMENT_KEYS]).size).toBe(
-      VAR_BASELINE.length + COMMENT_KEYS.length,
-    );
-    for (const key of [...VAR_BASELINE, ...COMMENT_KEYS]) {
+  it("the var baseline is well-formed (CF_DEPLOY_VERSION counted)", () => {
+    expect(new Set(VAR_BASELINE).size).toBe(VAR_BASELINE.length);
+    for (const key of VAR_BASELINE) {
       expect(key.length).toBeGreaterThan(0);
     }
     expect(live).toContain("CF_DEPLOY_VERSION");
-    expect(VAR_BASELINE.length).toBe(LIVE_VAR_CEILING);
+    expect(VAR_BASELINE.length).toBe(LIVE_VAR_COUNT);
   });
 });

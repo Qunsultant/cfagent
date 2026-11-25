@@ -23,6 +23,8 @@ import {
   getFeatureFlagParent,
   isKnownFeatureFlag,
 } from "./featureFlagPorts";
+import { fileBackedEnvValue } from "../config/environment";
+import type { Env } from "../types";
 
 const PRODUCTION_ENV_NAMES = new Set(["production", "prod"]);
 const NON_PRODUCTION_ENV_NAMES = new Set(["local", "test", "development", "dev"]);
@@ -53,6 +55,21 @@ export function isProductionFlagRuntime(env?: unknown): boolean {
     }
   }
   return false;
+}
+
+/**
+ * Phase 3 (#6550): parses one on/off flag value. An unrecognized
+ * string falls through (undefined) — the old adapter never treated
+ * one as an explicit setting either.
+ */
+function parseOnOffFlagValue(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const trimmed = value.trim().toLowerCase();
+    if (trimmed === "1" || trimmed === "true" || trimmed === "on") return true;
+    if (trimmed === "0" || trimmed === "false" || trimmed === "off") return false;
+  }
+  return undefined;
 }
 
 export class EnvFeatureFlagAdapter implements FeatureFlagPort {
@@ -87,40 +104,62 @@ export class EnvFeatureFlagAdapter implements FeatureFlagPort {
       }
     }
 
-    // 2. Named environment variable fallback (`FEATURE_SCREENER="1"`, `FEATURE_VOICE_TRADING="0"`)
+    // 2. Named direct variable (`FEATURE_SCREENER="1"`,
+    // `FEATURE_VOICE_TRADING="0"`) — RAW env only here. Phase 3
+    // (#6550): the seven moved FEATURE_* vars now live in
+    // environment.config.json (defaults.features); the file value is
+    // the default and is consulted below (step 2b), AFTER the legacy
+    // env vars (step 3) — an explicitly-set legacy env var beats the
+    // file default, exactly as it beat the old code default. Reading
+    // the file here would let it shadow the legacy env var.
     const envKey = `FEATURE_${flag.toUpperCase()}`;
-    const directVar = this.env[envKey];
-    if (typeof directVar === "string") {
-      const trimmed = directVar.trim().toLowerCase();
-      if (trimmed === "1" || trimmed === "true" || trimmed === "on") return true;
-      if (trimmed === "0" || trimmed === "false" || trimmed === "off") return false;
-    } else if (typeof directVar === "boolean") {
-      return directVar;
-    }
+    const rawDirectVar = this.env[envKey];
+    const parsedDirect = parseOnOffFlagValue(rawDirectVar);
+    if (parsedDirect !== undefined) return parsedDirect;
 
-    // 3. Documented legacy fallback
+    // 3. Documented legacy fallback — raw env first.
     if (flag === "social_publishing") {
-      const legacySocial = this.env.SOCIAL_POSTING_ENABLED;
-      if (typeof legacySocial === "string") {
-        const trimmed = legacySocial.trim().toLowerCase();
-        if (trimmed === "1" || trimmed === "true" || trimmed === "on") return true;
-        if (trimmed === "0" || trimmed === "false" || trimmed === "off") return false;
-      }
+      // Phase 3 (#6550): SOCIAL_POSTING_ENABLED lives in
+      // environment.config.json (defaults.social.postingEnabled);
+      // a still-set env var wins over the file value below.
+      const parsedLegacySocial = parseOnOffFlagValue(this.env.SOCIAL_POSTING_ENABLED);
+      if (parsedLegacySocial !== undefined) return parsedLegacySocial;
     }
 
     // Issue #2043: legacy monetization env var, for environments
     // that set it before the Flagship flag existed. Flagship (when
     // the FLAGS binding is present) is the source of truth and never
     // reads this var; this fallback only applies to the env adapter.
+    // Phase 3 (#6550): the raw env var is consulted BEFORE the file
+    // value of FEATURE_MONETIZATION — an explicit
+    // MONETIZATION_ENABLED="false" still turns monetization off.
     if (flag === "monetization") {
-      const legacyMonetization = this.env.MONETIZATION_ENABLED;
-      if (typeof legacyMonetization === "string") {
-        const trimmed = legacyMonetization.trim().toLowerCase();
-        if (trimmed === "1" || trimmed === "true" || trimmed === "on") return true;
-        if (trimmed === "0" || trimmed === "false" || trimmed === "off") return false;
-      } else if (typeof legacyMonetization === "boolean") {
-        return legacyMonetization;
-      }
+      const parsedLegacyMonetization = parseOnOffFlagValue(this.env.MONETIZATION_ENABLED);
+      if (parsedLegacyMonetization !== undefined) return parsedLegacyMonetization;
+    }
+
+    // 2b. File value for the direct var (the moved FEATURE_* vars).
+    // fileBackedEnvValue is env-wins; env was already consulted
+    // above, so a defined value here is the file value.
+    const parsedFileDirect = parseOnOffFlagValue(
+      fileBackedEnvValue(
+        this.env as unknown as Partial<Env> | undefined,
+        envKey,
+      ),
+    );
+    if (parsedFileDirect !== undefined) return parsedFileDirect;
+
+    // 3b. File value for the legacy vars (SOCIAL_POSTING_ENABLED
+    // moved to defaults.social.postingEnabled; MONETIZATION_ENABLED
+    // has no file home — it is env-only by design).
+    if (flag === "social_publishing") {
+      const parsedFileLegacySocial = parseOnOffFlagValue(
+        fileBackedEnvValue(
+          this.env as unknown as Partial<Env> | undefined,
+          "SOCIAL_POSTING_ENABLED",
+        ),
+      );
+      if (parsedFileLegacySocial !== undefined) return parsedFileLegacySocial;
     }
 
     // Issue #2596: options product flags inherit their parent when
@@ -185,9 +224,19 @@ export class EnvFeatureFlagAdapter implements FeatureFlagPort {
     // When feature configuration is present in the environment (bulk flags set,
     // or direct FEATURE_<FLAG> configured), non-enabled features default to OFF (closed).
     // In bare unit test environments with zero feature flags, baseline routes do not fail closed.
+    // Phase 3 (#6550): this check is deliberately ENV-ONLY — do NOT
+    // make it file-aware. environment.config.json is versioned code
+    // present in EVERY environment, including bare test fixtures, so
+    // a file-aware check would be always-true and kill the bare-env
+    // default-open branch (every unconfigured flag would read OFF in
+    // a bare env). Production does not depend on this branch: live
+    // runtimes use the Flagship adapter (FLAGS binding), and the env
+    // adapter returns false for every flag in a production runtime
+    // (isProductionFlagRuntime above). The seven moved flags resolve
+    // from the file in step 2b regardless of this check.
     const hasFeatureConfig = Boolean(
       bulkVar ||
-      directVar !== undefined ||
+      rawDirectVar !== undefined ||
       this.env.FEATURE_SCREENER !== undefined
     );
 

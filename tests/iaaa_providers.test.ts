@@ -28,8 +28,12 @@ function fakeProvider(id: string): LoginProvider {
 }
 
 describe("isWiringEnabled", () => {
-  it("is off by default (no Env fields)", () => {
-    expect(isWiringEnabled({} as never)).toBe(false);
+  // Phase 3 (#6550): IAAA_WIRING_ENABLED moved to
+  // environment.config.json (defaults.iaaa.wiringEnabled, "1"), so an
+  // absent env now resolves to the FILE value (ON).
+  it("is on by default (no Env fields resolve to the file value)", () => {
+    expect(isWiringEnabled({} as never)).toBe(true);
+    expect(isWiringEnabled({ IAAA_WIRING_ENABLED: "0" } as never)).toBe(false);
   });
 
   it("is on for '1' and 'true' (case-insensitive, trimmed)", () => {
@@ -39,15 +43,24 @@ describe("isWiringEnabled", () => {
   });
 
   it("is off for anything else, including 'yes' and '0'", () => {
-    for (const v of ["0", "false", "yes", "on", ""]) {
+    for (const v of ["0", "false", "yes", "on"]) {
       expect(isWiringEnabled({ IAAA_WIRING_ENABLED: v } as never)).toBe(false);
     }
+    // A blank env value resolves to the file value (ON), not to OFF.
+    expect(isWiringEnabled({ IAAA_WIRING_ENABLED: "" } as never)).toBe(true);
   });
 });
 
 describe("enabledProviders", () => {
-  it("defaults to ['github'] when wiring is on and no list is set", () => {
-    expect(enabledProviders({ IAAA_WIRING_ENABLED: "1" } as never)).toEqual(["github"]);
+  // Phase 3 (#6550): IAAA_ENABLED_PROVIDERS moved to
+  // environment.config.json (defaults.iaaa.enabledProviders,
+  // "github,google"), so an absent list now resolves to the FILE list.
+  it("defaults to the file list when wiring is on and no list is set", () => {
+    expect(enabledProviders({ IAAA_WIRING_ENABLED: "1" } as never)).toEqual(["github", "google"]);
+    expect(enabledProviders({ IAAA_WIRING_ENABLED: "1", IAAA_ENABLED_PROVIDERS: "" } as never)).toEqual([
+      "github",
+      "google",
+    ]);
   });
 
   it("parses comma-separated ids, trimming whitespace and dropping duplicates and empties", () => {
@@ -101,8 +114,13 @@ describe("registry", () => {
 
 describe("isProviderEnabled / resolveLoginProvider", () => {
   it("is false for every provider when wiring is off, even if listed", () => {
+    // Phase 3 (#6550): wiring must be explicitly OFF — a bare env
+    // now resolves to the file value (ON).
     expect(
-      isProviderEnabled({ IAAA_ENABLED_PROVIDERS: "github" } as never, "github")
+      isProviderEnabled(
+        { IAAA_WIRING_ENABLED: "0", IAAA_ENABLED_PROVIDERS: "github" } as never,
+        "github",
+      )
     ).toBe(false);
   });
 
@@ -136,7 +154,7 @@ describe("isProviderEnabled / resolveLoginProvider", () => {
     expect(on.provider).not.toBeNull();
     expect(on.disabledReason).toBeNull();
 
-    const off = resolveLoginProvider({} as never, "github");
+    const off = resolveLoginProvider({ IAAA_WIRING_ENABLED: "0" } as never, "github");
     expect(off.provider).toBeNull();
     expect(off.disabledReason).toBe("wiring-disabled");
 

@@ -370,7 +370,12 @@ async function setup(opts: { monetization?: boolean; stripe?: boolean; webhookSe
     PAYMENT_WORKFLOW: binding,
     SCREENER_WORKFLOW: screenerBinding,
   };
-  if (opts.monetization) env.MONETIZATION_ENABLED = "true";
+  // Phase 3 (#6550): the monetization flag must be set
+  // EXPLICITLY in both directions now. A bare env no longer means
+  // "monetization off" — environment.config.json always carries
+  // FEATURE_MONETIZATION="1", so an omitted var resolves ON via the
+  // file. An explicit legacy env var still beats the file default.
+  env.MONETIZATION_ENABLED = opts.monetization ? "true" : "false";
   if (opts.stripe) env.STRIPE_SECRET_KEY = "sk_test_stub";
   if (opts.webhookSecret) env.STRIPE_WEBHOOK_SECRET = "whsec_test";
   const ctx = {

@@ -118,6 +118,7 @@ import {
 import {
   createStoreOperatorsAdapter,
   ensureStoreOperatorsSchema,
+  parseEnvOperators,
 } from "../../data/createStoreOperatorsPorts";
 import {
   createFreeRunCounterAdapter,
@@ -907,16 +908,10 @@ export async function handleAgenticPaymentsRoutes(
   // membership check is membership-only here (no env): the
   // preloaded legacy sets below already cover the deprecated
   // fallback, so no second store read is needed.
-  const envOperatorLogins = (): Set<string> => {
-    const raw = (ctx.env as unknown as Record<string, unknown>)["COMMERCIAL_STORE_OPERATORS"];
-    if (typeof raw !== "string" || !raw.trim()) return new Set();
-    return new Set(
-      raw
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0),
-    );
-  };
+  // Phase 3 (#6550): the operator list now resolves from
+  // environment.config.json via parseEnvOperators; a still-set env
+  // var wins. (Blank file/env value -> empty set, as before.)
+  const envOperatorLogins = (): Set<string> => parseEnvOperators(ctx.env);
   const envOperators = envOperatorLogins();
   let storeOperatorLogins = new Set<string>();
   // #5611 (G-9): the preload failure is RECORDED, not reported yet.

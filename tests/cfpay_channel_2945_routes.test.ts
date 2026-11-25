@@ -160,7 +160,12 @@ async function setup(opts: {
     AGENT_DB: mock,
     COMMERCIAL_STORE_OPERATORS: "op1",
   };
-  if (opts.monetization !== false) env.MONETIZATION_ENABLED = "true";
+  // Phase 3 (#6550): the monetization flag must be set
+  // EXPLICITLY in both directions now. A bare env no longer means
+  // "monetization off" — environment.config.json always carries
+  // FEATURE_MONETIZATION="1", so an omitted var resolves ON via the
+  // file. An explicit legacy env var still beats the file default.
+  env.MONETIZATION_ENABLED = opts.monetization === false ? "false" : "true";
   if (opts.cfpayToken !== false) env.CFPAY_OUTBOUND_TOKEN = "stub-token";
   const txRows: Array<Record<string, unknown>> = [];
   const ctx = {

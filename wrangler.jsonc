@@ -9,9 +9,14 @@
   "minify": true,
   "compatibility_date": "2026-10-31",
   "compatibility_flags": ["nodejs_compat"],
-  // Issue #4708: preserve CI/CD-synced Worker secrets/vars across `wrangler deploy`
-  // before the `sync-secrets` job runs.
-  "keep_vars": true,
+  // Issue #4708: CI/CD-synced Worker secrets are preserved across
+  // `wrangler deploy` by the `sync-secrets` job (scripts/ci/put-secret.sh),
+  // which re-puts them after the deploy — secrets are unaffected by
+  // keep_vars (it covers vars only). Issue #6550 sets keep_vars false:
+  // with keep_vars true, wrangler preserves previously-deployed vars
+  // server-side, so the 50 vars commented out of the vars block below
+  // would stay live and the move would be file-green but deployed-red.
+  "keep_vars": false,
   // Issue #4128 - least-cost (C:/Users/spr9s/nextgentp-full-least-cost):
   // no source maps in the upload; nothing at runtime reads them.
   "upload_source_maps": false,
@@ -305,11 +310,11 @@
     // instance's Public Endpoint is an unauthenticated, shareable
     // URL, so the MCP path stays unconfigured and no traffic uses
     // the public endpoint.
-    "AI_SEARCH_INSTANCE": "screener-search",
+    // "AI_SEARCH_INSTANCE": "screener-search" — moved to environment.config.json (defaults.aiSearch.instance) in #6550.
     // Issue #278: TTL cache for AI Search queries (in-isolate, per the
     // cache module's honesty note). 300000 = 5 minutes; 200 entries.
-    "AI_SEARCH_CACHE_TTL_MS": "7200000",
-    "AI_SEARCH_CACHE_MAX_ENTRIES": "1000",
+    // "AI_SEARCH_CACHE_TTL_MS": "7200000" — moved to environment.config.json (defaults.aiSearch.cacheTtlMs) in #6550.
+    // "AI_SEARCH_CACHE_MAX_ENTRIES": "1000" — moved to environment.config.json (defaults.aiSearch.cacheMaxEntries) in #6550.
     // Issue #1169 enablement (owner direction 2026-11-04): knowledge
     // serving and AI Search report indexing are ON. The
     // ai_search_namespaces binding + instance configuration landed
@@ -319,15 +324,15 @@
     // Rollback is removing the ai_search_namespaces entry and
     // unsetting these vars (the two flags, AI_SEARCH_INSTANCE),
     // then redeploying.
-    "KNOWLEDGE_SERVING_ENABLED": "1",
-    "AI_SEARCH_REPORT_INDEXING_ENABLED": "1",
+    // "KNOWLEDGE_SERVING_ENABLED": "1" — moved to environment.config.json (defaults.aiSearch.knowledgeServingEnabled) in #6550.
+    // "AI_SEARCH_REPORT_INDEXING_ENABLED": "1" — moved to environment.config.json (defaults.aiSearch.reportIndexingEnabled) in #6550.
     // Issue #3375 — corpus indexing enablement: the #3345 corpus
     // items-API bridge is ON in production. Corpus writes and the
     // corpus sync ALSO upload each corpus document to the instance
     // through the bridge (best-effort, never failing the write or
     // the sync), and the Corpus tab reports per-item indexing state
     // as indexed. Rollback is unsetting this var and redeploying.
-    "AI_SEARCH_CORPUS_INDEXING_ENABLED": "1",
+    // "AI_SEARCH_CORPUS_INDEXING_ENABLED": "1" — moved to environment.config.json (defaults.aiSearch.corpusIndexingEnabled) in #6550.
     // Issue #3413 — Stock Copilot enablement (owner direction
     // 2026-11-05): the pattern-driven paper-trading loop from
     // #3391 is ON in production. Paper-only by construction —
@@ -336,10 +341,10 @@
     // execution context. The universe defaults to
     // SPY/QQQ/AAPL/MSFT/NVDA unless STOCK_COPILOT_UNIVERSE is
     // set. Rollback is unsetting this var and redeploying.
-    "STOCK_COPILOT_PAPER_ENABLED": "1",
+    // "STOCK_COPILOT_PAPER_ENABLED": "1" — moved to environment.config.json (defaults.stockCopilot.paperEnabled) in #6550.
     // Issue #3728: Unconstrained continuous Stock Copilot trading around the clock (24/7).
     // Issue #4122 — cost: idle outside market hours instead of polling all day.
-    "STOCK_COPILOT_AROUND_THE_CLOCK": "false",
+    // "STOCK_COPILOT_AROUND_THE_CLOCK": "false" — moved to environment.config.json (defaults.stockCopilot.aroundTheClock) in #6550.
     // Issue #3727 — copilot capability enablement (owner direction
     // 2026-11-07): every capability-gating switch is externalized
     // here and set so the copilots are fully functional/enabled —
@@ -358,15 +363,15 @@
     // src/config/chatNlqModes.ts chain keeps working) and a
     // per-user override can still select NLQ "on". Rollback is
     // setting CHAT_NLQ_MODE back to "on" and redeploying.
-    "AGENT_CAPABILITIES_DISABLED": "",
+    // "AGENT_CAPABILITIES_DISABLED": "" — moved to environment.config.json (defaults.agent.capabilitiesDisabled) in #6550.
     // Issue #3741 — the one resolver's operator pins
     // (src/services/agentConfigResolver.ts): explicitly EMPTY —
     // nothing is pinned; a pin ("<scope>:<entryId>") would freeze
     // that entry at the operator layer and refuse lower-layer
     // writes by name.
-    "AGENT_CONFIG_PINS": "",
-    "CHAT_NLQ_MODE": "off",
-    "SCREENER_ND_MODE": "on",
+    // "AGENT_CONFIG_PINS": "" — moved to environment.config.json (defaults.agent.configPins) in #6550.
+    // "CHAT_NLQ_MODE": "off" — moved to environment.config.json (defaults.agent.chatNlqMode) in #6550.
+    // "SCREENER_ND_MODE": "on" — moved to environment.config.json (defaults.agent.screenerNdMode) in #6550.
     // Issue #3738 — per-copilot channel switches (owner direction
     // 2026-11-08): channel enablement per copilot registration is
     // externalized and resolved stored > env > code default
@@ -376,7 +381,7 @@
     // it). Rollback is removing the entry (the code default for
     // stock:voice is also on) or setting it to "stock:voice=off",
     // and redeploying.
-    "COPILOT_CHANNELS": "stock:voice=on",
+    // "COPILOT_CHANNELS": "stock:voice=on" — moved to environment.config.json (defaults.agent.copilotChannels) in #6550.
     // Issue #3773 — the copilot voice channel's BACKEND switch
     // (src/services/copilotVoiceBackend.ts): entries
     // "<registration>=webspeech|model". Production value: empty —
@@ -385,37 +390,37 @@
     // stored backend setting still wins over this layer. Set e.g.
     // "stock=model" to serve a registration's voice turns from the
     // Workers AI STT/TTS models instead, and redeploy.
-    "COPILOT_VOICE_BACKEND": "",
+    // "COPILOT_VOICE_BACKEND": "" — moved to environment.config.json (defaults.agent.copilotVoiceBackend) in #6550.
     // Issue #3452 — Stock Copilot cycle cadence (AOP). Optional;
     // absence uses "every 30 minutes". Floor is 30m (Worker cron limit).
     // "STOCK_COPILOT_CADENCE": "every 30 minutes",
-    "APP_NAME": "NextGenTP",
+    // "APP_NAME": "NextGenTP" — moved to environment.config.json (defaults.app.name) in #6550.
     // Issue #2419 — externalized polling cadences (AOP). All optional;
     // absence means the pollingConfig defaults apply. Milliseconds,
     // except CHAT_AUTO_REFRESH_FLOOR_S (seconds, matching the stored
     // user interval). Rollback is unsetting the vars and redeploying.
-    "QUOTES_REST_FALLBACK_MS": "300000",
-    "QUOTES_WS_RECONNECT_BASE_MS": "5000",
-    "QUOTES_WS_RECONNECT_CAP_MS": "120000",
+    // "QUOTES_REST_FALLBACK_MS": "300000" — moved to environment.config.json (defaults.polling.quotesRestFallbackMs) in #6550.
+    // "QUOTES_WS_RECONNECT_BASE_MS": "5000" — moved to environment.config.json (defaults.polling.quotesWsReconnectBaseMs) in #6550.
+    // "QUOTES_WS_RECONNECT_CAP_MS": "120000" — moved to environment.config.json (defaults.polling.quotesWsReconnectCapMs) in #6550.
     // Issue #4122 — cost: 30s -> 300s between options-flow polls.
     // Issue #4213 — cost: effectively off (3e12 ms, ~95 years). The
     // options-flow panel no longer re-polls on its own; the filter-change
     // fetch still loads it. src/client/polling.ts clamps the delay to the
     // 32-bit timer ceiling (MAX_TIMER_DELAY_MS), so the value means "not in
     // this session" on every engine instead of relying on integer wrap.
-    "OPTIONS_FLOWS_POLL_MS": "3000000000000",
+    // "OPTIONS_FLOWS_POLL_MS": "3000000000000" — moved to environment.config.json (defaults.polling.optionsFlowsPollMs) in #6550.
     // Issue #4213 (owner direction: match it to the others) — cost:
     // effectively off (3e12 ms, ~95 years), the same clamp as the
     // options-flow cadence above. /api/options/latest still loads on first
     // subscribe and on a manual refresh; only its periodic poll stops.
-    "OPTIONS_LATEST_POLL_MS": "3000000000000",
-    "CHAT_AUTO_REFRESH_FLOOR_S": "30",
+    // "OPTIONS_LATEST_POLL_MS": "3000000000000" — moved to environment.config.json (defaults.polling.optionsLatestPollMs) in #6550.
+    // "CHAT_AUTO_REFRESH_FLOOR_S": "30" — moved to environment.config.json (defaults.polling.chatAutoRefreshFloorS) in #6550.
     // Issue #4213 — cost: effectively off (3e12 ms, ~95 years), same clamp
     // as the line above. A staged goal run no longer refreshes itself: the
     // submit-time state stays on screen until the user reloads or opens the
     // run from Screening -> Reports. GOAL_TRACK_DEADLINE_MS is unchanged.
-    "GOAL_TRACK_POLL_MS": "3000000000000",
-    "GOAL_TRACK_DEADLINE_MS": "3600000",
+    // "GOAL_TRACK_POLL_MS": "3000000000000" — moved to environment.config.json (defaults.polling.goalTrackPollMs) in #6550.
+    // "GOAL_TRACK_DEADLINE_MS": "3600000" — moved to environment.config.json (defaults.polling.goalTrackDeadlineMs) in #6550.
     // Issue #2443 — TickerAgent push cadence, seconds. Default 5s;
     // changing it changes live tick cadence (product call). Rollback
     // is unsetting the var and redeploying.
@@ -424,27 +429,27 @@
     // pushTicks is the only push on the ticker socket, so a connected client
     // now sees one new tick per 50 minutes: the live ticker reads as a
     // snapshot taken at connect. Rollback is setting this back to "300".
-    "TICKER_PUSH_INTERVAL_S": "3000",
+    // "TICKER_PUSH_INTERVAL_S": "3000" — moved to environment.config.json (defaults.polling.tickerPushIntervalS) in #6550.
     // Issue #4237 — missed-push threshold, in missed intervals (default
     // 2): the Schedules home shows a missed push once the last push is
     // older than this many push cadences. Display only — it never
     // changes the feed. Rollback is unsetting the var and redeploying.
-    "TICKER_PUSH_STALE_AFTER_INTERVALS": "2",
+    // "TICKER_PUSH_STALE_AFTER_INTERVALS": "2" — moved to environment.config.json (defaults.polling.tickerPushStaleAfterIntervals) in #6550.
     // Issue #4213 — cost: 5 -> 2, the shortest loop the clamp allows. This
     // REVERSES #4131 (same direction: 2 -> 5, "the loop needs room to finish
     // a real goal"). #4213 is the later owner direction and wins; a complex
     // goal may still stop before it converges. Clamp stays 1-10 in
     // src/agents/chatPrompt.ts.
-    "MAS_MAX_STEPS": "2",
-    "AI_MODEL": "@cf/zai-org/glm-4.7-flash",
-    "CF_WALLET_NETWORK": "base-sepolia",
-    "CF_WALLET_FACILITATOR": "https://x402.org/facilitator",
-    "_comment_wallet": "Set CF_WALLET_RECIPIENT via: wrangler secret put CF_WALLET_RECIPIENT",
+    // "MAS_MAX_STEPS": "2" — moved to environment.config.json (defaults.ai.masMaxSteps) in #6550.
+    // "AI_MODEL": "@cf/zai-org/glm-4.7-flash" — moved to environment.config.json (defaults.ai.model) in #6550.
+    // "CF_WALLET_NETWORK": "base-sepolia" — moved to environment.config.json (defaults.wallet.network) in #6550.
+    // "CF_WALLET_FACILITATOR": "https://x402.org/facilitator" — moved to environment.config.json (defaults.wallet.facilitator) in #6550.
+    // Set CF_WALLET_RECIPIENT via: wrangler secret put CF_WALLET_RECIPIENT
     // Issue #4708: Stripe secrets (STRIPE_TEST_SECRET_KEY, STRIPE_LIVE_SECRET_KEY,
     // STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET) are synced via CI/CD
     // (.github/workflows/deploy.yml sync-secrets) and preserved via keep_vars —
     // never hardcoded in wrangler.jsonc or set directly in Cloudflare dashboard.
-    "_comment_stripe": "Set STRIPE_TEST_SECRET_KEY / STRIPE_LIVE_SECRET_KEY / STRIPE_SECRET_KEY via CI/CD (.github/workflows/deploy.yml sync-secrets)",
+    // Set STRIPE_TEST_SECRET_KEY / STRIPE_LIVE_SECRET_KEY / STRIPE_SECRET_KEY via CI/CD (.github/workflows/deploy.yml sync-secrets)
     // Issue #945, Wiring Phase 1 enablement (PR #965 merged the code
     // default-off): GitHub login/session wiring ON in production.
     // Rollback is removing these two vars (or setting
@@ -452,7 +457,7 @@
     // Google login enabled (owner-authorized; OAuth client + PROD
     // secrets set). Rollback is removing google from the list below
     // and redeploying — no code change.
-    "IAAA_WIRING_ENABLED": "1",
+    // "IAAA_WIRING_ENABLED": "1" — moved to environment.config.json (defaults.iaaa.wiringEnabled) in #6550.
     // Issue #2444 — wired session freshness gate (DO request meter).
     // A cached wired session fetched within this window (ms) is served
     // without a fresh store read. Default 30s when unset. SECURITY
@@ -468,13 +473,13 @@
     // revocation and step-up propagation. That trade-off is the owner
     // direction in #4213 and stays a CISO sign-off item under #2444
     // (rollback: "0" disables gating entirely; a smaller value bounds it).
-    "IAAA_WIRED_FRESHNESS_MS": "3000000000000",
+    // "IAAA_WIRED_FRESHNESS_MS": "3000000000000" — moved to environment.config.json (defaults.iaaa.wiredFreshnessMs) in #6550.
     // Issue #3155 (Q9) — default grant lifetime in days for
     // non-platform-scope bindings without an explicit expiry.
     // Adopted initial value 90; "0" resolves to 90, never to
     // unbounded (see src/security/grantRules.ts).
-    "IAAA_GRANT_DEFAULT_EXPIRY_DAYS": "90",
-    "IAAA_ENABLED_PROVIDERS": "github,google",
+    // "IAAA_GRANT_DEFAULT_EXPIRY_DAYS": "90" — moved to environment.config.json (defaults.iaaa.grantDefaultExpiryDays) in #6550.
+    // "IAAA_ENABLED_PROVIDERS": "github,google" — moved to environment.config.json (defaults.iaaa.enabledProviders) in #6550.
     // Issue #945, GitHub activation (owner-authorized, updated 2026-10-23
     // after #1182 stable identity) + #6191 (2026-11-22): bootstrap the
     // owner by issuer:subject entries — one entry per user, with the
@@ -489,21 +494,21 @@
     // default "primary". Rollback is removing these two vars (or
     // setting IAAA_PDP_ENABLED to "0") and redeploying — no code
     // change; granted memberships are NOT deleted by rollback.
-    "IAAA_BOOTSTRAP_ADMINS": "platform,tenant:https://github.com:82253453,platform,tenant:https://accounts.google.com:116080816274398642624",
+    // "IAAA_BOOTSTRAP_ADMINS": "platform,tenant:https://github.com:82253453,platform,tenant:https://accounts.google.com:116080816274398642624" — moved to environment.config.json (defaults.iaaa.bootstrapAdmins) in #6550.
     // Issue #6236 — stale-identity cleanup mode (default dry-run:
     // the admin inventory / cleanup endpoints report but delete
     // nothing until the owner flips this to "execute" and
     // redeploys; an invalid value fails closed to dry-run).
     // Rollback is setting this back to "dry-run" and redeploying.
-    "IAAA_STALE_CLEANUP_MODE": "dry-run",
+    // "IAAA_STALE_CLEANUP_MODE": "dry-run" — moved to environment.config.json (defaults.iaaa.staleCleanupMode) in #6550.
     // Issue #6238 — membership-index repair mode (default dry-run:
     // the repair endpoint reports but rewrites no index until the
     // owner flips this to "execute" and redeploys; an invalid value
     // fails closed to dry-run). Set to "execute" for the one-time
     // index rebuild, then flipped back to "dry-run" (rollback is
     // setting this back to "dry-run" and redeploying).
-    "IAAA_MEMBERSHIP_INDEX_REPAIR_MODE": "execute",
-    "IAAA_PDP_ENABLED": "1",
+    // "IAAA_MEMBERSHIP_INDEX_REPAIR_MODE": "execute" — moved to environment.config.json (defaults.iaaa.membershipIndexRepairMode) in #6550.
+    // "IAAA_PDP_ENABLED": "1" — moved to environment.config.json (defaults.iaaa.pdpEnabled) in #6550.
     // Issue #2800 (owner-directed, interim bootstrap): make the
     // commercial URLs work for the owner login OpenAIMP for now.
     // Env operator list for the commercial routes (UNION the store
@@ -514,7 +519,7 @@
     // (/operators/add); this entry can be removed by a follow-up
     // PR + redeploy. Rollback is removing this var and
     // redeploying — no code change.
-    "COMMERCIAL_STORE_OPERATORS": "OpenAIMP",
+    // "COMMERCIAL_STORE_OPERATORS": "OpenAIMP" — moved to environment.config.json (defaults.commercial.storeOperators) in #6550.
     // Issue #1077, real-post test (owner-authorized go-live): social
     // posting ON + live publishing ON. Daily goal stays DISABLED, so
     // nothing auto-fires — a live post happens only via manual
@@ -522,13 +527,13 @@
     // silent dry-run. Rollback is removing these two vars (or setting
     // them to "0") and redeploying — no code change.
     // Issue #4122 — cost: no autonomous social posting.
-    "SOCIAL_POSTING_ENABLED": "0",
+    // "SOCIAL_POSTING_ENABLED": "0" — moved to environment.config.json (defaults.social.postingEnabled) in #6550.
     // Issue #4122 — cost: no live social publishing.
-    "SOCIAL_LIVE_PUBLISHING": "0",
+    // "SOCIAL_LIVE_PUBLISHING": "0" — moved to environment.config.json (defaults.social.livePublishing) in #6550.
     // Issue #1489: scope autonomous publishing to Threads only during
     // Threads-first rollout. Without this, config defaults to "threads,x",
     // attempting to publish to X where X_ACCESS_TOKEN is not configured.
-    "SOCIAL_AUTONOMOUS_CHANNELS": "threads",
+    // "SOCIAL_AUTONOMOUS_CHANNELS": "threads" — moved to environment.config.json (defaults.social.autonomousChannels) in #6550.
     // Issue #1475 (sub-issue of #1344), service identity for unattended
     // work (runbook docs/operations/runbook/service-identity.md):
     // the login scheduled goals and ledger forwards run under. Plain
@@ -537,37 +542,37 @@
     // identity (tests/service_identity.test.ts). Rollback is removing
     // this var (or blanking it) and redeploying — goals return to
     // failing closed at the budget check.
-    "SERVICE_USER_LOGIN": "svc-background",
+    // "SERVICE_USER_LOGIN": "svc-background" — moved to environment.config.json (defaults.service.userLogin) in #6550.
     // Issue #1806: Cloudflare feature flags — screener enabled first.
     // "1" or "true" = ON. All other features default to closed (OFF).
     // Rollback is removing this var (or setting to "0") and redeploying,
     // or toggling off in Cloudflare Flagship without redeploying.
-    "FEATURE_SCREENER": "1",
+    // "FEATURE_SCREENER": "1" — moved to environment.config.json (defaults.features.screener) in #6550.
     // Issue #2051: goal_workflow ON by default (opt-out). The staged
     // goal path + #1998 gather run unless explicitly disabled
     // (Flagship toggle off, or this var to "0", + redeploy).
-    "FEATURE_GOAL_WORKFLOW": "1",
+    // "FEATURE_GOAL_WORKFLOW": "1" — moved to environment.config.json (defaults.features.goalWorkflow) in #6550.
     // Issue #2054: PaymentWorkflow assurance page ON by default
     // (owner direction). Covers runtimes without the FLAGS binding;
     // in PROD the FLAGS binding takes precedence, so the adapter
     // default in cfFlagshipAdapter.ts is what turns it on there.
     // Rollback is setting this var to "0" and redeploying (explicit
     // disable wins over the default in every adapter).
-    "FEATURE_PAYMENT_ASSURANCE": "1",
+    // "FEATURE_PAYMENT_ASSURANCE": "1" — moved to environment.config.json (defaults.features.paymentAssurance) in #6550.
     // Issue #2596: Options Screener product programme slice 1.
     // Enables the top-level Options Screener nav item and sub-menus.
     // Rollback is removing this var (or setting to "0") and redeploying.
-    "FEATURE_OPTIONS_SCREENER": "1",
+    // "FEATURE_OPTIONS_SCREENER": "1" — moved to environment.config.json (defaults.features.optionsScreener) in #6550.
     // Issue #2742: Flagship monetization flag enabled (owner direction).
     // Native payment workflow and charging active by default.
     // Rollback is setting this var to "0" (or toggling off in Flagship dashboard).
-    "FEATURE_MONETIZATION": "1",
+    // "FEATURE_MONETIZATION": "1" — moved to environment.config.json (defaults.features.monetization) in #6550.
     // Issue #3491 / #3492 / #3779 — Sandbox & Workspace enablement
     // Issue #4122 (owner direction): the sandbox has no container (#4112),
     // so the flag is off — the variants put it at "0" for the same reason.
-    "FEATURE_SANDBOX": "0",
-    "FEATURE_WORKSPACE": "1",
-    "WORKSPACE_ROOT": "/workspace",
+    // "FEATURE_SANDBOX": "0" — moved to environment.config.json (defaults.features.sandbox) in #6550.
+    // "FEATURE_WORKSPACE": "1" — moved to environment.config.json (defaults.features.workspace) in #6550.
+    // "WORKSPACE_ROOT": "/workspace" — moved to environment.config.json (defaults.workspace.root) in #6550. Reserved for a future PortThink agent capability.
     // Issue #6216 — the deploy-time host version: the git SHA of the
     // deployed commit. CF_VERSION_METADATA.id is NOT available inside
     // a Durable Object, so the async-job claim stamped null and the
