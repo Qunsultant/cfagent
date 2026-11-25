@@ -1110,10 +1110,11 @@ never pass a policy — operator control of retry budgets is filed as
 **Replay** is `replayJob` (`src/services/jobPipelineEngine.ts:914`):
 it replays a run on the same instance identity, proven via
 `runWorkflowInstanceId` (#4454). Replay is not a re-run from scratch
-and not a resume — it re-executes the recorded run. There is no
-approval/wait aspect in the engine or the stage contract; approvals
-are a door/host concern, and their absence from the engine is evidence
-for #5279.
+and not a resume — it re-executes the recorded run. Approvals ARE a stage since #3955 (§3.2): a `wait.event` step waits for one
+named event and a timeout is a declared outcome. What the engine still
+lacks is an approval POLICY — who may decide, and how a decision is
+authorized — which stays a door concern; named signals and live queries
+are #5279.
 
 ### 3.10 Pause / resume / cancel / rerun
 
@@ -1128,6 +1129,27 @@ The control plane, all on `JobPipelineControl`:
 | Rerun stage | `rerunStage` (`:1318`), `rerunStageByVocabulary` (`:1814`) | Re-executes one stage (by node path or by vocabulary stage). |
 | Resume stage | `resumeStage` (`:1445`), `resumeStageByVocabulary` (`:1828`) | Resumes one paused stage. |
 | Cancel stage | `cancelStage` (`:1488`), `cancelStageByVocabulary` (`:1833`) | Cancels one stage; downstream never proceeds. |
+
+**Platform control (#5783).** Cancel reaches the run's durable host. When the
+instance carries a workflow-instance stamp and the host exposes a stop
+channel, `cancelJob` terminates the instance with `rollback: false` — the
+recorded choice, because no step registers a platform rollback handler yet
+(#5958 retires the hand-built compensation into them) — and then settles the
+record itself: a run parked in a durable wait never reaches a step boundary,
+so nothing else could settle it. A host with no channel keeps the
+cooperative flag, exactly as before.
+
+Pause deliberately does NOT call the platform's pause. The platform freezes
+the flow body before the engine's boundary check can run, while a resume
+starts a NEW executor (§3.10, #4454), so a platform-held instance would have
+no resumer: the two models would deadlock and the record would sit "running"
+forever. `pauseManagedWorkflowInstance` / `resumeManagedWorkflowInstance`
+exist on the seam for a door that owns an instance's flow. Restart-from-step
+is likewise unwired: the platform targets a `step.do` name in the instance's
+execution history, while `rerunStage` is a control op over the engine's own
+artifacts — running both would execute the same work twice. The seam's
+`restartManagedWorkflowInstance` takes the platform's `from` target for the
+day a door needs it.
 
 Stage retirement is persisted on the definition (`retired`, #3944,
 `src/data/jobPipelinePorts.ts:159-167`): a retired stage never
