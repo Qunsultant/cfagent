@@ -2752,6 +2752,10 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/restEndpointsData.ts", "alpaca", 4],
   ["src/client/restEndpointsData.ts", "etrade", 35],
   ["src/client/restEndpointsData.ts", "yahoo", 3],
+  // Issue #6509 — the broker-tool capability map is a provider-id registry:
+  // naming each broker's own tool is its job (INTEGRATION).
+  ["src/shared/brokerToolNames.ts", "etrade", 5],
+  ["src/shared/brokerToolNames.ts", "alpaca", 10],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));

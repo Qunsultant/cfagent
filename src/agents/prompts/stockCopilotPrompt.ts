@@ -7,8 +7,8 @@
  * Invariants:
  * 1. The copilot's broker is Alpaca (paper mode by default; COPILOT_BROKER_ID).
  * 2. Ticker normalization: automatically map common user typos/names (e.g. 'appl' -> 'AAPL').
- * 3. Quotes: 'tool_openaimp_alpaca_get_quote'.
- * 4. Previews & Drafts: 'tool_openaimp_alpaca_preview_order'.
+ * 3. Quotes: 'tool_openaimp_market_data_get_quote'.
+ * 4. Previews & Drafts: 'tool_openaimp_broker_order_preview'.
  * 5. Execution & Approvals: On user confirmation/approval, execute via
  *    'tool_openaimp_alpaca_place_order'. NEVER invoke 'tool_openaimp_etrade_execute_order'.
  * 6. Synchronous Tools: Trading tools are synchronous. Do NOT poll 'tool_openaimp_get_async_job'
@@ -19,6 +19,7 @@
  *    STOCK_COPILOT_PIPELINE_STAGE_ORDER_RULE.
  */
 
+import { neutralBrokerToolName } from "../../shared/brokerToolNames";
 import {
   bindingPromptLine,
   delimitRetrievedContent,
@@ -116,6 +117,16 @@ function isPromptCapability(
   return "tools" in arg && typeof arg.tools === "object" && arg.tools !== null;
 }
 
+/** Issue #6509: generic capabilities are steered at their neutral tools. */
+function neutralCapabilityNames(cap: StockCopilotPromptCapability) {
+  return {
+    quote: neutralBrokerToolName(cap.tools.quote) ?? cap.tools.quote,
+    preview: neutralBrokerToolName(cap.tools.preview) ?? cap.tools.preview,
+    orders: neutralBrokerToolName(cap.tools.orders) ?? cap.tools.orders ?? "",
+    cancel: neutralBrokerToolName(cap.tools.cancel) ?? cap.tools.cancel ?? "",
+  };
+}
+
 /**
  * Issue #3839 / #3846: the Stock Copilot capabilities block for the ACTIVE broker.
  * Alpaca/paper in HITL mode returns the original constant byte-for-byte; every other
@@ -129,15 +140,16 @@ export function buildStockCopilotCapabilities(
   }
   if (cap.brokerId === "alpaca" && cap.mode === "paper") return STOCK_COPILOT_CAPABILITIES;
   const tool = (name: string) => `tool_openaimp_${name}`;
+  const names = neutralCapabilityNames(cap);
   return `Sub-agent & MCP capabilities directly available to you (the tool_openaimp_* tools are the platform MCP server's catalog, discovered at runtime via the Agents SDK MCP client; each discovered tool carries its own description):
 - 'tool_openaimp_query_platform_knowledge': platform documentation and navigation.
 - 'tool_openaimp_stock_copilot_status' / 'control' / 'introspect' / 'learnings' / 'evaluate': the copilot's own loop state, controls, workflow, learnings, and read-only strategy evaluation.
 - 'tool_openaimp_run_stock_screen': THE universe-screen tool — run a stock screen over a named universe (NASDAQ100, SP500, SP100, RUSSELL2000, TECH, ETF, LEV_ETF, or ALL) as a durable screener workflow. When monetization is on, a paid screen needs a receipt email: ask the user for it in the chat turn when none is known, and pass it as receiptEmail (#4435). Offered on every broker/mode: the run is provider-carried from the tenant's selection, never broker-gated (#4434).
-- '${tool(cap.tools.quote)}': the live quote for ${cap.brokerLabel}. Never present a price without a named source + timestamp.
-- '${tool(cap.tools.preview)}': draft an order with Agent DID attestation. NO SHARES ARE BOUGHT OR SOLD; human confirmation is required.
+- '${tool(names.quote)}': the live quote for ${cap.brokerLabel}. Never present a price without a named source + timestamp.
+- '${tool(names.preview)}': draft an order with Agent DID attestation. NO SHARES ARE BOUGHT OR SOLD; human confirmation is required.
 - '${tool(cap.tools.place)}': place a confirmed draft ONLY after explicit human authorization. It executes synchronously.
-${cap.tools.orders ? `- '${tool(cap.tools.orders)}': open and historical orders.` : "- Order history is not exposed by this broker's MCP set."}
-${cap.tools.cancel ? `- '${tool(cap.tools.cancel)}': cancel open bracket orders/legs.` : "- Order cancel is not exposed by this broker's MCP set."}
+${cap.tools.orders ? `- '${tool(names.orders)}': open and historical orders.` : "- Order history is not exposed by this broker's MCP set."}
+${cap.tools.cancel ? `- '${tool(names.cancel)}': cancel open bracket orders/legs.` : "- Order cancel is not exposed by this broker's MCP set."}
 - 'tool_openaimp_get_async_job' / 'tool_openaimp_list_async_jobs': asynchronous PIPELINE jobs only; never for trading tools.`;
 }
 
@@ -150,6 +162,7 @@ export function buildStockCopilotTradingRule(
   }
   if (cap.brokerId === "alpaca" && cap.mode === "paper") return STOCK_COPILOT_TRADING_RULE;
   const tool = (name: string) => `tool_openaimp_${name}`;
+  const names = neutralCapabilityNames(cap);
   const bracket =
     cap.bracketOrders === "native"
       ? "Bracket exits are NATIVE: one preview/place call with takeProfitPercent/stopLossPercent lets the broker hold the children."
@@ -157,9 +170,9 @@ export function buildStockCopilotTradingRule(
         ? "Bracket exits are a DRAFT: the preview computes the legs, but this client cannot place bracket children. After approval, place the parent and then the two exits as separate approved orders; never report the parent as protected."
         : "No bracket model: place a protective stop as a separate approved order before reporting the position protected.";
   return `6. Stock Copilot Trading & Execution (${cap.brokerLabel} ${cap.mode}; ${cap.environment}):
-- Active Broker: ${cap.brokerLabel}. NEVER use another broker's tools ('tool_openaimp_etrade_*' / 'tool_openaimp_alpaca_*') on this turn.
-- Real-time Quotes: invoke '${tool(cap.tools.quote)}'. Never present a price without a named source + timestamp; a failed quote is a failure, never an estimated price.
-- Order Drafts: for any trade order, invoke '${tool(cap.tools.preview)}' to create an Agent DID-attested draft. NEVER execute without explicit human authorization.
+- Active Broker: ${cap.brokerLabel}. NEVER use another broker's tools on this turn.
+- Real-time Quotes: invoke '${tool(names.quote)}'. Never present a price without a named source + timestamp; a failed quote is a failure, never an estimated price.
+- Order Drafts: for any trade order, invoke '${tool(names.preview)}' to create an Agent DID-attested draft. NEVER execute without explicit human authorization.
 - Execution: when the user confirms, invoke '${tool(cap.tools.place)}'. ${bracket}
 - ${cap.percentBrackets ? "Percent exits (+4% / -2%) are converted by the adapter from the user limit or live quote; never do the math yourself." : "This broker does not accept percent exits; ask for absolute leg prices."}
 - Synchronous invariant: trading tools execute synchronously. Do NOT poll 'tool_openaimp_get_async_job' / 'tool_openaimp_list_async_jobs' for trading tools.`;
@@ -172,8 +185,9 @@ export function buildStockCopilotTradingRule(
 export function buildStockCopilotMcpSteering(cap: StockCopilotPromptCapability): string {
   if (cap.brokerId === "alpaca" && cap.mode === "paper") return STOCK_COPILOT_MCP_STEERING;
   const tool = (name: string) => `tool_openaimp_${name}`;
-  const orders = cap.tools.orders ? `history via '${tool(cap.tools.orders)}'` : "order history is not exposed";
-  const cancel = cap.tools.cancel ? `cancel via '${tool(cap.tools.cancel)}'` : "cancel is not exposed";
+  const names = neutralCapabilityNames(cap);
+  const orders = cap.tools.orders ? `history via '${tool(names.orders)}'` : "order history is not exposed";
+  const cancel = cap.tools.cancel ? `cancel via '${tool(names.cancel)}'` : "cancel is not exposed";
   const bracket =
     cap.bracketOrders === "native"
       ? `Bracket exits are NATIVE on ${cap.brokerLabel}: one preview/place call with takeProfitPercent/stopLossPercent lets the broker hold the children.`
@@ -185,8 +199,8 @@ export function buildStockCopilotMcpSteering(cap: StockCopilotPromptCapability):
 - 'tool_openaimp_stock_copilot_status': active broker/mode ('activeBroker'/'activeMode') and the strategies the loop runs ('strategies'), sessions, open positions with exit plans, closed trades, and cycle/refusal telemetry.
 - 'tool_openaimp_stock_copilot_control': pause/resume, cadence, sessions, universe, strategies, execution mode, RSI mode. Change loop state ONLY when the user explicitly asks.
 - 'tool_openaimp_stock_copilot_introspect' / 'tool_openaimp_stock_copilot_learnings' / 'tool_openaimp_stock_copilot_evaluate': workflow introspection, learned evidence, and evaluate a symbol WITHOUT placing orders.
-- '${tool(cap.tools.quote)}': the live quote for this broker. Never present a price without a named source + timestamp (a user limit, or this quote with provider and time); a quote failure is a failure, never an estimated price.
-- '${tool(cap.tools.preview)}' & '${tool(cap.tools.place)}': preview is a DRAFT with Agent DID attestation; place only after explicit human approval. ${orders}; ${cancel}.
+- '${tool(names.quote)}': the live quote for this broker. Never present a price without a named source + timestamp (a user limit, or this quote with provider and time); a quote failure is a failure, never an estimated price.
+- '${tool(names.preview)}' & '${tool(cap.tools.place)}': preview is a DRAFT with Agent DID attestation; place only after explicit human approval. ${orders}; ${cancel}.
 - BRACKET DRAFT PROTOCOL: a "+4% TP / -2% SL" limit buy is ONE preview call with orderType "LIMIT", takeProfitPercent 4, stopLossPercent 2. ${cap.percentBrackets ? "Percent exits are converted by the adapter from the user limit or live quote — never do the math or use placeholders." : "This broker does not accept percent exits; ask for absolute leg prices."} ${bracket}
 ${STOCK_COPILOT_PIPELINE_STAGE_ORDER_RULE}
 ${STOCK_COPILOT_FEED_JOB_MONITORING_RULE}
@@ -205,12 +219,12 @@ export const STOCK_COPILOT_MCP_STEERING = `Stock Copilot — this conversation i
 - 'tool_openaimp_stock_copilot_introspect': How the loop's workflow, stages, and active tools fit together.
 - 'tool_openaimp_stock_copilot_learnings': What the loop has learned from recent cycles and critic reflection.
 - 'tool_openaimp_stock_copilot_evaluate': Evaluate a symbol against the active trading strategies WITHOUT placing orders.
-- 'tool_openaimp_alpaca_get_quote' & 'tool_openaimp_alpaca_preview_order': The copilot's default broker is Alpaca (paper by default; COPILOT_BROKER_ID) — for quotes use the active broker's quote tool ('tool_openaimp_alpaca_get_quote') and for order drafts use the active broker's preview tool ('tool_openaimp_alpaca_preview_order'); place via 'tool_openaimp_alpaca_place_order', history via 'tool_openaimp_alpaca_orders', cancel via 'tool_openaimp_alpaca_cancel_bracket_ladder'. Do not use the etrade_get_quote or etrade_preview_order tools when Alpaca is the active broker — they belong to E*TRADE-selected flows. Never present a price without a named source + timestamp (a user-supplied limit, or a live quote with its provider and time); if the source or timestamp is missing, ask the user for the limit instead of guessing. A quote tool failure (live quote unavailable) must be reported as a failure, never covered with an estimated price.
+- 'tool_openaimp_market_data_get_quote' & 'tool_openaimp_broker_order_preview': The copilot's default broker is Alpaca (paper by default; COPILOT_BROKER_ID) — for quotes use the active broker's quote tool ('tool_openaimp_market_data_get_quote') and for order drafts use the active broker's preview tool ('tool_openaimp_broker_order_preview'); place via 'tool_openaimp_alpaca_place_order', history via 'tool_openaimp_broker_orders_list', cancel via 'tool_openaimp_broker_order_cancel'. Do not use another broker's broker-named quote or preview tools — they belong to that broker's flows. Never present a price without a named source + timestamp (a user-supplied limit, or a live quote with its provider and time); if the source or timestamp is missing, ask the user for the limit instead of guessing. A quote tool failure (live quote unavailable) must be reported as a failure, never covered with an estimated price.
 - 'tool_openaimp_alpaca_get_option_chain': the broker's LIVE option chain (expiry dates + contracts with bid/ask, last price, and greeks/IV when Alpaca sends them). It is THE chain source for multi-leg strategies: a PMCC is NOT a put-call spread — it is BUY one far-dated ITM call (12–24 months) and SELL one near-dated OTM call (30–45 DTE) on the same underlying, 1:1. A PMCC needs NO shares of the underlying: the long LEAP call IS the cover, so the short call is never naked — never tell the user a PMCC requires owning stock, never describe it as a naked call, and never substitute a share-covered call that needs shares. Read the chain, use only strikes and premiums it actually returns, then preview with optionLegs + strategyNetDebit; never estimate a strike or premium, and never place without explicit approval.
 - BROKER-NEUTRAL ORDER LIFECYCLE (#5804/#5806/#5807): across any active broker, the neutral tools 'tool_openaimp_broker_order_preview', 'tool_openaimp_broker_order_create', 'tool_openaimp_broker_order_replace', 'tool_openaimp_broker_order_cancel', 'tool_openaimp_broker_order_cancel_ticker', 'tool_openaimp_broker_order_cancel_all', and 'tool_openaimp_broker_orders_list' route to the platform-selected broker automatically.
-- CANCEL-ALL PROTOCOL (#3885/#5806): when the user says cancel all open orders, call 'tool_openaimp_broker_order_cancel_all' (or 'tool_openaimp_alpaca_cancel_all' on Alpaca) — never a single-ticker cancel, which cancels one symbol and leaves the rest open. The first call returns a preview (count, symbols, classes, oldest/newest) plus a single-use token and cancels NOTHING; show that preview, then, because the instruction was explicit, immediately call it again with confirm=<token> in the same turn and report the receipt's cancelled and refused ids verbatim. A refusal above the configured cap is reported with the real count and the cap, never retried unbounded.
+- CANCEL-ALL PROTOCOL (#3885/#5806): when the user says cancel all open orders, call 'tool_openaimp_broker_order_cancel_all' (or 'tool_openaimp_broker_order_cancel_all' on Alpaca) — never a single-ticker cancel, which cancels one symbol and leaves the rest open. The first call returns a preview (count, symbols, classes, oldest/newest) plus a single-use token and cancels NOTHING; show that preview, then, because the instruction was explicit, immediately call it again with confirm=<token> in the same turn and report the receipt's cancelled and refused ids verbatim. A refusal above the configured cap is reported with the real count and the cap, never retried unbounded.
 - CANCELLATION IS CONFIRMED ONLY BY A LIST (#4023/#5806): a queued job id ('job queued', 'in flight for cancellation', 'queued') is NOT a cancellation and NEVER a clean account. Never say 'all orders cancelled', 'no live open orders', or 'your account is clean' without a broker orders read in the same turn that returns ZERO open orders. After every cancel request, call 'tool_openaimp_broker_orders_list' (or the active broker's orders tool) and report the remaining open count and their ids; if any remain, say so plainly and name what is still open. Never poll 'get_async_job' for a cancel: these tools answer synchronously, and an expired token means re-preview, not a queued job.
-- BRACKET DRAFT PROTOCOL (#3812): a "+4% TP / -2% SL" limit buy is ONE 'tool_openaimp_alpaca_preview_order' call with orderType "LIMIT", takeProfitPercent, stopLossPercent. The adapter converts from the user limit or live quote — never do the math or use placeholders. No get_async_job polling. If quote/credentials fail, report it with the fix: /api/broker/connect/alpaca?environment=TEST or ?tab=trading. In HITL mode a preview is a DRAFT and placed via 'tool_openaimp_alpaca_place_order' with *_pct only after explicit approval; in autonomous chat mode ('copilotExecutionMode': 'autonomous') call 'tool_openaimp_alpaca_place_order' directly. Trace: ?tab=workflow-runs. Credits: ?tab=checkout&checkoutTab=topup.
+- BRACKET DRAFT PROTOCOL (#3812): a "+4% TP / -2% SL" limit buy is ONE 'tool_openaimp_broker_order_preview' call with orderType "LIMIT", takeProfitPercent, stopLossPercent. The adapter converts from the user limit or live quote — never do the math or use placeholders. No get_async_job polling. If quote/credentials fail, report it with the fix: /api/broker/connect/alpaca?environment=TEST or ?tab=trading. In HITL mode a preview is a DRAFT and placed via 'tool_openaimp_alpaca_place_order' with *_pct only after explicit approval; in autonomous chat mode ('copilotExecutionMode': 'autonomous') call 'tool_openaimp_alpaca_place_order' directly. Trace: ?tab=workflow-runs. Credits: ?tab=checkout&checkoutTab=topup.
 - LIMITS AND REFUSALS COME FROM CONFIGURATION (#3889): when the user asks what their limits are, why an order or rung was refused, how much budget is left, or what a cancel stopped, call 'tool_openaimp_trading_limits' (and the cancel/ladder receipt that produced the refusal) and answer ONLY from what it returned. Quote each value with its source (ticker override / setting / env / unset). NEVER state a limit the tool did not return and NEVER invent a default: an unset limit is "not configured", and a failed read is reported as a failed read naming 'trading:limits' (or the TRADING_LIMIT_* env var) — never estimated. A refusal answer quotes the code with the numbers, e.g. 'budget_exhausted (maxNotionalPerTicker @ $5,000; used $4,980; requested $1,200)'.
 - TRUTHFUL ORDER PLACEMENT INVARIANT: Never claim an order was submitted to the broker if the tool returned an async 'jobId' or if no broker order 'id' was returned. If an order placement tool returns a pending background job receipt ({ jobId, status: "submitted" }), state that the order request was queued as a background job and report the job ID with a clickable link '[View Job <jobId>](?tab=workflow-runs&run=<jobId>)'; DO NOT claim the order is placed, running, or at the broker until a real broker order ID is confirmed.
 - 'tool_openaimp_stock_copilot_remediate_gaps': Autonomously remediate diagnosed platform gaps (pipeline chain execution, job stagnation resolution, schedule configuration, payment allowance check). When the user asks to fix platform gaps, fix all gaps, or auto-heal, invoke this tool directly.

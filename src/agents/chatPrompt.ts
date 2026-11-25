@@ -88,6 +88,7 @@
  */
 import type { Env } from "../types";
 import { BROKER_CATALOG, isBrokerId, type AccountBindingTuple } from "../trading";
+import { neutralPromptToolName, promptToolName } from "../shared/brokerToolNames";
 import { maskAccountId } from "../config/accountBindings";
 
 export interface OrchestratorPromptRoute {
@@ -212,49 +213,32 @@ export function resolvePromptBrokerTools(
   input?: Partial<Pick<OrchestratorPromptInput, "activeBroker" | "activeMode" | "copilotExecutionMode">>,
 ): ResolvedPromptBrokerTools {
   const rawBroker = String(input?.activeBroker ?? "").trim();
-  const isEtrade = /^(etrade|e\*trade|e-trade)$/i.test(rawBroker);
-  const isPublic = /^public(?:\.com)?$/i.test(rawBroker);
   const isLive = /^(live|prod)$/i.test(String(input?.activeMode ?? "").trim());
   const executionPolicy = input?.copilotExecutionMode === "autonomous" ? "autonomous" : "hitl";
-  const [brokerId, brokerLabel, quoteTool, previewTool, executeTool] = isEtrade
-    ? ["etrade", "E*TRADE", "tool_openaimp_etrade_get_quote", "tool_openaimp_etrade_preview_order", "tool_openaimp_etrade_execute_order"]
-    : isPublic
-      ? ["public", "Public", "tool_openaimp_public_get_quote", "tool_openaimp_public_preview_order", "tool_openaimp_public_place_order"]
-      : ["alpaca", "Alpaca", "tool_openaimp_alpaca_get_quote", "tool_openaimp_alpaca_preview_order", "tool_openaimp_alpaca_place_order"];
-  const normalizedCatalogId = rawBroker.toLowerCase();
-  if (rawBroker.length > 0 && isBrokerId(normalizedCatalogId) && normalizedCatalogId !== brokerId) {
-    const entry = BROKER_CATALOG[normalizedCatalogId];
-    return {
-      brokerId: entry.id,
-      brokerLabel: entry.label,
-      modeId: isLive ? "live" : "paper",
-      modeLabel: isLive ? "Live" : "Paper",
-      quoteTool: "tool_openaimp_market_data_get_quote",
-      previewTool: "tool_openaimp_broker_order_preview",
-      executeTool: "tool_openaimp_broker_order_create",
-      ordersTool: "tool_openaimp_broker_orders_list",
-      cancelBracketTool: "tool_openaimp_broker_order_cancel",
-      executionPolicy,
-    };
-  }
-  // Issue #4660 (matrix gap 8): the order list and the single-order cancel are
-  // per-broker tools, not one shared pair. A session on the broker that owns
-  // these tools must be steered at them, never at another broker's tools.
-  const [ordersTool, cancelBracketTool] = isEtrade
-    ? ["tool_openaimp_etrade_orders", "tool_openaimp_etrade_cancel_order"]
-    : isPublic
-      ? ["tool_openaimp_public_orders", "tool_openaimp_public_cancel_order"]
-    : ["tool_openaimp_alpaca_orders", "tool_openaimp_alpaca_cancel_bracket_ladder"];
+
+  // Issue #6509: resolve the broker through the catalog, then steer generic
+  // capabilities at their neutral tools. No per-broker branch: a new
+  // broker gets the same neutral quote/preview/orders/cancel tools, and only
+  // direct execution remains the broker's own tool.
+  const normalized = rawBroker.toLowerCase().replace(/[^a-z]/g, "");
+  const brokerKey = normalized.startsWith("public") ? "public" : normalized;
+  const entry =
+    brokerKey.length > 0 && isBrokerId(brokerKey)
+      ? BROKER_CATALOG[brokerKey]
+      : BROKER_CATALOG.alpaca;
+
   return {
-    brokerId,
-    brokerLabel,
+    brokerId: entry.id,
+    brokerLabel: entry.label,
     modeId: isLive ? "live" : "paper",
     modeLabel: isLive ? "Live" : "Paper",
-    quoteTool,
-    previewTool,
-    executeTool,
-    ordersTool,
-    cancelBracketTool,
+    quoteTool: neutralPromptToolName("quote"),
+    previewTool: neutralPromptToolName("preview"),
+    executeTool: entry.copilot.supported
+      ? promptToolName(entry.copilot.tools.place)
+      : promptToolName("broker_order_create"),
+    ordersTool: neutralPromptToolName("orders"),
+    cancelBracketTool: neutralPromptToolName("cancel"),
     executionPolicy,
   };
 }

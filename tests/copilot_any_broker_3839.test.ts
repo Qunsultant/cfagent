@@ -123,7 +123,7 @@ describe("broker-aware Stock Copilot steering (#3839)", () => {
       percentBrackets: etrade.percentBrackets,
     });
     expect(steering).toContain("E*TRADE · paper (TEST)");
-    expect(steering).toContain("tool_openaimp_etrade_preview_order");
+    expect(steering).toContain("tool_openaimp_broker_order_preview");
     expect(steering).toContain("tool_openaimp_etrade_execute_order");
     expect(steering).not.toContain("tool_openaimp_alpaca_preview_order");
     expect(steering).toMatch(/Bracket exits are a DRAFT/);

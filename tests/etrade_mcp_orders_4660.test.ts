@@ -170,16 +170,16 @@ describe("#4660 — etrade_cancel_order returns the broker's receipt", () => {
   });
 });
 
-describe("#4660 — chat is steered at the selected broker's own order tools", () => {
-  it("names etrade_orders and etrade_cancel_order on an E*TRADE session", () => {
+describe("#4660/#6509 — chat is steered at the neutral order tools", () => {
+  it("routes an E*TRADE session's list/cancel through the neutral tools", () => {
     const resolved = resolvePromptBrokerTools({ activeBroker: "etrade", activeMode: "live" });
-    expect(resolved.ordersTool).toBe("tool_openaimp_etrade_orders");
-    expect(resolved.cancelBracketTool).toBe("tool_openaimp_etrade_cancel_order");
+    expect(resolved.ordersTool).toBe("tool_openaimp_broker_orders_list");
+    expect(resolved.cancelBracketTool).toBe("tool_openaimp_broker_order_cancel");
   });
 
-  it("leaves an Alpaca session on Alpaca's own order and ladder-cancel tools", () => {
+  it("routes an Alpaca session's list/cancel through the neutral tools", () => {
     const resolved = resolvePromptBrokerTools({ activeBroker: "alpaca" });
-    expect(resolved.ordersTool).toBe("tool_openaimp_alpaca_orders");
-    expect(resolved.cancelBracketTool).toBe("tool_openaimp_alpaca_cancel_bracket_ladder");
+    expect(resolved.ordersTool).toBe("tool_openaimp_broker_orders_list");
+    expect(resolved.cancelBracketTool).toBe("tool_openaimp_broker_order_cancel");
   });
 });
