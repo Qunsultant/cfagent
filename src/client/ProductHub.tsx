@@ -78,7 +78,7 @@ export function isValidProductHubTab(tab: unknown): tab is ProductHubTab {
   );
 }
 
-const PRODUCT_HUB_TAB_OPTIONS: TabOption<ProductHubTab>[] = [
+export const PRODUCT_HUB_TAB_OPTIONS: TabOption<ProductHubTab>[] = [
   { id: "products", label: "Products" },
   { id: "selling-options", label: "Selling options" },
   { id: "marketing-draft-preview", label: "Marketing draft preview" },

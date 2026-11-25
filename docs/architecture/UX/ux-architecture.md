@@ -250,6 +250,36 @@ Creation pattern (uniform across the platform):
 Rationale: one system gives consistent behavior, consistent structure, and
 consistent creation, fully controlled by this architecture — no one-offs.
 
+### Tabs: one system
+
+Every tab strip is built with the Tabs primitive from
+`src/client/components/ui/` (`Tabs.tsx`, `.ui-tabs` in `primitives.css`).
+No hand-rolled tab rows (divs with their own click, selection, or scroll
+handling) may be added, and existing rows migrate to Tabs when touched.
+
+- The strip's tabs come from a single named registry per page (a
+  `*_VIEWS` + `*_VIEW_LABELS` module, or an exported `*_TABS` array the
+  page renders) — never an inline literal duplicated between the page
+  and a test. The registry is the one source of truth for the strip.
+- The strip never collapses: `.ui-tabs` carries `flex-shrink: 0`
+  (issue #6501). A tab strip is a scroll container, so its automatic
+  minimum size is zero; inside a height-constrained flex column, a
+  long panel whose min-content height exceeds its flex-basis freezes
+  and the strip absorbs the whole overflow, collapsing to its border
+  — all tabs present in the DOM, none visible. `flex-shrink: 0` keeps
+  the overflow with the panel, which scrolls via the tab-viewport.
+  The strip's height stays fully content-derived (font + padding
+  tokens); no min-height patch may be added to it.
+- Rendered tabs == registry tabs: the composed-page gate
+  (`tests/template_composed_gate_4825.test.tsx`, #4825) asserts, for
+  every tabbed template route, that the first tablist in document
+  order shows every registry label, in registry order, and nothing
+  else. A tablist with no gate entry fails the gate.
+
+Rationale: one system gives consistent behavior and one registry per
+strip, and the gate makes a collapsed or wrong strip impossible to
+ship — DOM presence is not visibility.
+
 ### Toasts: one place for transient feedback
 
 Transient success/failure feedback — anything the user did that succeeded
@@ -745,6 +775,9 @@ A feature is complete only when:
 - No placeholder activity is represented as real.
 - Telemetry and privacy behavior are documented.
 - Tests and known limitations are recorded.
+- On a tabbed page, rendered tabs equal the page's registry tabs
+  (count + labels, in registry order), asserted by the composed-page
+  gate — DOM presence of tabs is not visibility.
 
 ## 21. Instructions to the implementation agent
 

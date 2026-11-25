@@ -288,8 +288,9 @@ const CONFORMING_ROUTES: Record<string, string> = {
   // conforming now, not a hub-hosted trading route.
   schedules: "src/client/SchedulesHome.tsx",
   // Issue #4585: the DataHub and SecurityHub homes render from the
-  // shell (Chat.tsx TAB_CONTENT → DataHubHome / SecurityHubHome),
-  // which carry the PageShell.
+  // shell (Chat.tsx TAB_CONTENT → DataHubHome / SecurityHubHome).
+  // SecurityHubHome carries PageTemplate since #6164; DataHubHome
+  // carries PageTemplate since #6501.
   "data-hub": "src/client/DataHubHome.tsx",
   "security-hub": "src/client/SecurityHubHome.tsx",
   // Issue #5169: the Observability home renders from the shell
