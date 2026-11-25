@@ -213,7 +213,9 @@ describe("runOpportunityHunt with holdings (issue 6406)", () => {
     });
     expect(result.seriesBySymbol.AAAA).toHaveLength(OPPORTUNITY_HUNT_CHART_BARS);
     expect(result.seriesBySymbol.AAAA[OPPORTUNITY_HUNT_CHART_BARS - 1]).toBe(98);
-    expect(result.seriesBySymbol.BBBB).toBeUndefined();
+    // Issue 6478 — a symbol evaluated with no setup keeps its series too: the
+    // report shows the evaluated universe, not only the symbols that fired.
+    expect(result.seriesBySymbol.BBBB).toEqual(Array(15).fill(100));
   });
 
   it("defaults to holdings unavailable with a named reason when the caller says nothing", () => {
@@ -585,5 +587,42 @@ describe("OpportunityHuntPanel report view (issue 6406)", () => {
     // Patterns desc: BBBB (2 patterns) first.
     expect(rowsAfter[0]).toContain("BBBB");
     expect(rowsAfter[1]).toContain("AAAA");
+  });
+
+  it("lists an evaluated symbol with no setup and opens its chart (issue 6478)", async () => {
+    await renderPanel({
+      ok: true,
+      scanned: 2,
+      skipped: 0,
+      setups: [
+        { symbol: "AAAA", strategy: "rsi_reversal", direction: "entry", lastClose: 98, detail: "(dip >1.5% below prior bar)", levels: { entryLow: 97.51, entryHigh: 98.49, stopLoss: 95.06, takeProfit: 100.94 } },
+      ],
+      summary: "Opportunity hunt: 1 setup(s) across 2 symbol(s), 1 entry, 0 exits",
+      asOf: "2026-11-23T12:00:00.000Z",
+      holdingsStatus: { available: true, broker: "alpaca" },
+      seriesBySymbol: { AAAA: [100, 98], BBBB: [50, 50, 50] },
+    });
+    const tableRows = [...container!.querySelectorAll("tbody tr")];
+    expect(tableRows).toHaveLength(2);
+    const quietRow = tableRows.find((tr) => tr.textContent?.includes("BBBB"));
+    expect(quietRow).toBeDefined();
+    // A zero-pattern row is a row, not a gap: 0 patterns and the last close.
+    expect(quietRow!.textContent).toContain("0");
+    expect(quietRow!.textContent).toContain("$50.00");
+
+    await act(async () => {
+      (quietRow as HTMLElement).click();
+    });
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("BBBB — no setup");
+    expect(text).toContain(
+      "No setup — this symbol was evaluated and no strategy produced an entry or exit signal.",
+    );
+    // The dialog still carries the symbol's chart (drawn from the row's own
+    // series), and the sparkline remains a labelled image.
+    const chartImg = [...document.querySelectorAll('[role="img"]')].find((el) =>
+      (el.getAttribute("aria-label") ?? "").startsWith("Trailing closes for BBBB"),
+    );
+    expect(chartImg).toBeTruthy();
   });
 });

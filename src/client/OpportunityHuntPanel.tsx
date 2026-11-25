@@ -205,9 +205,9 @@ export function OpportunityHuntPanel() {
   const selectedRow: OpportunityHuntSymbolRow | null =
     rows.find((row) => row.symbol === selectedSymbol) ?? rows[0] ?? null;
 
-  const selectedCloses: readonly number[] = selectedRow
-    ? (result?.seriesBySymbol?.[selectedRow.symbol] ?? [])
-    : [];
+  // Issue 6478 — the row carries its own series, so the detail chart works for
+  // an evaluated symbol with no setup exactly as it does for a setup symbol.
+  const selectedCloses: readonly number[] = selectedRow?.closes ?? [];
   const selectedLabels: readonly string[] = useMemo(
     () =>
       result && selectedCloses.length > 0
@@ -436,7 +436,7 @@ export function OpportunityHuntPanel() {
                   key: "trend",
                   header: "Trend",
                   render: (row) => (
-                    <SymbolSparkline symbol={row.symbol} closes={result.seriesBySymbol?.[row.symbol] ?? []} />
+                    <SymbolSparkline symbol={row.symbol} closes={row.closes} />
                   ),
                 },
                 {
@@ -469,8 +469,12 @@ export function OpportunityHuntPanel() {
               caption="One row per symbol — pattern count, entry and exit signals, and the entry recommendation's price range. Select a row for its recommendations and chart."
               empty={
                 <EmptyState
-                  title="No setups"
-                  description="The latest bar produced no entry signal for any symbol."
+                  title={result.scanned > 0 ? "No setups" : "No symbols evaluated"}
+                  description={
+                    result.scanned > 0
+                      ? "This result retains no evaluated symbols (it predates the evaluated-symbol report); run the hunt again to list every symbol and its chart."
+                      : "The run returned no evaluated symbols — there is nothing to report."
+                  }
                 />
               }
             />
@@ -484,13 +488,17 @@ export function OpportunityHuntPanel() {
             <Modal
               open={selectedRow !== null}
               onClose={() => setSelectedSymbol(null)}
-              title={selectedRow ? `${selectedRow.symbol} — recommendations` : "Recommendations"}
+              title={
+                selectedRow
+                  ? `${selectedRow.symbol} — ${selectedRow.patternCount > 0 ? "recommendations" : "no setup"}`
+                  : "Recommendations"
+              }
               size="lg"
             >
             {selectedRow ? (
               <Card>
                 <CardHeader
-                  title={`${selectedRow.symbol} — recommendations`}
+                  title={`${selectedRow.symbol} — ${selectedRow.patternCount > 0 ? "recommendations" : "no setup"}`}
                 />
                 <p>
                   Last close {formatHuntPrice(selectedRow.lastClose)}
@@ -539,7 +547,10 @@ export function OpportunityHuntPanel() {
                 ) : null}
                 {selectedRow.entries.length === 0 &&
                 selectedRow.exits.length === 0 ? (
-                  <p>No recommendations for this symbol.</p>
+                  <p>
+                    No setup — this symbol was evaluated and no strategy
+                    produced an entry or exit signal.
+                  </p>
                 ) : null}
                 <OpportunityHuntChart
                   symbol={selectedRow.symbol}

@@ -304,6 +304,9 @@ export async function generateOpportunityHuntPdf(
   const rows = groupHuntSetupsBySymbol(result);
   const entries = result.setups.filter((s) => s.direction === "entry");
   const exits = result.setups.filter((s) => s.direction === "exit");
+  // Issue 6478 — "evaluated" and "with setups" are different populations now:
+  // every evaluated symbol is a row, and most may carry zero patterns.
+  const symbolsWithSetups = rows.filter((row) => row.patternCount > 0).length;
 
   // Header
   text(ctx, "Opportunity Hunt Report", { size: 16, bold: true });
@@ -315,7 +318,7 @@ export async function generateOpportunityHuntPdf(
   text(ctx, "Summary", { size: 12, bold: true });
   text(
     ctx,
-    `Scanned: ${result.scanned} symbol(s)   Setups: ${result.setups.length}   Entries: ${entries.length}   Exits: ${exits.length}   Symbols with setups: ${rows.length}${result.skipped > 0 ? `   Skipped (short history): ${result.skipped}` : ""}`,
+    `Scanned: ${result.scanned} symbol(s)   Setups: ${result.setups.length}   Entries: ${entries.length}   Exits: ${exits.length}   Symbols evaluated: ${rows.length}   Symbols with setups: ${symbolsWithSetups}${result.skipped > 0 ? `   Skipped (short history): ${result.skipped}` : ""}`,
     { size: 10 },
   );
   if (result.holdingsStatus && !result.holdingsStatus.available) {
@@ -334,16 +337,19 @@ export async function generateOpportunityHuntPdf(
   // Issue #6473 — "how did N symbols become M setups?" is answerable from the
   // run's own counts, so the report answers it instead of leaving the reader to
   // wonder: a symbol carries one setup per strategy that fired, and exits are
-  // counted apart from entries. Computed here, never asserted.
-  if (result.setups.length > 0) {
-    text(ctx, "How the counts add up", { size: 12, bold: true });
-    text(ctx, huntCountsExplanation(result), { size: 10 });
-    rule(ctx);
-  }
+  // counted apart from entries. Computed here, never asserted; rendered for a
+  // zero-setup run too, because "0 setups" is still the run's arithmetic.
+  text(ctx, "How the counts add up", { size: 12, bold: true });
+  text(ctx, huntCountsExplanation(result), { size: 10 });
+  rule(ctx);
 
   if (result.setups.length === 0) {
     text(ctx, "No setups", { size: 12, bold: true });
-    text(ctx, "The latest bar produced no entry signal for any symbol.", { size: 10, color: PDF_PRINT_MUTED });
+    text(
+      ctx,
+      `The latest bar produced no entry or exit signal for any of the ${rows.length} evaluated symbol(s).`,
+      { size: 10, color: PDF_PRINT_MUTED },
+    );
     rule(ctx);
   } else {
     // Per-strategy breakdown: entries and exits per strategy.
@@ -356,23 +362,29 @@ export async function generateOpportunityHuntPdf(
       if (x > 0) strategyBars.push({ label: `${strategy} — exits`, value: x, color: PRINT_EXIT_BAR });
     }
     renderBarChart(ctx, "Setups by strategy", strategyBars, { labelWidth: 220 });
+  }
 
-    // Per-symbol pattern-count chart: top N by pattern count.
-    const byPatterns = [...rows].sort(
-      (a, b) => b.patternCount - a.patternCount || a.symbol.localeCompare(b.symbol),
-    );
-    const top = byPatterns.slice(0, PATTERN_CHART_TOP_N);
+  // Per-symbol pattern-count chart: top N by pattern count over the EVALUATED
+  // population (issue 6478). All-zero patterns would draw an empty chart, so a
+  // run where nothing fired skips the chart instead of drawing 20 zero bars.
+  const byPatterns = [...rows].sort(
+    (a, b) => b.patternCount - a.patternCount || a.symbol.localeCompare(b.symbol),
+  );
+  const top = byPatterns.slice(0, PATTERN_CHART_TOP_N);
+  if (top.some((row) => row.patternCount > 0)) {
     renderBarChart(
       ctx,
-      `Pattern count by symbol (top ${top.length} of ${rows.length})`,
+      `Pattern count by symbol (top ${top.length} of ${rows.length} evaluated)`,
       top.map((row) => ({ label: row.symbol, value: row.patternCount, color: PRINT_COUNT_BAR })),
       { labelWidth: 84 },
     );
+  }
 
-    // Main table — the panel's table, one row per symbol.
+  if (rows.length > 0) {
+    // Main table — the panel's table, one row per EVALUATED symbol.
     renderTable(
       ctx,
-      `Symbols (${rows.length})`,
+      `Symbols evaluated (${rows.length})`,
       HUNT_TABLE_COLUMNS,
       rows.map((row) => [
         row.symbol,
@@ -386,16 +398,25 @@ export async function generateOpportunityHuntPdf(
       ]),
     );
 
-    // Per-symbol detail — the panel's detail card, for every symbol:
-    // grouped entry and exit recommendations with their price ranges,
-    // and the price chart with the recommendation levels.
+    // Per-symbol detail — the panel's detail card, for every evaluated symbol:
+    // grouped entry and exit recommendations with their price ranges, and the
+    // price chart. A symbol with no setup says so and still carries its chart
+    // (issue 6478): the reader sees what was evaluated and found uninteresting.
     for (const row of rows) {
-      text(ctx, `${row.symbol} — recommendations`, { size: 12, bold: true });
+      const hasSetup = row.patternCount > 0;
+      text(ctx, `${row.symbol} — ${hasSetup ? "recommendations" : "no setup"}`, { size: 12, bold: true });
       const gainText =
         row.exitGainPct !== null
           ? ` · exits ${formatHuntPct(row.exitGainPct)} vs cost basis`
           : "";
       text(ctx, `Last close ${formatHuntPrice(row.lastClose)}${gainText}.`, { size: 9, color: PDF_PRINT_MUTED });
+      if (!hasSetup) {
+        text(
+          ctx,
+          "No setup — this symbol was evaluated and no strategy produced an entry or exit signal.",
+          { size: 9, color: PDF_PRINT_MUTED },
+        );
+      }
       if (row.entries.length > 0) {
         text(ctx, "Entry recommendations", { size: 10, bold: true, color: PRINT_SUCCESS });
         for (const setup of row.entries) {
@@ -419,7 +440,7 @@ export async function generateOpportunityHuntPdf(
           );
         }
       }
-      const closes = result.seriesBySymbol?.[row.symbol] ?? [];
+      const closes = row.closes ?? result.seriesBySymbol?.[row.symbol] ?? [];
       if (closes.length >= 2) {
         const levels: PriceLevel[] = [];
         if (row.entryLow !== null) levels.push({ value: row.entryLow, label: `Entry ${formatHuntPrice(row.entryLow)}`, color: PRINT_LEVEL_ENTRY });

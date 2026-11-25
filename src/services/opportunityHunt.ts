@@ -76,8 +76,11 @@ export interface OpportunityHuntResult {
   asOf: string;
   holdingsStatus: OpportunityHuntHoldingsStatus;
   /**
-   * Trailing closes per symbol with setups, oldest → newest, capped at
-   * OPPORTUNITY_HUNT_CHART_BARS — the panel's price chart, not a new store.
+   * Trailing closes per EVALUATED symbol, oldest → newest, capped at
+   * OPPORTUNITY_HUNT_CHART_BARS — the report's chart data, not a new store.
+   * Issue 6478: every symbol the run scanned is retained, including symbols
+   * with no setup, so the report can show what was evaluated and found
+   * uninteresting. A symbol skipped for short history has no series.
    */
   seriesBySymbol: Record<string, readonly number[]>;
 }
@@ -160,20 +163,22 @@ export function runOpportunityHunt(input: OpportunityHuntInput): OpportunityHunt
       continue;
     }
     scanned += 1;
+    // Issue 6478 — retain every evaluated symbol's chart series, not only the
+    // symbols that fire a setup. The report must show what was evaluated and
+    // found uninteresting; a renderer cannot draw a symbol the run dropped.
+    seriesBySymbol[symbol] = closes.slice(-OPPORTUNITY_HUNT_CHART_BARS);
     // Issue 6406 — a held symbol evaluates with its cost basis, so the
     // evaluator's exit rules can fire; a symbol with no holding evaluates
     // flat, exactly as before.
     const entryPrice = input.holdings?.get(symbol);
     const holding = entryPrice !== undefined;
     const lastClose = closes[closes.length - 1];
-    let hasSetup = false;
     for (const strategy of strategies) {
       const signal = evaluateLatestPatternSignal(strategy, closes as readonly number[], {
         holding,
         entryPrice: entryPrice ?? 0,
       });
       if (signal.action === "enter_long") {
-        hasSetup = true;
         setups.push({
           symbol,
           strategy,
@@ -183,7 +188,6 @@ export function runOpportunityHunt(input: OpportunityHuntInput): OpportunityHunt
           levels: deriveOpportunityHuntLevels(strategy, lastClose),
         });
       } else if (signal.action === "exit_long") {
-        hasSetup = true;
         setups.push({
           symbol,
           strategy,
@@ -193,9 +197,6 @@ export function runOpportunityHunt(input: OpportunityHuntInput): OpportunityHunt
           entryPrice,
         });
       }
-    }
-    if (hasSetup) {
-      seriesBySymbol[symbol] = closes.slice(-OPPORTUNITY_HUNT_CHART_BARS);
     }
   }
 
