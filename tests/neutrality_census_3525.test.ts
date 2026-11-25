@@ -1007,6 +1007,22 @@ function measure(): Map<string, number> {
  * named the provider); the new client modules carry no
  * provider-brand row. 3 rows removed, 6 rows added.
  * Baseline totals move 1410/11352 -> 1413/11394.
+ * Baseline update (#6528, 2026-11-25): the Phase 1 Config census lands
+ * seven documents under docs/architecture/survey/ — the six universal-
+ * context surveys (context RCA + plan, resolvers + issues, copies and
+ * overlaps, target-state counts, domain attribution, per-domain end
+ * state) plus the #6528 census seed record. The surveys name the
+ * providers/brokers they surveyed (the E*TRADE/Alpaca/Yahoo/Tastytrade
+ * resolver and context identifiers, the Nasdaq index, the Interactive
+ * Brokers name); neutralizing those mentions would falsify the evidence
+ * record, so all rows are dispositioned HISTORICAL, as the #4791/#3121/
+ * #6076 survey precedents. 18 new rows, 101 lines. The HISTORICAL
+ * marker is restated 188/1026 -> 206/1127. (Counted totals before this
+ * update are 1415/11409 — the #6438 note's 1413/11394 is stale by 2 rows
+ * / 15 lines of un-noted drift, the same class the #6423 note records;
+ * the NOT-PROVIDER marker's 298 lines is likewise one line short of the
+ * 299 counted, left as-is.)
+ * Baseline totals move 1415/11409 -> 1433/11510.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -2096,7 +2112,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/agents/copilot-broker-capability.md", "yahoo", 1],
   ["src/agents/orchestrator.ts", "alpaca", 1],
   ["src/config/asyncJobModes.ts", "alpaca", 1],
-  // ---- HISTORICAL (188 rows / 1026 lines) ----
+  // ---- HISTORICAL (206 rows / 1127 lines) ----
   ["docs/Assessment.md", "etrade", 6],
   ["docs/Assessment.md", "yahoo", 2],
   ["docs/agents/options-report-inventory.md", "etrade", 4],
@@ -2296,6 +2312,30 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/survey/stock-screen-gap-issue-map-2026-11-13-survey.md", "alpaca", 4],
   ["docs/architecture/survey/stock-screen-gap-issue-map-2026-11-13-survey.md", "yahoo", 18],
   ["docs/architecture/survey/stock-screen-gap-issue-map-2026-11-13-survey.md", "nasdaq", 2],
+  // #6528 HISTORICAL: the Phase 1 Config census lands six universal-
+  // context survey snapshots plus the census seed record under
+  // docs/architecture/survey/. The surveys name the providers they
+  // surveyed (resolver/context identifiers, the Nasdaq index, the
+  // Interactive Brokers name); neutralizing the names would falsify
+  // the evidence record, so all rows are dispositioned HISTORICAL.
+  ["docs/architecture/survey/6528-census-seed.md", "etrade", 4],
+  ["docs/architecture/survey/context-survey-rca-plan.md", "etrade", 19],
+  ["docs/architecture/survey/context-survey-rca-plan.md", "alpaca", 3],
+  ["docs/architecture/survey/context-survey-rca-plan.md", "nasdaq", 1],
+  ["docs/architecture/survey/copies-and-overlaps.md", "etrade", 8],
+  ["docs/architecture/survey/domain-attribution.md", "etrade", 2],
+  ["docs/architecture/survey/domain-attribution.md", "alpaca", 2],
+  ["docs/architecture/survey/domain-attribution.md", "tastytrade", 2],
+  ["docs/architecture/survey/domain-attribution.md", "yahoo", 2],
+  ["docs/architecture/survey/per-domain-end-state.md", "etrade", 6],
+  ["docs/architecture/survey/per-domain-end-state.md", "yahoo", 1],
+  ["docs/architecture/survey/resolvers-and-issues-survey.md", "etrade", 23],
+  ["docs/architecture/survey/resolvers-and-issues-survey.md", "alpaca", 2],
+  ["docs/architecture/survey/resolvers-and-issues-survey.md", "interactive brokers / ibkr", 1],
+  ["docs/architecture/survey/resolvers-and-issues-survey.md", "tastytrade", 3],
+  ["docs/architecture/survey/target-state-counts.md", "etrade", 20],
+  ["docs/architecture/survey/target-state-counts.md", "tastytrade", 1],
+  ["docs/architecture/survey/target-state-counts.md", "yahoo", 1],
   // ---- NOT-PROVIDER (74 rows / 298 lines) ----
   ["docs/ANALYSIS_AND_EXECUTION_WORKFLOWS.md", "nasdaq", 4],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "nasdaq", 1],
