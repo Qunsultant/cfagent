@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { ReportLinkRow } from "../src/client/components/ReportLinkRow";
+import { ReportLinkRow } from "../src/client/ReportLinkRow";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 

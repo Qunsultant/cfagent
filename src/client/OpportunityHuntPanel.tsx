@@ -48,7 +48,7 @@ import {
   runOpportunityHuntNow,
   type JobRunRecord,
 } from "./jobsApi";
-import { ReportLinkRow } from "./components/ReportLinkRow";
+import { ReportLinkRow } from "./ReportLinkRow";
 import type { OpportunityHuntResult } from "../services/opportunityHunt";
 import { OpportunityHuntChart } from "./OpportunityHuntChart";
 import {
