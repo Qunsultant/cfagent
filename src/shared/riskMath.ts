@@ -81,6 +81,55 @@ export interface OptionGreeks {
   vomma: number;
 }
 
+interface BlackScholesTerms {
+  d1: number;
+  d2: number;
+  expRt: number;
+  expQt: number;
+  sqrtT: number;
+}
+
+function blackScholesTerms(
+  s: number,
+  k: number,
+  t: number,
+  v: number,
+  r: number,
+  q: number,
+): BlackScholesTerms {
+  const sqrtT = Math.sqrt(t);
+  const d1 = (Math.log(s / k) + (r - q + 0.5 * v * v) * t) / (v * sqrtT);
+  const d2 = d1 - v * sqrtT;
+  return { d1, d2, expRt: Math.exp(-r * t), expQt: Math.exp(-q * t), sqrtT };
+}
+
+/**
+ * European Black-Scholes price, price-only.
+ *
+ * Contract (issue #6529): `NaN` for non-positive/non-finite spot, strike,
+ * years, or sigma, or non-finite rate/dividend; no volatility clamp and no
+ * near-zero-expiry shortcut. That is the research-economics contract this
+ * function replaces. `blackScholesGreeks` keeps its own clamp/short-expiry
+ * behaviour at its entry.
+ */
+export function blackScholesPrice(
+  s: number,
+  k: number,
+  t: number,
+  v: number,
+  r: number = RISK_MATH.riskFreeRate,
+  q: number = RISK_MATH.dividendYield,
+  type: "CALL" | "PUT" = "CALL",
+): number {
+  if (!(s > 0) || !(k > 0) || !(t > 0) || !(v > 0) || !Number.isFinite(s + k + t + r + q + v)) {
+    return NaN;
+  }
+  const { d1, d2, expRt, expQt } = blackScholesTerms(s, k, t, v, r, q);
+  return type === "CALL"
+    ? s * expQt * normalCdf(d1) - k * expRt * normalCdf(d2)
+    : k * expRt * normalCdf(-d2) - s * expQt * normalCdf(-d1);
+}
+
 export function blackScholesGreeks(
   s: number,
   k: number,
@@ -97,12 +146,7 @@ export function blackScholesGreeks(
   }
 
   const vol = Math.max(0.01, v);
-  const sqrtT = Math.sqrt(t);
-  const d1 = (Math.log(s / k) + (r - q + 0.5 * vol * vol) * t) / (vol * sqrtT);
-  const d2 = d1 - vol * sqrtT;
-
-  const expRt = Math.exp(-r * t);
-  const expQt = Math.exp(-q * t);
+  const { d1, d2, expRt, expQt, sqrtT } = blackScholesTerms(s, k, t, vol, r, q);
   const pdfD1 = normalPdf(d1);
 
   const gamma = (expQt * pdfD1) / (s * vol * sqrtT);
@@ -113,7 +157,7 @@ export function blackScholesGreeks(
   if (type === "CALL") {
     const cdfD1 = normalCdf(d1);
     const cdfD2 = normalCdf(d2);
-    const price = s * expQt * cdfD1 - k * expRt * cdfD2;
+    const price = blackScholesPrice(s, k, t, vol, r, q, "CALL");
     const delta = expQt * cdfD1;
     const thetaYears = -((s * vol * expQt * pdfD1) / (2 * sqrtT)) - r * k * expRt * cdfD2 + q * s * expQt * cdfD1;
     const rho = (k * t * expRt * cdfD2) / 100;
@@ -133,7 +177,7 @@ export function blackScholesGreeks(
 
   const cdfNegD1 = normalCdf(-d1);
   const cdfNegD2 = normalCdf(-d2);
-  const price = k * expRt * cdfNegD2 - s * expQt * cdfNegD1;
+  const price = blackScholesPrice(s, k, t, vol, r, q, "PUT");
   const delta = -expQt * cdfNegD1;
   const thetaYears = -((s * vol * expQt * pdfD1) / (2 * sqrtT)) + r * k * expRt * cdfNegD2 - q * s * expQt * cdfNegD1;
   const rho = (-k * t * expRt * cdfNegD2) / 100;

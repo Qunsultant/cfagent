@@ -14,7 +14,7 @@
 
 export type ResearchOptionType = "call" | "put";
 
-import { normalCdf } from "../shared/riskMath";
+import { blackScholesPrice as sharedBlackScholesPrice, normalCdf } from "../shared/riskMath";
 import {
   expectedMove as sharedExpectedMove,
   expiryPayoff,
@@ -105,30 +105,23 @@ export interface BsInputs {
   optionType: ResearchOptionType;
 }
 
-/** European Black-Scholes price. Returns NaN on degenerate input. */
+/**
+ * European Black-Scholes price. Returns NaN on degenerate input.
+ * Issue #6529: one price-only implementation lives in shared/riskMath; the
+ * shared contract (NaN on degenerate, no vol clamp, no expiry shortcut)
+ * preserves this module's behaviour exactly.
+ */
 export function blackScholesPrice(input: BsInputs): number {
   const { spot, strike, years, rate, dividendYield, sigma, optionType } = input;
-  if (
-    !(spot > 0) ||
-    !(strike > 0) ||
-    !(years > 0) ||
-    !(sigma > 0) ||
-    !Number.isFinite(spot + strike + years + rate + dividendYield + sigma)
-  ) {
-    return NaN;
-  }
-  const sqrtT = Math.sqrt(years);
-  const d1 =
-    (Math.log(spot / strike) +
-      (rate - dividendYield + 0.5 * sigma * sigma) * years) /
-    (sigma * sqrtT);
-  const d2 = d1 - sigma * sqrtT;
-  const discQ = Math.exp(-dividendYield * years);
-  const discR = Math.exp(-rate * years);
-  if (optionType === "call") {
-    return spot * discQ * normCdf(d1) - strike * discR * normCdf(d2);
-  }
-  return strike * discR * normCdf(-d2) - spot * discQ * normCdf(-d1);
+  return sharedBlackScholesPrice(
+    spot,
+    strike,
+    years,
+    sigma,
+    rate,
+    dividendYield,
+    optionType === "call" ? "CALL" : "PUT",
+  );
 }
 
 /** One-standard-deviation expected move over `years` at volatility `sigma`. */
