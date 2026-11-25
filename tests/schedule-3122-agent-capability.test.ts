@@ -147,22 +147,41 @@ describe("3122-P02..P09 classifier", () => {
     if (out.schedulable) expect(out.requiresApproval).toBe(true);
   });
 
-  it("P08 interval below the floor binds approval; at or above does not; no floor binds all", () => {
+  it("P08 interval below the floor is REFUSED (#6482); at or above is not; no floor still refuses below the default", () => {
     const below = classifyAgentScheduleRequest(
       { kind: "sdk-callback", callback: "autonomousMarketScreen", intervalSeconds: 1_800 },
       CONFIG,
     );
-    if (below.schedulable) expect(below.requiresApproval).toBe(true);
+    expect(below.schedulable).toBe(false);
+    if (!below.schedulable) expect(below.denialReason).toContain("SCHEDULE_BELOW_FREQUENCY_FLOOR");
     const at = classifyAgentScheduleRequest(
       { kind: "sdk-callback", callback: "autonomousMarketScreen", intervalSeconds: 3_600 },
       CONFIG,
     );
     if (at.schedulable) expect(at.requiresApproval).toBe(false);
-    const noFloor = classifyAgentScheduleRequest(
+    // Issue #6482 — an unconfigured floor resolves to the fail-closed
+    // default (monthly, 2,592,000s): below it is refused, at it needs
+    // no approval. A daily arm (86,400s) is below the monthly default.
+    const noFloorBelow = classifyAgentScheduleRequest(
+      { kind: "sdk-callback", callback: "autonomousMarketScreen", intervalSeconds: 1_800 },
+      NO_CONFIG,
+    );
+    expect(noFloorBelow.schedulable).toBe(false);
+    const noFloorDaily = classifyAgentScheduleRequest(
       { kind: "sdk-callback", callback: "autonomousMarketScreen", intervalSeconds: 86_400 },
       NO_CONFIG,
     );
-    if (noFloor.schedulable) expect(noFloor.requiresApproval).toBe(true);
+    expect(noFloorDaily.schedulable).toBe(false);
+    const noFloorAt = classifyAgentScheduleRequest(
+      { kind: "sdk-callback", callback: "autonomousMarketScreen", intervalSeconds: 2_592_000 },
+      NO_CONFIG,
+    );
+    if (noFloorAt.schedulable) expect(noFloorAt.requiresApproval).toBe(false);
+    const noFloorAbove = classifyAgentScheduleRequest(
+      { kind: "sdk-callback", callback: "autonomousMarketScreen", intervalSeconds: 5_184_000 },
+      NO_CONFIG,
+    );
+    if (noFloorAbove.schedulable) expect(noFloorAbove.requiresApproval).toBe(false);
   });
 
   it("P08b cron gap estimation: */30 fires every 30m; daily 0 9 fires every 1440m; unparsable is undefined", () => {
@@ -170,16 +189,23 @@ describe("3122-P02..P09 classifier", () => {
     expect(estimateCronMinGapMinutes("0 9 * * 1-5")).toBe(1_440);
     expect(estimateCronMinGapMinutes("0 */6 * * *")).toBe(360);
     expect(estimateCronMinGapMinutes("not a cron")).toBeUndefined();
+    // Issue #6482 — a below-floor cron is REFUSED, not approval-bound.
     const frequent = classifyAgentScheduleRequest(
       { kind: "sdk-callback", callback: "autonomousMarketScreen", cron: "*/30 * * * *" },
       CONFIG,
     );
-    if (frequent.schedulable) expect(frequent.requiresApproval).toBe(true);
+    expect(frequent.schedulable).toBe(false);
+    if (!frequent.schedulable) expect(frequent.denialReason).toContain("SCHEDULE_BELOW_FREQUENCY_FLOOR");
     const daily = classifyAgentScheduleRequest(
       { kind: "sdk-callback", callback: "autonomousMarketScreen", cron: "0 9 * * 1-5" },
       CONFIG,
     );
     if (daily.schedulable) expect(daily.requiresApproval).toBe(false);
+    const unparsable = classifyAgentScheduleRequest(
+      { kind: "sdk-callback", callback: "autonomousMarketScreen", cron: "not a cron" },
+      CONFIG,
+    );
+    expect(unparsable.schedulable).toBe(false);
   });
 
   it("P09 trading operation is denied outright (exclusion wins over approval-binding)", () => {
@@ -305,6 +331,10 @@ describe("3122-P13..P15 executor", () => {
     const audits: Array<{ type: string; payload: Record<string, unknown> }> = [];
     let pending: PendingScheduleApproval[] = [];
     const sdkItems: Array<{ id: string; callback: string; payload?: unknown; type: string; intervalSeconds?: number; cron?: string }> = [];
+    // Issue #6482 — the goals fake is stateful (list/add/remove share
+    // this list) so an update test can seed a goal, then watch the
+    // remove + re-add land under the same id.
+    const goalsAdded: Array<Record<string, unknown>> = [];
     let seq = 0;
     const deps = {
       pdp: async () => ({ enforced: true as const, allowed: true as const }),
@@ -340,16 +370,25 @@ describe("3122-P13..P15 executor", () => {
           },
         },
         goals: {
-          list: async () => [],
-          add: async (goal: { id: string; operation: string }) => ({ ...goal, enabled: true }),
-          remove: async () => true,
+          list: async () => [...goalsAdded],
+          add: async (goal: Record<string, unknown>) => {
+            const created = { ...goal, enabled: true };
+            goalsAdded.push(created);
+            return created;
+          },
+          remove: async (id: string) => {
+            const index = goalsAdded.findIndex((goal) => goal.id === id);
+            if (index < 0) return false;
+            goalsAdded.splice(index, 1);
+            return true;
+          },
           setEnabled: async () => true,
           trigger: async () => ({ jobsCreated: 0, jobsSkipped: 0, errors: [] }),
         },
       },
       ...overrides,
     };
-    return { deps, ledger, audits, getPending: () => pending, sdkItems };
+    return { deps, ledger, audits, getPending: () => pending, sdkItems, goalsAdded };
   }
 
   it("P13 agent creates a screen schedule: armed with agent provenance + ledger row with agent identity", async () => {
@@ -438,6 +477,11 @@ describe("3122-P13..P15 executor", () => {
   });
 
   it("P14b an approved pending id arms the schedule without re-gating; an unknown id errors honestly", async () => {
+    // Issue #6482 — the approval flow is still covered, but the driver
+    // is spend, not frequency: the interval is at the floor (3600s),
+    // so the floor does not refuse it, and the budget above the
+    // 10000-cent threshold binds approval. The old frequency-driven
+    // driver (60s) is now a refusal, pinned in the #6482 file.
     const { deps, getPending, sdkItems } = harness();
     const create = {
       action: "create",
@@ -445,7 +489,8 @@ describe("3122-P13..P15 executor", () => {
       principal,
       tenantId: "primary",
       callback: "autonomousMarketScreen",
-      timing: { type: "interval", intervalSeconds: 60 } as const,
+      timing: { type: "interval", intervalSeconds: 3_600 } as const,
+      budgetCents: 10_001,
     } as const;
     const refused = await executeAgentScheduleAction(deps as never, create);
     expect(refused.ok).toBe(false);
@@ -468,22 +513,28 @@ describe("3122-P13..P15 executor", () => {
     expect(sdkItems).toHaveLength(1);
   });
 
-  it("P14c an approved update arms without re-gating (cancel + recreate)", async () => {
-    const { deps, getPending, sdkItems } = harness();
-    sdkItems.push({
-      id: "sdk-1",
-      callback: "autonomousMarketScreen",
-      type: "interval",
-      intervalSeconds: 3600,
-      payload: { provenance: { origin: "user", createdBy: "OpenAIMP", createdAt: "2026-11-11T00:00:00.000Z" } },
+  it("P14c an approved update arms without re-gating (goal update, remove + re-add)", async () => {
+    // Issue #6482 — the old driver (an SDK update tightening the
+    // interval to 30s) is now a floor refusal, so the approval flow
+    // is covered by a goal update whose budget crosses the threshold
+    // instead: the update binds approval, and the approved id arms
+    // (remove + re-add under the same id, stamped with agent
+    // provenance).
+    const { deps, getPending, goalsAdded } = harness();
+    goalsAdded.push({
+      id: "g1",
+      name: "Daily rollup",
+      operation: "resource.rollup_daily",
+      budgetCents: 100,
+      enabled: true,
     });
     const update = {
       action: "update",
-      kind: "sdk",
+      kind: "goal",
       principal,
       tenantId: "primary",
-      scheduleId: "sdk-1",
-      timing: { type: "interval", intervalSeconds: 30 } as const,
+      scheduleId: "g1",
+      goal: { id: "g1", name: "Daily rollup", operation: "resource.rollup_daily", budgetCents: 10_001 },
     } as const;
     const refused = await executeAgentScheduleAction(deps as never, update);
     expect(refused.ok).toBe(false);
@@ -495,11 +546,11 @@ describe("3122-P13..P15 executor", () => {
     );
     const armed = await executeAgentScheduleAction(deps as never, { ...update, approvedPendingId: pendingId });
     expect(armed.ok).toBe(true);
-    // Cancel + recreate: exactly one row remains, stamped with agent
-    // provenance (the fake re-mints the same sequence id, so the
-    // provenance stamp — not the id — proves the row is the new one).
-    expect(sdkItems).toHaveLength(1);
-    expect((sdkItems[0].payload as Record<string, unknown>).provenance).toMatchObject({
+    // Remove + re-add: exactly one row remains, with the new budget
+    // and agent provenance (not the seeded row).
+    expect(goalsAdded).toHaveLength(1);
+    expect(goalsAdded[0]).toMatchObject({ id: "g1", budgetCents: 10_001 });
+    expect(goalsAdded[0].provenance).toMatchObject({
       origin: "agent",
       createdBy: "OpenAIMP",
       agentId: "agent-1",

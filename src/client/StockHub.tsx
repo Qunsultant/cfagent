@@ -701,7 +701,7 @@ export function StockHub({
             capturedScreen.sector === "ALL" ? "all sectors" : capturedScreen.sector
           } · max ${capturedScreen.maxItems ?? "universe default"} · ${
             capturedScreen.presetName ? `preset ${capturedScreen.presetName}` : "custom thresholds"
-          }) — manage it under Schedules.`,
+          }) — created paused; resume it under Schedules to start it.`,
         );
       } else {
         setCaptureError(data.error || `Failed to create schedule (${response.status})`);

@@ -433,6 +433,9 @@ export async function runStockCopilotCycleForInstance(
         "stock_copilot.ledger_write_failed",
         { taskId: taskCtx.taskId },
       ),
+      // Issue #6482 — the Worker env for the kill-switch + firing-rate
+      // resolution at the one choke point.
+      env: ctx.env,
     },
   );
 }

@@ -64,8 +64,20 @@ import type { UnifiedScheduleRecord } from "../data/unifiedSchedulePorts";
 import type { JobNodeConfig } from "../data/jobPipelinePorts";
 import { isExternalSendStage } from "./workflowStageSchedule";
 import type { ResolvedWorkflowStage } from "./workflowStageSchedule";
-import { screenScheduleToRecord } from "./unifiedScheduleManagement";
+import { pausedScreenScheduleToRecord, screenScheduleToRecord } from "./unifiedScheduleManagement";
 import { resolveEnvironmentConfig } from "../config/environment";
+import {
+  DEFAULT_SCHEDULE_MIN_INTERVAL_SECONDS,
+} from "../config/scheduleFrequencyFloor";
+import {
+  SCHEDULE_BELOW_FREQUENCY_FLOOR,
+  refuseBelowFloorTiming,
+  type ScheduleFloorTiming,
+} from "./scheduleFrequencyFloor";
+import { resolveEffectiveScheduleFloor } from "./scheduleControls";
+
+/** Issue #6482 — the cron-gap estimator moved to the floor leaf (src/services/scheduleFrequencyFloor.ts); re-exported so existing import sites keep working. */
+export { estimateCronMinGapMinutes } from "./scheduleFrequencyFloor";
 import type { SqlStorage } from "../orm";
 import type { NLQSchedulingPort } from "../agents/nlq/types";
 
@@ -224,42 +236,33 @@ export type AgentScheduleClassification =
 
 /**
  * Estimate the minimum gap between firings of a 5-field cron, in minutes.
- * Minute/hour fields only (the day pattern can only widen the gap, so the
- * estimate is an upper bound on frequency — it errs toward approval-binding,
- * never away from it). Unparsable ⇒ undefined (the caller binds approval on
- * uncertainty).
+ * Issue #6482 — moved to src/services/scheduleFrequencyFloor.ts; see the
+ * re-export at the top of this module.
  */
-export function estimateCronMinGapMinutes(cron: string): number | undefined {
-  const fields = cron.trim().split(/\s+/).filter(Boolean);
-  if (fields.length !== 5) return undefined;
-  const parseField = (field: string, max: number): number | undefined => {
-    if (field === "*") return max + 1;
-    if (field.startsWith("*/")) {
-      const n = Number(field.slice(2));
-      if (!Number.isSafeInteger(n) || n <= 0 || n > max) return undefined;
-      return Math.floor((max + 1) / n);
-    }
-    const parts = field.split(",");
-    const values = new Set<number>();
-    for (const part of parts) {
-      if (part.includes("-")) {
-        const [lo, hi] = part.split("-").map(Number);
-        if (!Number.isSafeInteger(lo) || !Number.isSafeInteger(hi) || lo < 0 || hi > max || lo > hi) return undefined;
-        for (let v = lo; v <= hi; v++) values.add(v);
-      } else if (part.includes("/")) {
-        return undefined;
-      } else {
-        const v = Number(part);
-        if (!Number.isSafeInteger(v) || v < 0 || v > max) return undefined;
-        values.add(v);
-      }
-    }
-    return values.size;
-  };
-  const perHour = parseField(fields[0], 59);
-  const perDayHours = parseField(fields[1], 23);
-  if (perHour === undefined || perDayHours === undefined || perHour <= 0 || perDayHours <= 0) return undefined;
-  return 1440 / (perHour * perDayHours);
+
+/**
+ * Issue #6482 — the frequency floor as a hard refusal. A below-floor
+ * interval or cron (or an unparsable cron) is REFUSED with the coded
+ * outcome SCHEDULE_BELOW_FREQUENCY_FLOOR when the request arms work;
+ * it is never approval-bound any more (approval stays for the other
+ * consequential classes — external send and spend). Managing an
+ * already-armed schedule (pause/delete/trigger/list) is not an arm
+ * and is never refused on frequency: a legacy below-floor schedule
+ * must stay pausable and deletable. Resume IS an arm (it re-arms).
+ */
+export function frequencyFloorRefusal(
+  input: AgentScheduleClassifyInput,
+  floorSeconds: number,
+): string | undefined {
+  let timing: ScheduleFloorTiming | undefined;
+  if (typeof input.intervalSeconds === "number" && input.intervalSeconds > 0) {
+    timing = { type: "interval", intervalSeconds: input.intervalSeconds };
+  } else if (typeof input.cron === "string" && input.cron.trim()) {
+    timing = { type: "cron", cron: input.cron };
+  }
+  if (!timing) return undefined;
+  const refusal = refuseBelowFloorTiming(timing, floorSeconds);
+  return refusal.ok ? undefined : refusal.message;
 }
 
 /**
@@ -270,6 +273,7 @@ export function estimateCronMinGapMinutes(cron: string): number | undefined {
 export function classifyAgentScheduleRequest(
   input: AgentScheduleClassifyInput,
   config: AgentScheduleApprovalConfig = {},
+  opts?: { arming?: boolean },
 ): AgentScheduleClassification {
   if (input.kind === "sdk-callback") {
     if (typeof input.callback !== "string" || !input.callback.trim()) {
@@ -317,6 +321,25 @@ export function classifyAgentScheduleRequest(
     }
   }
 
+  // Issue #6482 — the frequency floor is a hard refusal on arming,
+  // never an approval reason: a below-floor arm is refused outright
+  // (approval stays for external send and spend). The floor is
+  // always defined — an unconfigured floor resolves to the
+  // fail-closed default (monthly 2,592,000s) — so there is no "no floor
+  // configured" approval leg any more. Non-arming evaluations
+  // (pause/delete/trigger/list of an already-armed schedule) skip
+  // the floor: a legacy below-floor schedule must stay manageable.
+  // The default is arming (the strict path): direct callers
+  // evaluating a new schedule get the refusal without opting in.
+  const arming = opts?.arming !== false;
+  if (arming) {
+    const floorSeconds = config.minIntervalSeconds ?? DEFAULT_SCHEDULE_MIN_INTERVAL_SECONDS;
+    const floorRefusal = frequencyFloorRefusal(input, floorSeconds);
+    if (floorRefusal !== undefined) {
+      return { schedulable: false, denialReason: floorRefusal };
+    }
+  }
+
   const approvalReasons: string[] = [];
   const isExternalSend =
     input.isExternalSend === true ||
@@ -328,23 +351,6 @@ export function classifyAgentScheduleRequest(
       approvalReasons.push("spend: a budget is carried and no budget threshold is configured (fail-closed)");
     } else if (input.budgetCents > config.budgetCentsThreshold) {
       approvalReasons.push(`spend: budget ${input.budgetCents}c exceeds the configured threshold ${config.budgetCentsThreshold}c`);
-    }
-  }
-  if (typeof input.intervalSeconds === "number" && input.intervalSeconds > 0) {
-    if (config.minIntervalSeconds === undefined) {
-      approvalReasons.push("high frequency: an interval is set and no frequency floor is configured (fail-closed)");
-    } else if (input.intervalSeconds < config.minIntervalSeconds) {
-      approvalReasons.push(`high frequency: interval ${input.intervalSeconds}s is below the configured floor ${config.minIntervalSeconds}s`);
-    }
-  }
-  if (typeof input.cron === "string" && input.cron.trim()) {
-    const gapMinutes = estimateCronMinGapMinutes(input.cron);
-    if (gapMinutes === undefined) {
-      approvalReasons.push("high frequency: the cron expression could not be parsed (fail-closed)");
-    } else if (config.minIntervalSeconds === undefined) {
-      approvalReasons.push("high frequency: a cron is set and no frequency floor is configured (fail-closed)");
-    } else if (gapMinutes * 60 < config.minIntervalSeconds) {
-      approvalReasons.push(`high frequency: cron fires about every ${gapMinutes}m, below the configured floor ${config.minIntervalSeconds}s`);
     }
   }
   return { schedulable: true, requiresApproval: approvalReasons.length > 0, approvalReasons };
@@ -733,11 +739,20 @@ export type AgentScheduleActionRequest =
       scheduleId: string;
     };
 
+/** Coded refusal outcomes for an agent schedule action (issue #6482 adds below-frequency-floor). */
+export type AgentScheduleRefusalCode =
+  | "denied"
+  | "approval-required"
+  | "below-frequency-floor"
+  | "not-found"
+  | "unsupported"
+  | "error";
+
 export type AgentScheduleActionResult =
   | { ok: true; scheduleId?: string; schedule?: unknown; pendingApprovalId?: string }
   | {
       ok: false;
-      code: "denied" | "approval-required" | "not-found" | "unsupported" | "error";
+      code: AgentScheduleRefusalCode;
       reason: string;
       pendingApprovalId?: string;
     };
@@ -863,6 +878,7 @@ export async function executeAgentScheduleAction(
   const deny = async (
     reason: string,
     scheduleId: string | null,
+    code: AgentScheduleRefusalCode = "denied",
   ): Promise<AgentScheduleActionResult> => {
     await recordOutcome("skipped", scheduleId, `agent ${principal.agentId} (${principal.login}) denied: ${reason}`);
     deps.audit("agent.schedule.denied", {
@@ -873,9 +889,17 @@ export async function executeAgentScheduleAction(
       principal: principal.login,
       scheduleId,
       reason,
+      ...(code !== "denied" ? { code } : {}),
     });
-    return { ok: false, code: "denied", reason };
+    return { ok: false, code, reason };
   };
+
+  // Issue #6482 — the floor applies to arming actions only (create,
+  // update, resume re-arms). Managing an already-armed schedule
+  // (pause/delete/trigger/list) never refuses on frequency.
+  const isArmingAction = action === "create" || action === "update" || action === "resume";
+  const classify = (input: AgentScheduleClassifyInput): AgentScheduleClassification =>
+    classifyAgentScheduleRequest(input, deps.config, { arming: isArmingAction });
 
   try {
     // --- Load the target for non-create actions (existence + ownership + classification inputs).
@@ -913,7 +937,7 @@ export async function executeAgentScheduleAction(
     let classification: AgentScheduleClassification;
     if (request.action === "create" && request.kind === "sdk") {
       const timing = request.timing;
-      classification = classifyAgentScheduleRequest(
+      classification = classify(
         {
           kind: "sdk-callback",
           callback: request.callback,
@@ -921,9 +945,7 @@ export async function executeAgentScheduleAction(
           intervalSeconds: timing.type === "interval" ? timing.intervalSeconds : undefined,
           cron: timing.type === "cron" ? timing.cron : undefined,
           isExternalSend: request.isExternalSend,
-        },
-        deps.config,
-      );
+        });
     } else if (request.action === "create" && request.kind === "workflow-stage") {
       // The stage must exist (and not be retired) before classification:
       // the classifier's external-send class is derived from the node,
@@ -939,7 +961,7 @@ export async function executeAgentScheduleAction(
         return deny(`Job '${request.jobId}' has no stage registry; nothing was scheduled.`, null);
       }
       const timing = request.timing;
-      classification = classifyAgentScheduleRequest(
+      classification = classify(
         {
           kind: "workflow-stage",
           jobId: request.jobId,
@@ -950,15 +972,11 @@ export async function executeAgentScheduleAction(
           isExternalSend:
             request.isExternalSend === true ||
             isExternalSendStage(stage.node as unknown as JobNodeConfig),
-        },
-        deps.config,
-      );
+        });
     } else if (request.action === "create" && request.kind === "goal") {
       const goal = request.goal as { operation?: unknown; budgetCents?: number };
-      classification = classifyAgentScheduleRequest(
-        { kind: "goal-operation", operation: typeof goal.operation === "string" ? goal.operation : undefined, budgetCents: goal.budgetCents },
-        deps.config,
-      );
+      classification = classify(
+        { kind: "goal-operation", operation: typeof goal.operation === "string" ? goal.operation : undefined, budgetCents: goal.budgetCents });
     } else if (request.action === "update" && request.kind === "workflow-stage") {
       // The REQUEST's timing is what will arm (falling back to the
       // target's); the external-send class comes from the target's
@@ -978,7 +996,7 @@ export async function executeAgentScheduleAction(
         }
       }
       const def = targetStage ? (targetStage.definition as Record<string, unknown>) : {};
-      classification = classifyAgentScheduleRequest(
+      classification = classify(
         {
           kind: "workflow-stage",
           jobId: typeof def.jobId === "string" ? def.jobId : "",
@@ -986,41 +1004,33 @@ export async function executeAgentScheduleAction(
           intervalSeconds: timing?.type === "interval" ? timing.intervalSeconds : undefined,
           cron: timing?.type === "cron" ? timing.cron : undefined,
           isExternalSend,
-        },
-        deps.config,
-      );
+        });
     } else if (request.action === "update" && request.kind === "goal") {
       const goal = request.goal as { operation?: unknown; budgetCents?: number };
-      classification = classifyAgentScheduleRequest(
-        { kind: "goal-operation", operation: typeof goal.operation === "string" ? goal.operation : undefined, budgetCents: goal.budgetCents },
-        deps.config,
-      );
+      classification = classify(
+        { kind: "goal-operation", operation: typeof goal.operation === "string" ? goal.operation : undefined, budgetCents: goal.budgetCents });
     } else if (request.action === "update" && request.kind === "sdk") {
       // The REQUEST's timing is what will arm: an update that tightens
       // the interval (or moves to a fast cron) is classified on the new
       // timing, falling back to the target's when the update keeps it.
       const updateReq = request as Extract<AgentScheduleActionRequest, { action: "update"; kind: "sdk" }>;
       const timing = updateReq.timing ?? (targetSdk ? timingOfSdkSchedule(targetSdk) : undefined);
-      classification = classifyAgentScheduleRequest(
+      classification = classify(
         {
           kind: "sdk-callback",
           callback: targetSdk ? targetSdk.callback : "",
           intervalSeconds: timing?.type === "interval" ? timing.intervalSeconds : undefined,
           cron: timing?.type === "cron" ? timing.cron : undefined,
-        },
-        deps.config,
-      );
+        });
     } else if (kind === "sdk" && targetSdk) {
       const timing = timingOfSdkSchedule(targetSdk);
-      classification = classifyAgentScheduleRequest(
+      classification = classify(
         {
           kind: "sdk-callback",
           callback: targetSdk.callback,
           intervalSeconds: timing?.type === "interval" ? timing.intervalSeconds : undefined,
           cron: timing?.type === "cron" ? timing.cron : undefined,
-        },
-        deps.config,
-      );
+        });
     } else if (kind === "workflow-stage" && targetStage) {
       const timing = timingOfStageSchedule(targetStage);
       let isExternalSend: boolean | undefined;
@@ -1041,7 +1051,7 @@ export async function executeAgentScheduleAction(
         }
       }
       const def = targetStage.definition as Record<string, unknown>;
-      classification = classifyAgentScheduleRequest(
+      classification = classify(
         {
           kind: "workflow-stage",
           jobId: typeof def.jobId === "string" ? def.jobId : "",
@@ -1049,18 +1059,14 @@ export async function executeAgentScheduleAction(
           intervalSeconds: timing?.type === "interval" ? timing.intervalSeconds : undefined,
           cron: timing?.type === "cron" ? timing.cron : undefined,
           isExternalSend,
-        },
-        deps.config,
-      );
+        });
     } else if (kind === "goal" && targetGoal) {
-      classification = classifyAgentScheduleRequest(
+      classification = classify(
         {
           kind: "goal-operation",
           operation: typeof targetGoal.operation === "string" ? targetGoal.operation : undefined,
           budgetCents: typeof targetGoal.budgetCents === "number" ? targetGoal.budgetCents : undefined,
-        },
-        deps.config,
-      );
+        });
     } else {
       // list: no classification needed (read-only).
       classification = { schedulable: true, requiresApproval: false, approvalReasons: [] };
@@ -1068,7 +1074,15 @@ export async function executeAgentScheduleAction(
     if (!classification.schedulable) {
       const scheduleId =
         action !== "create" && action !== "list" ? (request as { scheduleId: string }).scheduleId : null;
-      return deny(classification.denialReason, scheduleId);
+      // Issue #6482 — a floor refusal is a coded outcome, not a plain
+      // denial: it surfaces as "below-frequency-floor" so callers can
+      // tell a refused arm from a denied one (and so an approved
+      // pending id, which only skips the approval gate below, can
+      // never arm a below-floor schedule).
+      const code = classification.denialReason.includes(SCHEDULE_BELOW_FREQUENCY_FLOOR)
+        ? "below-frequency-floor"
+        : "denied";
+      return deny(classification.denialReason, scheduleId, code);
     }
 
     // --- PDP.
@@ -1390,6 +1404,78 @@ export async function executeAgentScheduleAction(
  * ===================================================================== */
 
 /**
+ * Issue #6482 — paused by default: create an agent SDK schedule as
+ * a paused unified record, never arming the SDK. The record carries
+ * the full timing + payload, so an explicit resume (the management
+ * service) arms exactly what creation recorded. Returns the record
+ * as an AgentScheduleItem (the executor's shape). Fail-closed: with
+ * no store there is nowhere to record a paused schedule, so
+ * creation is refused instead of silently arming active.
+ */
+export async function createPausedAgentSdkScheduleRecord(
+  store: UnifiedStoreLike | undefined,
+  input: { timing: AgentSdkTiming; callback: string; payload?: unknown },
+  nowIso: string,
+): Promise<AgentScheduleItem> {
+  if (!store) {
+    throw new Error(
+      "No schedule store is available: a schedule is created paused, and a paused schedule cannot be recorded without one.",
+    );
+  }
+  const owner = ownerOfSdkSchedule({ payload: input.payload } as AgentScheduleItem) ?? null;
+  const record = pausedScreenScheduleToRecord(
+    {
+      callback: input.callback,
+      type: input.timing.type,
+      payload: input.payload,
+      ...(input.timing.type === "cron" ? { cron: input.timing.cron } : {}),
+      ...(input.timing.type === "interval" ? { intervalSeconds: input.timing.intervalSeconds } : {}),
+      ...(input.timing.type === "scheduled" ? { time: input.timing.time } : {}),
+      ...(input.timing.type === "delayed" ? { delayInSeconds: input.timing.delayInSeconds } : {}),
+      ownerLogin: owner,
+    },
+    nowIso,
+  );
+  await store.save(record);
+  return {
+    id: record.id,
+    callback: input.callback,
+    type: input.timing.type,
+    ...(input.timing.type === "cron" ? { cron: input.timing.cron } : {}),
+    ...(input.timing.type === "interval" ? { intervalSeconds: input.timing.intervalSeconds } : {}),
+    ...(input.timing.type === "scheduled" ? { time: input.timing.time } : {}),
+    ...(input.timing.type === "delayed" ? { delayInSeconds: input.timing.delayInSeconds } : {}),
+    ...(input.payload !== undefined ? { payload: input.payload } : {}),
+  };
+}
+
+/**
+ * Issue #6482 — a stored unified record as an AgentScheduleItem, so
+ * the SDK adapters' list/get see paused schedules (which have no
+ * live alarm) as well as armed ones. The timing comes from the
+ * record's definition, the shape the management service maintains.
+ */
+export function unifiedRecordToAgentSdkScheduleItem(
+  record: UnifiedScheduleRecord,
+): AgentScheduleItem {
+  const def = record.definition as Record<string, unknown>;
+  const type =
+    def.type === "cron" || def.type === "interval" || def.type === "scheduled" || def.type === "delayed"
+      ? def.type
+      : "interval";
+  return {
+    id: record.id,
+    callback: typeof record.callback === "string" ? record.callback : String(def.callback ?? ""),
+    type,
+    ...(typeof def.cron === "string" ? { cron: def.cron } : {}),
+    ...(typeof def.intervalSeconds === "number" ? { intervalSeconds: def.intervalSeconds } : {}),
+    ...(typeof def.time === "number" ? { time: def.time } : {}),
+    ...(typeof def.delayInSeconds === "number" ? { delayInSeconds: def.delayInSeconds } : {}),
+    ...(def.payload !== undefined ? { payload: def.payload } : {}),
+  };
+}
+
+/**
  * Issue #3122 (store integration, #3123) — adopt an armed SDK alarm
  * into the unified store. The #3123 T2-route precedent (adoptRecord
  * in routes/schedules.ts): the record id is the SDK alarm id;
@@ -1438,36 +1524,58 @@ export async function removeAgentSdkScheduleRecord(
  * Adapt the NLQ scheduling port to the capability's SDK adapter. The
  * port implements only create/list/cancel — pause/resume/trigger/update
  * are absent, so the executor returns `unsupported` for those actions
- * on this channel (never a silent no-op). When a unified store is
- * supplied, each armed alarm is adopted into it (record id = alarm
- * id) and each cancellation removes its record, so capability-created
- * schedules live in the one store (#3123) instead of beside it.
+ * on this channel (never a silent no-op). Issue #6482 — paused by
+ * default: create records a paused schedule in the unified store and
+ * never arms the port (an explicit resume is the only activation);
+ * with no store, create is refused fail-closed. Cancellation removes
+ * the record, so capability-created schedules live in the one store
+ * (#3123) instead of beside it.
  */
 export function nlqPortToAgentSdkAdapter(
   port: NLQSchedulingPort,
   store?: UnifiedStoreLike,
 ): AgentSdkScheduleAdapter {
+  // Issue #6482 — paused schedules have no live alarm, so list/get
+  // union the port's live alarms with the store's records (a live
+  // alarm wins when both name the same id).
+  const storedItems = async (): Promise<AgentScheduleItem[]> => {
+    if (!store) return [];
+    const records = await store.list();
+    return records
+      .filter((record) => record.kind === "screen")
+      .map((record) => unifiedRecordToAgentSdkScheduleItem(record));
+  };
   return {
-    list: () => port.listSchedules(),
-    get: async (id) => (await port.listSchedules()).find((item) => item.id === id),
-    create: async ({ timing, callback, payload }) => {
-      let armed: AgentScheduleItem;
-      if (timing.type === "interval") {
-        armed = await port.scheduleEvery(timing.intervalSeconds, callback, payload);
-      } else if (timing.type === "cron") {
-        armed = await port.schedule(timing.cron, callback, payload, { idempotent: true });
-      } else if (timing.type === "scheduled") {
-        armed = await port.schedule(new Date(timing.time * 1000), callback, payload);
-      } else {
-        armed = await port.schedule(timing.delayInSeconds, callback, payload);
-      }
-      await adoptAgentSdkScheduleRecord(store, armed, new Date().toISOString());
-      return armed;
+    list: async () => {
+      const live = await port.listSchedules();
+      const stored = await storedItems();
+      const seen = new Set(live.map((item) => item.id));
+      return [...live, ...stored.filter((item) => !seen.has(item.id))];
     },
+    get: async (id) => {
+      const live = (await port.listSchedules()).find((item) => item.id === id);
+      if (live) return live;
+      const stored = await storedItems();
+      return stored.find((item) => item.id === id);
+    },
+    create: async ({ timing, callback, payload }) =>
+      createPausedAgentSdkScheduleRecord(store, { timing, callback, payload }, new Date().toISOString()),
     cancel: async (id) => {
       const cancelled = await port.cancelSchedule(id);
-      if (cancelled) await removeAgentSdkScheduleRecord(store, id);
-      return cancelled;
+      if (cancelled) {
+        await removeAgentSdkScheduleRecord(store, id);
+        return true;
+      }
+      // Issue #6482 — a paused schedule has no live alarm to cancel:
+      // deleting it removes the record instead.
+      if (store) {
+        const existing = await store.get(id);
+        if (existing) {
+          await removeAgentSdkScheduleRecord(store, id);
+          return true;
+        }
+      }
+      return false;
     },
   };
 }
@@ -1488,9 +1596,16 @@ export function createAgentScheduleExecutorDepsForDo(
 ): AgentScheduleExecutorDeps {
   const pdpDeps = createAgentSchedulePdpDeps(env);
   const ledgerStore = new SqlJobRunRecordStore(sql);
+  // Issue #6482 — the executor's floor is the EFFECTIVE floor
+  // (managed setting > env carrier > fail-closed default, monthly),
+  // resolved from this DO's own store, so a floor set in the
+  // schedules home governs agent arms without a redeploy. The
+  // budget threshold keeps the env-carrier value.
+  const agentSchedule = resolveEnvironmentConfig(env).agentSchedule;
+  const effectiveFloor = resolveEffectiveScheduleFloor(sql, env);
   return {
     pdp: (input) => evaluateAgentSchedulePdp(pdpDeps, input),
-    config: resolveEnvironmentConfig(env).agentSchedule,
+    config: { ...agentSchedule, minIntervalSeconds: effectiveFloor.seconds },
     nowMs: () => Date.now(),
     nowIso: () => new Date().toISOString(),
     // Issue #5085 (S6): the one write entry — agent-schedule action

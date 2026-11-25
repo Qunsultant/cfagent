@@ -806,6 +806,92 @@ accident (the #3741 scheduling alignment, recorded in the
   not gain a second path for composed workflows. One scheduling
   plane — a §1 foundation.
 
+### 5.4 Runaway controls: the floor, the kill-switch, the inventory (#6482)
+
+A runaway alarm loop — a schedule armed at a 1–2s interval, as the
+SCREENER_AGENT loop was — is stopped through configuration, not
+through code changes or a redeploy. Three controls, one seam each:
+
+- **The floor (minimum schedule interval).** No arm may fire more
+  often than the floor. The default is **2,592,000s (30 days,
+  monthly)** — ruled by the owner 2026-11-24, replacing the earlier
+  3600s draft — fail-closed: with nothing configured, a 1s arm, an
+  hourly arm, and a daily arm are all refused. An arm below the
+  floor is refused with the coded outcome
+  `SCHEDULE_BELOW_FREQUENCY_FLOOR` (HTTP 400 on the REST create
+  route, `below-frequency-floor` from the capability), never
+  silently slowed and never approval-bound — approval cannot
+  override the floor, and the sub-daily opt-in cannot override it
+  either. Precedence: **managed setting > env carrier > default**.
+  The managed setting is `schedule.minIntervalSeconds` (mas_settings);
+  the env carrier is `AGENT_SCHEDULE_MIN_INTERVAL_SECONDS`;
+  the default is 2,592,000s (`src/config/scheduleFrequencyFloor.ts`).
+  The value is ruled by the owner; the mechanism (externalized +
+  UX-managed) is not optional. The cron estimator is day-aware
+  (it enumerates real occurrences over five years and takes the
+  smallest gap), so a yearly cron passes while a daily cron is
+  refused; a 1st-of-month cron is refused by design, because its
+  tightest gap is February's 28 days, below the 30-day floor —
+  monthly cadence uses the 2,592,000s interval, not a cron.
+- **Paused by default.** Every schedule is created **paused** —
+  even the first time, including system / sweep / watchdog
+  schedules. Creation saves a paused unified record and never arms
+  the SDK; only an explicit resume activates it
+  (`resumeUnifiedSchedule` re-arms through the alarms port, which
+  re-checks the floor — a paused sub-monthly schedule cannot
+  resume). The paused state already existed (pause/resume routes,
+  bulk pause/resume, `state: "paused"` rows); this slice makes it
+  the initial state. Goal schedules are the one exception in this
+  slice: they are created enabled via `ScheduledAgent.addGoal`, a
+  separate surface — bringing goals under paused-by-default is
+  follow-up work, not a silent exemption.
+- **Idle by default (the governing principle).** No agent runs
+  unless it needs to process a request, and after processing it
+  goes idle. What this slice enforces: no new arm below monthly
+  (the floor on every arming path); the kill-switch halts all
+  scheduled firings; the firing-rate alert observes runaway rates;
+  resume/re-arm below the floor is refused. What still re-arms
+  (stated honestly, not claimed otherwise): SDK `scheduleEvery`
+  alarms re-fire on their intervals regardless of work; already-armed
+  sub-monthly alarms keep firing until paused, deleted, or
+  kill-switched (the floor governs arms, not existing alarms);
+  the three code-armed system duties (900s sweeps, 1800s heartbeat)
+  call `scheduleEvery` directly and re-fire on fixed intervals.
+  Follow-up: cancel-on-empty (a firing that finds no pending work
+  cancels/pauses its own schedule) and arm-on-enqueue.
+- **The firing kill-switch.** `schedule.firingEnabled`
+  (managed setting; env carrier `SCHEDULE_FIRING_ENABLED`; default
+  **ON** — deploying the slice halts nothing). When OFF, every
+  scheduled firing is halted at the one choke point,
+  `recordScheduleCallbackRun` (`src/agents/orchestrator/scheduleCallbackRunRecords.ts`),
+  which every schedule callback passes through: the firing is
+  recorded as a skipped ledger row naming the halt, and the
+  callback never runs. Manual triggers are never halted. The
+  heartbeat watchdog (#4234) is out of scope and is not gated.
+- **The firing-rate alert.** A configured threshold
+  (`SCHEDULE_FIRING_RATE_ALERT_THRESHOLD`, default 120 firings;
+  window `SCHEDULE_FIRING_RATE_ALERT_WINDOW_MINUTES`, default 60)
+  is evaluated after real runs only, never after halted firings,
+  and throttled to once per window. A breach emits the coded
+  observation `schedule.firing_rate_exceeded` through the existing
+  audit + structured-log seam — no new notification mechanism.
+  The threshold and window are working defaults, not rulings.
+
+**Where it is managed.** The schedules home, `?tab=schedules&view=flags`
+— the runaway controls section (`ScheduleControlsPanel`) below the
+channel flags: the floor (read + set + clear the managed value),
+the kill-switch (read + set), the firing-rate line, and the
+armed-schedule inventory (callback + interval/cron + owner +
+state, from GET /api/schedules/controls). The same routes serve
+both: GET/POST `/api/schedules/controls` (platform-admin only for
+writes). Non-admins see the state read-only.
+
+**The R2 driver.** The schedulable R2-listing driver is the corpus
+sync (`src/services/corpusSync.ts`, paginated `bucket.list({prefix:
+"knowledge/"})` per sync) — it is governed by the floor +
+kill-switch because it is armed as a schedule. `ListMultipartUploads`
+has no call site in `src/`; it is not claimed as a driver.
+
 ## 6. Queues (surveyed)
 
 Three distinct mechanisms carry queued work today. They are not

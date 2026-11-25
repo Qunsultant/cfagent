@@ -536,6 +536,13 @@
  * before /tenant/settings/auto-refresh) — bringing the pinned
  * inventory to 500 entries (498 on current main); the
  * delegation sequence is unchanged (same handler, same position).
+ *
+ * Issue #6482 added four — GET /schedules/controls and POST
+ * /schedules/controls (in handleSchedulesRoutes, after the flags
+ * read, before the cancel-all branch; bare + /api forms) —
+ * bringing the pinned inventory to 510 entries (506 in this file
+ * before the change); the delegation sequence is unchanged (same
+ * handler, same position).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -1182,6 +1189,13 @@ const EXPECTED_INVENTORY = [
   "handleSchedulesRoutes :: endsWith(\"/api/schedules/flags\")",
   "handleSchedulesRoutes :: endsWith(\"/schedules/flags\")",
   "handleSchedulesRoutes :: endsWith(\"/api/schedules/flags\")",
+  // Issue #6482 — the runaway controls surface (in
+  // handleSchedulesRoutes, after the flags read, before the
+  // cancel-all branch): GET then POST, bare + /api forms.
+  "handleSchedulesRoutes :: endsWith(\"/schedules/controls\")",
+  "handleSchedulesRoutes :: endsWith(\"/api/schedules/controls\")",
+  "handleSchedulesRoutes :: endsWith(\"/schedules/controls\")",
+  "handleSchedulesRoutes :: endsWith(\"/api/schedules/controls\")",
   "handleSchedulesRoutes :: endsWith(\"/schedules/cancel-all\")",
   "handleSchedulesRoutes :: === \"/schedules/runs\"",
   // Issue #3121 Phase 2 (#3123) — the ledger record route, placed

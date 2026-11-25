@@ -109,6 +109,18 @@ import {
   applyScheduleChannelToggle,
   resolveScheduleChannelFlagsView,
 } from "../../features/scheduleChannelFlags";
+import { DEFAULT_SCHEDULE_MIN_INTERVAL_SECONDS } from "../../config/scheduleFrequencyFloor";
+import {
+  SCHEDULE_BELOW_FREQUENCY_FLOOR,
+  isBelowFrequencyFloorError,
+  refuseBelowFloorTiming,
+  type ScheduleFloorTiming,
+} from "../../services/scheduleFrequencyFloor";
+import {
+  applyScheduleControlsPatch,
+  resolveEffectiveScheduleFloor,
+  resolveScheduleControlsView,
+} from "../../services/scheduleControls";
 import { checkPlatformPermission } from "../../security/iaaaPdpSeam";
 import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
 import { createKvMembershipStore } from "../../security/iaaaMembershipStore";
@@ -142,6 +154,7 @@ import {
   listUnifiedScheduleItems,
   pauseSchedulesInScope,
   pauseUnifiedSchedule,
+  pausedScreenScheduleToRecord,
   resumeSchedulesInScope,
   resumeUnifiedSchedule,
   screenScheduleToRecord,
@@ -197,15 +210,16 @@ import { resolveActorAttribution } from "../../security/backgroundAttribution";
 import type { DatabaseORM } from "../../orm";
 import type { AgentName, AgentScheduleItem, Env } from "../../types";
 import {
-  adoptAgentSdkScheduleRecord,
   agentScheduleProvenance,
   createAgentScheduleExecutorDepsForDo,
   createAgentSchedulePdpDeps,
+  createPausedAgentSdkScheduleRecord,
   decidePendingScheduleApproval,
   evaluateAgentSchedulePdp,
   executeAgentScheduleAction,
   removeAgentSdkScheduleRecord,
   resolvePendingScheduleApproval,
+  unifiedRecordToAgentSdkScheduleItem,
   type AgentScheduleActionResult,
   type AgentSdkScheduleAdapter,
   type AgentSdkTiming,
@@ -379,12 +393,22 @@ export function makeRunScheduleCallback(
  * (list/get/cancel/arm) over the class's Agent methods. The routes
  * and the A2A capability instance share it, so the two never drift
  * into different arming behavior.
+ *
+ * Issue #6482 — the port is also a floor enforcement point: arm()
+ * refuses a below-floor interval or cron (coded
+ * SCHEDULE_BELOW_FREQUENCY_FLOOR) before touching the SDK, so
+ * every arm through the unified management service and the stage
+ * adapter goes through the one hard-reject helper. The floor
+ * resolves per arm through the caller's resolver (managed setting
+ * > env carrier > default (monthly 2,592,000s)); with no resolver the fail-closed
+ * default applies. One-shot timings pass through.
  */
 export function makeScheduleAlarmsPort(
   scheduling: Pick<
     SchedulesRouteContext,
     "listSchedules" | "getScheduleById" | "cancelSchedule" | "schedule" | "scheduleEvery"
   >,
+  opts?: { resolveFloor?: () => number },
 ): ScheduleAlarms {
   return {
     list: () =>
@@ -396,17 +420,29 @@ export function makeScheduleAlarmsPort(
         .getScheduleById(id)
         .then((s) => (s ? (s as unknown as ScheduleAlarmLike) : undefined)),
     cancel: (id) => scheduling.cancelSchedule(id),
-    arm: (timing, callback, payload) => {
+    arm: async (timing, callback, payload, options) => {
+      const floorSeconds = opts?.resolveFloor?.() ?? DEFAULT_SCHEDULE_MIN_INTERVAL_SECONDS;
+      const timingForFloor: ScheduleFloorTiming =
+        timing.type === "cron"
+          ? { type: "cron", cron: timing.cron }
+          : timing.type === "interval"
+            ? { type: "interval", intervalSeconds: timing.intervalSeconds }
+            : { type: "scheduled", time: timing.time };
+      const refusal = refuseBelowFloorTiming(timingForFloor, floorSeconds);
+      if (!refusal.ok) throw refusal.error;
+      // Issue #6482 — a recorded idempotent opt-out rides the SDK
+      // arm (default idempotent: true); interval arms take no options.
+      const idempotent = options?.idempotent ?? true;
       if (timing.type === "cron")
         return scheduling
-          .schedule(timing.cron, callback, payload, { idempotent: true })
+          .schedule(timing.cron, callback, payload, { idempotent })
           .then((s) => s as unknown as ScheduleAlarmLike);
       if (timing.type === "interval")
         return scheduling
           .scheduleEvery(timing.intervalSeconds, callback, payload)
           .then((s) => s as unknown as ScheduleAlarmLike);
       return scheduling
-        .schedule(new Date(timing.time * 1000), callback, payload)
+        .schedule(new Date(timing.time * 1000), callback, payload, { idempotent })
         .then((s) => s as unknown as ScheduleAlarmLike);
     },
   };
@@ -738,7 +774,13 @@ export async function handleSchedulesRoutes(
         sql: ctx.agentCtx.storage.sql,
         storage: ctx.agentCtx.storage,
       }).unifiedSchedulesSync;
-    const alarms: ScheduleAlarms = makeScheduleAlarmsPort(ctx);
+    const alarms: ScheduleAlarms = makeScheduleAlarmsPort(ctx, {
+      // Issue #6482 — the port resolves the effective floor per arm
+      // (managed setting > env carrier > default), so a floor set in
+      // the schedules home governs unified-management arms without a
+      // redeploy.
+      resolveFloor: () => resolveEffectiveScheduleFloor(ctx.agentCtx.storage.sql, ctx.env).seconds,
+    });
     // Issue #4352 — the ticker push is schedulable like any other job. Its
     // record lives in the TickerAgent's own DO (ADR 0029 D-0), so pause /
     // resume / cadence go through that host's typed RPC, not the local store.
@@ -860,6 +902,9 @@ export async function handleSchedulesRoutes(
               (type, agent, payload) => ctx.audit(type, agent, payload),
               "schedule.ledger_write_failed",
             ),
+            // Issue #6482 — the Worker env for the kill-switch +
+            // firing-rate resolution at the one choke point.
+            env: ctx.env,
           },
         );
       }
@@ -1328,6 +1373,68 @@ export async function handleSchedulesRoutes(
       const view = await resolveScheduleChannelFlagsView(port);
       return Response.json({ ...view, canToggle: true, managedBy });
     }
+
+    // Issue #6482 — the schedules-home controls surface. GET reads the
+    // managed schedule controls live (effective floor + kill-switch +
+    // firing rate + armed-schedule inventory); any caller may read,
+    // canToggle is true only for a platform admin. POST applies one
+    // controls change for a platform admin through the managed store
+    // (mas_settings): the floor and the kill-switch are managed
+    // settings, never env-only or dashboard-only. Both blocks sit
+    // before the get-by-id branch, which would otherwise swallow
+    // /schedules/controls as an id.
+    if (request.method === "GET" && (path.endsWith("/schedules/controls") || path.endsWith("/api/schedules/controls"))) {
+      try {
+        const items = await listUnifiedScheduleItems({ store: unifiedStore(), alarms });
+        const view = resolveScheduleControlsView(ctx.agentCtx.storage.sql, ctx.env, items);
+        const caller = await resolveScheduleFlagsCaller(request, ctx);
+        return Response.json({ ...view, canToggle: caller.kind === "admin" });
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Failed to read schedule controls" }, { status: 500 });
+      }
+    }
+    if (request.method === "POST" && (path.endsWith("/schedules/controls") || path.endsWith("/api/schedules/controls"))) {
+      const caller = await resolveScheduleFlagsCaller(request, ctx);
+      if (caller.kind === "unauthenticated") {
+        return Response.json({ error: "Unauthorized: a signed-in session is required." }, { status: 401 });
+      }
+      if (caller.kind !== "admin") {
+        return Response.json({ error: caller.reason }, { status: 403 });
+      }
+      const body = (await request.json().catch(() => null)) as unknown;
+      const patch = (body ?? {}) as { minIntervalSeconds?: unknown; firingEnabled?: unknown };
+      const hasFloor = patch.minIntervalSeconds !== undefined;
+      const hasFiring = patch.firingEnabled !== undefined;
+      if (!hasFloor && !hasFiring) {
+        return Response.json(
+          { error: "A minIntervalSeconds or firingEnabled value is required.", code: "INVALID_CONTROLS" },
+          { status: 400 },
+        );
+      }
+      const applied = applyScheduleControlsPatch(
+        ctx.agentCtx.storage.sql,
+        {
+          ...(hasFloor ? { minIntervalSeconds: patch.minIntervalSeconds as never } : {}),
+          ...(hasFiring ? { firingEnabled: patch.firingEnabled as never } : {}),
+        },
+        new Date().toISOString(),
+      );
+      if (!applied.ok) {
+        return Response.json({ error: applied.message, code: applied.code }, { status: 400 });
+      }
+      ctx.audit("schedule.controls-changed", "orchestrator", {
+        ...(applied.changed.minIntervalSeconds !== undefined
+          ? { minIntervalSeconds: applied.changed.minIntervalSeconds }
+          : {}),
+        ...(applied.changed.firingEnabled !== undefined
+          ? { firingEnabled: applied.changed.firingEnabled }
+          : {}),
+        changedBy: caller.login,
+      });
+      const items = await listUnifiedScheduleItems({ store: unifiedStore(), alarms });
+      const view = resolveScheduleControlsView(ctx.agentCtx.storage.sql, ctx.env, items);
+      return Response.json({ ...view, canToggle: true });
+    }
     const approvalsMatch = path.match(/\/schedules\/approvals\/([^/]+)\/(approve|reject)$/);
     if (request.method === "POST" && approvalsMatch) {
       const approvalId = (() => {
@@ -1426,27 +1533,49 @@ export async function handleSchedulesRoutes(
         }
         const toItem = (s: unknown): AgentScheduleItem => s as unknown as AgentScheduleItem;
         const sdkAdapter: AgentSdkScheduleAdapter = {
-          list: async () => (await ctx.listSchedules()).map(toItem),
+          // Issue #6482 — paused schedules have no live alarm, so
+          // list/get union the live alarms with the store's records
+          // (a live alarm wins when both name the same id).
+          list: async () => {
+            const live = (await ctx.listSchedules()).map(toItem);
+            const stored = unifiedStore()
+              .list()
+              .filter((record) => record.kind === "screen")
+              .map((record) => unifiedRecordToAgentSdkScheduleItem(record));
+            const seen = new Set(live.map((item) => item.id));
+            return [...live, ...stored.filter((item) => !seen.has(item.id))];
+          },
           get: async (id) => {
             const found = await ctx.getScheduleById(id);
-            return found === undefined ? undefined : toItem(found);
+            if (found !== undefined) return toItem(found);
+            const record = unifiedStore().get(id);
+            return record && record.kind === "screen"
+              ? unifiedRecordToAgentSdkScheduleItem(record)
+              : undefined;
           },
-          create: async ({ timing, callback, payload }) => {
-            let armed: AgentScheduleItem;
-            if (timing.type === "cron") armed = toItem(await ctx.schedule(timing.cron, callback, payload, { idempotent: true }));
-            else if (timing.type === "interval") armed = toItem(await ctx.scheduleEvery(timing.intervalSeconds, callback, payload));
-            else if (timing.type === "scheduled") armed = toItem(await ctx.schedule(new Date(timing.time * 1000), callback, payload));
-            else armed = toItem(await ctx.schedule(timing.delayInSeconds, callback, payload));
-            // Issue #3122 (store integration, #3123): the approved arming
-            // adopts its record into the unified store (record id = alarm
-            // id), so an approved schedule lives in the one store.
-            await adoptAgentSdkScheduleRecord(unifiedStore(), armed, new Date().toISOString());
-            return armed;
-          },
+          // Issue #6482 — paused by default: an approved create
+          // records a paused schedule and never arms the SDK; an
+          // explicit resume is the only activation.
+          create: async ({ timing, callback, payload }) =>
+            createPausedAgentSdkScheduleRecord(
+              unifiedStore(),
+              { timing, callback, payload },
+              new Date().toISOString(),
+            ),
           cancel: async (id) => {
             const cancelled = await ctx.cancelSchedule(id);
-            if (cancelled) await removeAgentSdkScheduleRecord(unifiedStore(), id);
-            return cancelled;
+            if (cancelled) {
+              await removeAgentSdkScheduleRecord(unifiedStore(), id);
+              return true;
+            }
+            // Issue #6482 — a paused schedule has no live alarm to
+            // cancel: deleting it removes the record instead.
+            const existing = unifiedStore().get(id);
+            if (existing) {
+              await removeAgentSdkScheduleRecord(unifiedStore(), id);
+              return true;
+            }
+            return false;
           },
         };
         const capabilityDeps = createAgentScheduleExecutorDepsForDo(
@@ -1810,6 +1939,12 @@ export async function handleSchedulesRoutes(
         ctx.audit("schedule.resumed", "orchestrator", { scheduleId, newScheduleId: result.alarm?.id, callback: result.record.callback });
         return Response.json({ success: true, previousId: result.previousId, schedule: result.alarm });
       } catch (err: any) {
+        // Issue #6482 — a floor refusal from the re-arm is a client
+        // error (400 with the code), not a 500: the requested cadence
+        // is below the floor.
+        if (isBelowFrequencyFloorError(err)) {
+          return Response.json({ error: err.message, code: SCHEDULE_BELOW_FREQUENCY_FLOOR }, { status: 400 });
+        }
         return Response.json({ error: err.message || "Failed to resume schedule" }, { status: 500 });
       }
     }
@@ -1900,6 +2035,11 @@ export async function handleSchedulesRoutes(
         ctx.audit("schedule.updated", "orchestrator", { scheduleId, callback: result.record.callback, paused: true });
         return Response.json({ success: true, schedule: unifiedRecordToListItem(result.record) });
       } catch (err: any) {
+        // Issue #6482 — a floor refusal from the re-arm is a client
+        // error (400 with the code), not a 500.
+        if (isBelowFrequencyFloorError(err)) {
+          return Response.json({ success: false, error: err.message, code: SCHEDULE_BELOW_FREQUENCY_FLOOR }, { status: 400 });
+        }
         return Response.json({ error: err.message || "Failed to update schedule" }, { status: 500 });
       }
     }
@@ -1962,6 +2102,11 @@ export async function handleSchedulesRoutes(
         });
         return Response.json({ success: true, schedule: unifiedRecordToListItem(created) });
       } catch (err: any) {
+        // Issue #6482 — a floor refusal from the stage adapter's arm
+        // is a client error (400 with the code), not a 500.
+        if (isBelowFrequencyFloorError(err)) {
+          return Response.json({ error: err.message, code: SCHEDULE_BELOW_FREQUENCY_FLOOR }, { status: 400 });
+        }
         return Response.json({ error: err.message || "Failed to create stage-schedule" }, { status: 500 });
       }
     }
@@ -1970,7 +2115,7 @@ export async function handleSchedulesRoutes(
     if ((path.endsWith("/schedules/create") || (path.endsWith("/schedules") && request.method === "POST"))) {
       try {
         const body = (await request.json().catch(() => ({}))) as any;
-        const { scheduleType, callback, payload, delayInSeconds, intervalSeconds, cron, date } = body;
+        const { scheduleType, callback, payload, delayInSeconds, intervalSeconds, cron, date, idempotent } = body;
 
         if (!callback) {
           return Response.json({ error: "Callback method name is required" }, { status: 400 });
@@ -2016,6 +2161,29 @@ export async function handleSchedulesRoutes(
         if (scheduleType === "interval" && intervalSeconds) {
           if (isSubDailyInterval(Number(intervalSeconds)) && !subDailyOptIn) {
             return Response.json({ success: false, error: subDailyOptInError }, { status: 400 });
+          }
+        }
+
+        // Issue #6482 — the frequency floor is a hard refusal at arm
+        // time, AFTER the sub-daily gate (a missing opt-in still
+        // reports the opt-in error first) and BEFORE any identity,
+        // credential, duplicate, or arming work, so a refused create
+        // arms nothing. The sub-daily opt-in does NOT override the
+        // floor: a 1-second interval with the opt-in is still refused.
+        const floorSeconds = resolveEffectiveScheduleFloor(ctx.agentCtx.storage.sql, ctx.env).seconds;
+        const floorTiming: ScheduleFloorTiming | undefined =
+          scheduleType === "interval" && intervalSeconds
+            ? { type: "interval", intervalSeconds: Number(intervalSeconds) }
+            : scheduleType === "cron" && cron
+              ? { type: "cron", cron: String(cron).trim() }
+              : undefined;
+        if (floorTiming) {
+          const floorRefusal = refuseBelowFloorTiming(floorTiming, floorSeconds);
+          if (!floorRefusal.ok) {
+            return Response.json(
+              { success: false, error: floorRefusal.message, code: SCHEDULE_BELOW_FREQUENCY_FLOOR },
+              { status: 400 },
+            );
           }
         }
 
@@ -2317,17 +2485,17 @@ export async function handleSchedulesRoutes(
 
         // No fabricated success (#111): this route never invents a
         // schedule id or reports success for a schedule that does not
-        // exist. Issue #108: the calls below use the typed Agents SDK
-        // API directly — schedule/scheduleEvery are typed members of
-        // the Agent base class, so the old missing-method guard is
-        // gone; if a typed call throws, the catch below returns the
-        // same honest 503 {success:false} shape.
+        // exist. Issue #6482 — paused by default: creation saves a
+        // paused unified record and never arms the SDK, so nothing
+        // can fire until an explicit resume re-arms it.
         // Issue #2071: creation is idempotent. A duplicate submit (double
         // click, retried request) returns the schedule that already exists
-        // instead of arming a second identical one — interval schedules are
-        // not idempotent at the SDK layer, which is how the page ended up
-        // showing the same schedule twice.
+        // instead of creating a second identical one. A paused record
+        // has no live alarm, so the duplicate check consults the
+        // store as well as the live alarms — otherwise the second
+        // submit would mint a second paused row for the same schedule.
         let duplicate: Schedule<unknown> | undefined;
+        let duplicateRecord: ReturnType<typeof pausedScreenScheduleToRecord> | undefined;
         try {
           duplicate = findDuplicateSchedule(
             (await ctx.listSchedules()) as unknown as Record<string, any>[],
@@ -2335,8 +2503,34 @@ export async function handleSchedulesRoutes(
             screeningPayload,
             { type: scheduleType, cron, intervalSeconds, delayInSeconds, date },
           ) as unknown as Schedule<unknown> | undefined;
+          if (!duplicate) {
+            const stored = unifiedStore()
+              .list()
+              .filter((record) => record.kind === "screen")
+              .map((record) => {
+                const def = record.definition as Record<string, unknown>;
+                return {
+                  id: record.id,
+                  callback: record.callback,
+                  payload: def.payload,
+                  type: def.type,
+                  cron: def.cron,
+                  intervalSeconds: def.intervalSeconds,
+                  delayInSeconds: def.delayInSeconds,
+                  time: def.time,
+                };
+              });
+            const match = findDuplicateSchedule(
+              stored,
+              callback,
+              screeningPayload,
+              { type: scheduleType, cron, intervalSeconds, delayInSeconds, date },
+            ) as unknown as { id: string } | undefined;
+            if (match) duplicateRecord = unifiedStore().get(match.id);
+          }
         } catch {
           duplicate = undefined;
+          duplicateRecord = undefined;
         }
         // Issue #3121 Phase 2 (#3123) — adoption: the armed alarm's
         // definition and state live in the unified store (record id =
@@ -2372,6 +2566,19 @@ export async function handleSchedulesRoutes(
           });
           return Response.json({ success: true, schedule: duplicate, duplicate: true });
         }
+        if (duplicateRecord) {
+          ctx.audit("schedule.duplicate_suppressed", "orchestrator", {
+            scheduleId: duplicateRecord.id,
+            callback,
+            scheduleType,
+          });
+          return Response.json({
+            success: true,
+            schedule: duplicateRecord,
+            duplicate: true,
+            paused: duplicateRecord.state === "paused",
+          });
+        }
 
         // Issue #3121 S1 — creation provenance travels in the stored
         // payload (#2366 items 3–4): origin user, the trusted creator
@@ -2389,15 +2596,62 @@ export async function handleSchedulesRoutes(
           }),
         );
 
-        let schedule: Schedule<unknown> | undefined;
+        // Issue #6482 — paused by default: the schedule is created
+        // as a paused unified record; the SDK is never armed here.
+        // A missing timing is a 400 (the same honest shape as the
+        // old invalid-parameters refusal), never a fabricated id.
+        const nowIso = new Date().toISOString();
+        let record: ReturnType<typeof pausedScreenScheduleToRecord> | undefined;
         if (scheduleType === "interval" && intervalSeconds) {
-          schedule = await ctx.scheduleEvery(Number(intervalSeconds), callback, screeningPayload);
+          record = pausedScreenScheduleToRecord(
+            {
+              callback,
+              type: "interval",
+              payload: screeningPayload,
+              intervalSeconds: Number(intervalSeconds),
+              ownerLogin: trustedUserLogin || null,
+            },
+            nowIso,
+          );
         } else if (scheduleType === "cron" && cron) {
-          schedule = await ctx.schedule(cron, callback, screeningPayload, { idempotent: body.idempotent !== false });
+          record = pausedScreenScheduleToRecord(
+            {
+              callback,
+              type: "cron",
+              payload: screeningPayload,
+              cron,
+              // Issue #6482 — the idempotent opt-out rides the paused
+              // record so resume arms with it (interval arms take no
+              // options, so it is not recorded there).
+              ...(typeof idempotent === "boolean" ? { idempotent } : {}),
+              ownerLogin: trustedUserLogin || null,
+            },
+            nowIso,
+          );
         } else if (scheduleType === "scheduled" && date) {
-          schedule = await ctx.schedule(new Date(date), callback, screeningPayload);
+          record = pausedScreenScheduleToRecord(
+            {
+              callback,
+              type: "scheduled",
+              payload: screeningPayload,
+              time: Math.floor(new Date(date).getTime() / 1000),
+              ...(typeof idempotent === "boolean" ? { idempotent } : {}),
+              ownerLogin: trustedUserLogin || null,
+            },
+            nowIso,
+          );
         } else if (delayInSeconds !== undefined) {
-          schedule = await ctx.schedule(Number(delayInSeconds), callback, screeningPayload);
+          record = pausedScreenScheduleToRecord(
+            {
+              callback,
+              type: "delayed",
+              payload: screeningPayload,
+              delayInSeconds: Number(delayInSeconds),
+              ...(typeof idempotent === "boolean" ? { idempotent } : {}),
+              ownerLogin: trustedUserLogin || null,
+            },
+            nowIso,
+          );
         } else {
           return Response.json(
             { error: "Invalid schedule parameters: provide intervalSeconds, cron, date, or delayInSeconds" },
@@ -2405,11 +2659,16 @@ export async function handleSchedulesRoutes(
           );
         }
 
-        ctx.audit("schedule.created", "orchestrator", { scheduleId: schedule?.id, callback, scheduleType });
-        if (schedule) adoptRecord(schedule);
-        return Response.json({ success: true, schedule });
+        unifiedStore().save(record);
+        ctx.audit("schedule.created", "orchestrator", {
+          scheduleId: record.id,
+          callback,
+          scheduleType,
+          state: "paused",
+        });
+        return Response.json({ success: true, schedule: record, paused: true });
       } catch (err: any) {
-        // A throwing SDK scheduling call created nothing, so it gets the
+        // A throwing store write created nothing, so it gets the
         // honest 503 {success:false, error} shape (#111), worded as what
         // it is — scheduling was unavailable and no schedule was created
         // — never a success response and never a fabricated id.

@@ -38,7 +38,12 @@
  *   (`ScheduleChannelFlagsPanel`) — schedule_chat, schedule_nlq and
  *   the schedules surface flag with live state through the existing
  *   FeatureFlagPort, and the platform-admin toggle for the two
- *   channel flags (one-on invariant enforced server-side).
+ *   channel flags (one-on invariant enforced server-side). Issue
+ *   #6482 adds the runaway controls (`ScheduleControlsPanel`) below
+ *   it in the same section — the minimum-interval floor (read + set),
+ *   the firing kill-switch (read + set), the firing-rate line, and
+ *   the armed-schedule inventory, all through GET/POST
+ *   /api/schedules/controls.
  *
  * Retired addresses (each maps to the home, or to null with the reason
  * recorded here — never silently kept):

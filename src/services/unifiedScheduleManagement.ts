@@ -463,6 +463,11 @@ export interface ScheduleAlarms {
     timing: ResolvedScheduleTiming,
     callback: string,
     payload: unknown,
+    // Issue #6482 — a caller-supplied idempotent opt-out travels
+    // with the arm (cron/scheduled SDK arms); absent means the
+    // default (idempotent: true). Creation records it on the paused
+    // definition; resume passes it back here.
+    options?: { idempotent?: boolean },
   ): Promise<ScheduleAlarmLike>;
 }
 
@@ -568,6 +573,113 @@ export function screenScheduleToRecord(
  */
 export const STRATEGY_SCAN_BASELINE_ORIGIN = "strategy-scan-baseline";
 
+/** The inputs a paused-by-default screen record needs (no alarm — nothing is armed). */
+export interface PausedScreenScheduleInput {
+  callback: string;
+  type: "cron" | "interval" | "scheduled" | "delayed";
+  payload?: unknown;
+  cron?: string;
+  intervalSeconds?: number;
+  time?: number;
+  delayInSeconds?: number;
+  // Issue #6482 — a caller-supplied idempotent opt-out (cron /
+  // scheduled / delayed SDK arms only; interval arms via
+  // scheduleEvery take no options). Recorded on the definition so
+  // resume arms with the same option creation carried.
+  idempotent?: boolean;
+  ownerLogin?: string | null;
+}
+
+/**
+ * Issue #6482 — paused by default: a screen schedule as it is
+ * created. The record carries state "paused" and no alarm id — the
+ * SDK is never armed at creation, so nothing can fire until an
+ * explicit resume re-arms it (resumeUnifiedSchedule). The id is
+ * minted here (no alarm exists to lend one); resume keeps it and
+ * only replaces alarmId. The definition mirrors
+ * screenScheduleToRecord (including the #4235 opt-in lift) so a
+ * resumed schedule is identical to one armed at creation.
+ */
+export function pausedScreenScheduleToRecord(
+  input: PausedScreenScheduleInput,
+  nowIso: string,
+): UnifiedScheduleRecord {
+  const definition: Record<string, unknown> = {
+    type: input.type,
+    callback: input.callback,
+    ...(input.payload !== undefined ? { payload: input.payload } : {}),
+    ...(input.cron !== undefined ? { cron: input.cron } : {}),
+    ...(input.intervalSeconds !== undefined ? { intervalSeconds: input.intervalSeconds } : {}),
+    ...(input.time !== undefined ? { time: input.time } : {}),
+    ...(input.delayInSeconds !== undefined ? { delayInSeconds: input.delayInSeconds } : {}),
+    ...(input.idempotent !== undefined ? { idempotent: input.idempotent } : {}),
+    ...((input.payload as Record<string, unknown> | undefined)?.subDailyOptIn === true
+      ? { subDailyOptIn: true }
+      : {}),
+  };
+  return {
+    id: crypto.randomUUID(),
+    kind: "screen",
+    state: "paused",
+    callback: input.callback,
+    definition,
+    ...(input.ownerLogin ? { ownerLogin: input.ownerLogin } : {}),
+    alarmId: null,
+    pausedAt: nowIso,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  };
+}
+
+/** The inputs a paused-by-default workflow-stage record needs (no alarm). */
+export interface PausedWorkflowStageScheduleInput {
+  jobId: string;
+  nodePath: string;
+  stageId: string;
+  callback: string;
+  timing: { type: "cron" | "interval" | "scheduled" | "delayed"; cron?: string; intervalSeconds?: number; time?: number };
+  payload?: unknown;
+  ownerLogin?: string | null;
+}
+
+/**
+ * Issue #6482 — paused by default: a workflow-stage schedule as it
+ * is created. Same shape as workflowStageScheduleToRecord, but
+ * state "paused" and no alarm — the stage never fires until an
+ * explicit resume re-arms it.
+ */
+export function pausedWorkflowStageScheduleToRecord(
+  input: PausedWorkflowStageScheduleInput,
+  nowIso: string,
+): UnifiedScheduleRecord {
+  const payload = (input.payload ?? {}) as Record<string, unknown>;
+  return {
+    id: crypto.randomUUID(),
+    kind: "workflow-stage",
+    state: "paused",
+    callback: input.callback,
+    definition: {
+      type: input.timing.type,
+      callback: input.callback,
+      payload: input.payload,
+      ...(typeof input.timing.cron === "string" ? { cron: input.timing.cron } : {}),
+      ...(typeof input.timing.intervalSeconds === "number"
+        ? { intervalSeconds: input.timing.intervalSeconds }
+        : {}),
+      ...(typeof input.timing.time === "number" ? { time: input.timing.time } : {}),
+      jobId: input.jobId,
+      nodePath: input.nodePath,
+      stageId: input.stageId,
+      ...(typeof payload.reason === "string" ? { reason: payload.reason } : {}),
+    },
+    ...(input.ownerLogin ? { ownerLogin: input.ownerLogin } : {}),
+    ...(payload.provenance !== undefined ? { provenance: payload.provenance } : {}),
+    alarmId: null,
+    pausedAt: nowIso,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  };
+}
 /** The inputs a baseline record needs beyond the armed alarm. */
 export interface StrategyScanBaselineRecordInput {
   userLogin: string;
@@ -1088,23 +1200,36 @@ export interface WorkflowStageScheduleCreateInput {
 }
 
 /**
- * Create a stage-schedule: arm the firing alarm, then save the record
- * with id = alarm id (the #3123 screen precedent). The caller owns
- * validation (registry + timing) — this service arms and stores.
+ * Create a stage-schedule (issue #6482 — paused by default): save
+ * the record paused, never arm the firing alarm. The caller owns
+ * validation (registry + timing); an explicit resume is the only
+ * activation. The record id is minted here (no alarm exists to lend
+ * one); resume keeps it and only replaces alarmId.
  */
 export async function createWorkflowStageSchedule(
   deps: UnifiedManagementDeps,
   input: WorkflowStageScheduleCreateInput,
   nowIso: string,
 ): Promise<UnifiedOpResult> {
-  const alarm = await deps.alarms.arm(input.timing, input.callback, input.payload);
-  const record = workflowStageScheduleToRecord(
-    { ...alarm, payload: input.payload ?? alarm.payload },
+  // Issue #6482 — paused by default: a stage schedule is created
+  // paused and the SDK is never armed at creation, so nothing can
+  // fire until an explicit resume re-arms it (resumeUnifiedSchedule
+  // is the only activation). The record carries the full definition,
+  // so resume arms exactly what creation recorded.
+  const record = pausedWorkflowStageScheduleToRecord(
+    {
+      jobId: input.jobId,
+      nodePath: input.nodePath,
+      stageId: input.stageId,
+      callback: input.callback,
+      timing: input.timing,
+      payload: input.payload,
+      ownerLogin: input.ownerLogin ?? null,
+    },
     nowIso,
-    input.ownerLogin ?? null,
   );
   await deps.store.save(record);
-  return { ok: true, record, alarm };
+  return { ok: true, record };
 }
 
 /** Ticker-push health as the Schedules home renders it (#4237). */
@@ -2001,7 +2126,15 @@ export async function resumeUnifiedSchedule(
   }
   const callback =
     record.callback ?? (typeof record.definition.callback === "string" ? record.definition.callback : "");
-  const alarm = await deps.alarms.arm(timing, callback, record.definition.payload);
+  // Issue #6482 — resume arms with the idempotent option creation
+  // recorded (default idempotent: true when none was recorded).
+  const idempotent = typeof record.definition.idempotent === "boolean" ? record.definition.idempotent : undefined;
+  const alarm = await deps.alarms.arm(
+    timing,
+    callback,
+    record.definition.payload,
+    idempotent === undefined ? undefined : { idempotent },
+  );
   const resumed: UnifiedScheduleRecord = {
     ...record,
     state: "active",

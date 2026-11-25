@@ -445,7 +445,9 @@ export function ScheduledOptionsManager({
       const created = results.filter((r) => r.ok).length;
       const failed = results.filter((r) => !r.ok);
       if (created > 0) {
-        setSuccessMsg(`✓ Quick create: ${created} of ${results.length} schedules created.`);
+        // Issue #6482 — quick-created schedules land paused; only an
+        // explicit resume starts them.
+        setSuccessMsg(`✓ Quick create: ${created} of ${results.length} schedules created paused. Resume them under Schedules to start them.`);
         fetchSchedules();
         fetchAudit();
       }
@@ -647,7 +649,9 @@ export function ScheduledOptionsManager({
         setSuccessMsg(
           editingScheduleId
             ? `✓ Schedule updated successfully!${result.warning ? ` ${result.warning}` : ""}`
-            : `✓ Schedule created successfully! (ID: ${result.scheduleId || "active"})`
+            // Issue #6482 — a new schedule is created paused; only an
+            // explicit resume starts it.
+            : `✓ Schedule created paused! Resume it under Schedules to start it. (ID: ${result.scheduleId || "paused"})`
         );
         setEditingScheduleId(null);
         setModalOpen(false);

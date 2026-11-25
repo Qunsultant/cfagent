@@ -16,7 +16,9 @@
  * dead-letter-queue (DlqPanel — the dead-letter queue, moved from the
  * retired Queues page in #4574; the page's async-jobs copy is removed
  * as covered by Background Tasks), flags (ScheduleChannelFlagsPanel —
- * the scheduling-channel flags with live state, #4260).
+ * the scheduling-channel flags with live state, #4260, plus
+ * ScheduleControlsPanel — the #6482 runaway controls: floor,
+ * kill-switch, firing rate, armed inventory).
  *
  * View state follows the URL (`?view=`, plus `?schedule=` / `?run=`
  * deep links), the same pattern as PlatformAdminPage: the component
@@ -42,6 +44,7 @@ import { SchedulesPanel } from "./SchedulesPanel";
 import { ScheduledGoalsPanel } from "./ScheduledGoalsPanel";
 import { ScheduleRunLedgerPanel } from "./ScheduleRunLedgerPanel";
 import { ScheduleChannelFlagsPanel } from "./ScheduleChannelFlagsPanel";
+import { ScheduleControlsPanel } from "./ScheduleControlsPanel";
 import { ScheduleQueueView } from "./ScheduleQueueView";
 import { AsyncJobsPanel } from "./AsyncJobsPanel";
 import { DlqPanel } from "./DlqPanel";
@@ -197,6 +200,11 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
           {/* Issue #4330 — the tab scrolls on both axes; the shell clips otherwise. */}
           <div className="ui-scroll-frame">
           <ScheduleChannelFlagsPanel />
+          {/* Issue #6482 — the runaway controls (floor, firing
+              kill-switch, armed inventory) live in the same flags
+              section: the floor and the kill-switch are managed here,
+              not in a dashboard. */}
+          <ScheduleControlsPanel />
         </div>
         </Card>
       </TabPanel>
