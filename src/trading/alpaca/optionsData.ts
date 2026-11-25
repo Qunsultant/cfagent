@@ -35,6 +35,7 @@ import type {
 } from "../dataProviders/contract";
 import type { OptionRequestBudget } from "../interfaces";
 import { normalizeAlpacaBaseUrl } from "./credentials";
+import { DEFAULT_ALPACA_OPTIONS_FEED } from "../../config/alpacaOptions";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 
@@ -187,7 +188,10 @@ export function buildAlpacaOptionsConfig(
       "APCA-API-KEY-ID": safeEnv.ALPACA_API_KEY || safeEnv.ALPACA_API_KEY_ID || "",
       "APCA-API-SECRET-KEY": safeEnv.ALPACA_SECRET_KEY || safeEnv.ALPACA_API_SECRET_KEY || "",
     },
-    feed: safeEnv.ALPACA_OPTIONS_FEED,
+    // Issue 6498 (#6237): the documented default, implemented here once so
+    // every consumer of this config gets the same feed. An empty env value is
+    // "unset", not a deliberate blank that would omit the required parameter.
+    feed: safeEnv.ALPACA_OPTIONS_FEED || DEFAULT_ALPACA_OPTIONS_FEED,
     rateLimiter,
   };
 }
