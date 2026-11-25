@@ -422,9 +422,15 @@ const ORCH = "agents/orchestrator.ts";
  *  delegating wrappers + their imports (execution in
  *  orchestrator/idpProfileConfig.ts; the class gains no logic) —
  *  measured 4,078 lines / 187,445 B on the rebased tree, so
- *  budget lines rise to 4080 and bytes rise to 187_900. */
-const BUDGET_LINES = 4080;
-const BUDGET_BYTES = 187_900;
+ *  budget lines rise to 4080 and bytes rise to 187_900.
+ *  #5976 (one OODA configuration) adds the thin researchConfigForMcp
+ *  delegating wrapper + its import (execution in
+ *  orchestrator/researchConfigDoor.ts; the class gains no logic) —
+ *  measured 4,084 lines / 187,876 B on the rebased tree, so budget
+ *  lines rise to 4090 and bytes rise to 188_400, which keeps headroom
+ *  for the next delegating wrapper rather than a 24 B margin. */
+const BUDGET_LINES = 4090;
+const BUDGET_BYTES = 188_400;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;

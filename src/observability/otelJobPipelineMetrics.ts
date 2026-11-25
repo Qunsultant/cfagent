@@ -30,6 +30,7 @@ import {
   identityJobStepJournal,
   type JobRunSettledInfo,
   type JobStepJournal,
+  type JobStepJournalMeta,
 } from "../services/jobPipelineEngine";
 
 /** The dependencies every J1–J7 metrics observer needs. */
@@ -97,7 +98,11 @@ export function createOtelJobPipelineMetricsStepJournal(
   const inner = deps.inner ?? identityJobStepJournal;
   const nowMs = deps.nowMs ?? (() => Date.now());
   return {
-    do: async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+    // Issue #6466 part 5 — the journal forwards the run context to the inner
+    // journal, but records NO new metric label: a per-run label would blow
+    // the free-tier 10,000-series cardinality. Determinability by run id
+    // lives on the traces span + the log event, not on metrics.
+    do: async <T>(name: string, fn: () => Promise<T>, meta?: JobStepJournalMeta): Promise<T> => {
       const enabled = (() => {
         try {
           return deps.isEnabled();
@@ -105,10 +110,10 @@ export function createOtelJobPipelineMetricsStepJournal(
           return false;
         }
       })();
-      if (!enabled) return inner.do(name, fn);
+      if (!enabled) return inner.do(name, fn, meta);
       const startMs = nowMs();
       try {
-        const result = await inner.do(name, fn);
+        const result = await inner.do(name, fn, meta);
         const durationMs = nowMs() - startMs;
         try {
           deps.recorder.recordJobStageStep(name, "completed", durationMs);

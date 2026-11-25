@@ -544,3 +544,42 @@ describe("Assets Hub registry + binding sub-menus (#6147 S2; #4681)", () => {
     expect(forexBtn!.classList.contains("active")).toBe(true);
   });
 });
+
+describe("Data Hub pipeline-policy sub-menu (#6147 S3)", () => {
+  it("configures Data Hub with data-providers, feeds, data-lifecycle, downloads, pipeline-policy", () => {
+    const dataSubItems = SUB_MENU_CONFIGS["data-hub"];
+    expect(dataSubItems).toBeDefined();
+    expect(dataSubItems.map((s) => s.id)).toEqual([
+      "data-providers",
+      "feeds",
+      "data-lifecycle",
+      "downloads",
+      "pipeline-policy",
+    ]);
+  });
+
+  it("on ?tab=data-hub&view=pipeline-policy, Data Hub is active and the Pipeline Policy sub-item is active", async () => {
+    window.history.pushState(null, "", "/?tab=data-hub&view=pipeline-policy");
+    await renderNavBar({ activeTab: "data-hub" });
+    const policyBtn = Array.from(container.querySelectorAll(".sidebar-submenu-item")).find((b) =>
+      b.textContent?.includes("Pipeline Policy"),
+    );
+    expect(policyBtn).toBeDefined();
+    expect(policyBtn!.classList.contains("active")).toBe(true);
+    const providersBtn = Array.from(container.querySelectorAll(".sidebar-submenu-item")).find((b) =>
+      b.textContent?.includes("Data Providers"),
+    );
+    expect(providersBtn).toBeDefined();
+    expect(providersBtn!.classList.contains("active")).toBe(false);
+  });
+
+  it("on bare ?tab=data-hub, the Data Providers sub-item is active by default", async () => {
+    window.history.pushState(null, "", "/?tab=data-hub");
+    await renderNavBar({ activeTab: "data-hub" });
+    const providersBtn = Array.from(container.querySelectorAll(".sidebar-submenu-item")).find((b) =>
+      b.textContent?.includes("Data Providers"),
+    );
+    expect(providersBtn).toBeDefined();
+    expect(providersBtn!.classList.contains("active")).toBe(true);
+  });
+});

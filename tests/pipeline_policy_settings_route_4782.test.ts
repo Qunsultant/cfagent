@@ -248,6 +248,9 @@ describe("Issue #4782 S3 — pipeline-policy route source pins", () => {
       expect(file).not.toContain("localStorage.setItem");
       expect(file).not.toContain("localStorage.removeItem");
     }
-    expect(src("client/BrokerDynamicMenu.tsx")).toContain("PipelinePolicyPanel");
+    // #6147 S3: the panel moved out of the settings menu into the
+    // Data Hub — one mount, in the hub, never in the menu.
+    expect(src("client/DataHubHome.tsx")).toContain("PipelinePolicyPanel");
+    expect(src("client/BrokerDynamicMenu.tsx")).not.toContain("PipelinePolicyPanel");
   });
 });

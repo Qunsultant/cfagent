@@ -29,6 +29,8 @@ import { createJobPipelineControl } from "../../services/jobPipelineControlFacto
 import { createBuiltinStepRegistry } from "../../services/jobPipelineSteps";
 import { codedMessage } from "../../outcomes/outcomeAspects";
 import type { SqlStorage } from "../../orm";
+import { actorGateway } from "../../services/cloudflareActorGateway";
+import { SHARED_ORCHESTRATOR_INSTANCE } from "../../security/serviceIdentity";
 
 export interface RunResearchJobInput {
   trigger?: "manual" | "scheduled";
@@ -276,5 +278,73 @@ export class DefinePipelineChainCommand implements IMcpToolCommand<DefinePipelin
       ephemeralFallback,
       ...(ephemeralReason ? { ephemeralReason } : {}),
     };
+  }
+}
+
+/** Issue #5976 — the config door the orchestrator exposes (one owner, one store). */
+interface ResearchConfigDoor {
+  researchConfigForMcp(
+    userLogin: string | undefined,
+    patch?: Record<string, unknown>,
+  ): Promise<Record<string, unknown>>;
+}
+
+export interface ResearchConfigInput {
+  action: "get" | "update";
+  patch?: Record<string, unknown>;
+}
+
+/**
+ * Issue #5976 — inspect and update the canonical OODA configuration from chat
+ * or MCP. Reads and writes go through the same `ResearchConfigService` the
+ * settings page and `POST /api/research/settings` use, so a chat update is
+ * validated by name, atomic on refusal, and visible in the UI immediately. The
+ * model can carry a user-requested value; it cannot infer one.
+ */
+export class ResearchConfigCommand implements IMcpToolCommand<ResearchConfigInput> {
+  readonly name = "research_config";
+  readonly description =
+    "Inspect or update the canonical OODA research configuration (the same store and validation the settings page and API use). `get` returns the effective config; `update` applies the given settings, refusing unknown or invalid keys by name atomically.";
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      action: { type: "string", enum: ["get", "update"] },
+      patch: {
+        type: "object",
+        description: "For update: the settings to change, keyed by research setting name.",
+        additionalProperties: true,
+      },
+    },
+    required: ["action"],
+  };
+  readonly zodSchema = z.object({
+    action: z.enum(["get", "update"]),
+    patch: z.record(z.string(), z.unknown()).optional(),
+  });
+
+  async execute(input: ResearchConfigInput, context: McpToolContext) {
+    const actingLogin = context.actingLogin?.()?.trim() || "";
+    if (!actingLogin || actingLogin === "default") {
+      throw new Error(codedMessage("FAILURE_RESEARCH_OWNER_MISSING"));
+    }
+    if (input.action === "update" && !input.patch) {
+      throw new Error(
+        "research_config_patch_missing: an update must name the settings to change; nothing was written.",
+      );
+    }
+    const door = actorGateway.stub<ResearchConfigDoor>(
+      context.env.ORCHESTRATOR_AGENT,
+      SHARED_ORCHESTRATOR_INSTANCE,
+    );
+    const result =
+      input.action === "update"
+        ? await door.researchConfigForMcp(actingLogin, input.patch)
+        : await door.researchConfigForMcp(actingLogin);
+    context.audit("mcp.tool_called", "orchestrator", {
+      tool: this.name,
+      action: input.action,
+      ...(input.action === "update" ? { keys: Object.keys(input.patch ?? {}) } : {}),
+    });
+    return result;
   }
 }

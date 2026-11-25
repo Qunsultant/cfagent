@@ -19,7 +19,12 @@ import { validateResearchRules, type ResearchRules } from "../config/researchRul
 // by the same rule.
 import {
   validateResearchStageModes,
+  validateResearchSettlementWaitMs,
+  validateResearchStageRetryBuckets,
+  validateResearchStageTimeouts,
   type ResearchStageModes,
+  type ResearchStageRetryBuckets,
+  type ResearchStageTimeouts,
 } from "../config/researchJobConfig";
 
 export interface ResearchConfig {
@@ -96,6 +101,24 @@ export interface ResearchConfig {
    * identifies the rules it ran under.
    */
   rules: Partial<ResearchRules>;
+  /**
+   * Issue #6466 part 4 — the per-stage timeout overrides (ms), persisted
+   * here like stageModes: empty by default (every stage takes the deployment
+   * resolution); a stored value wins over the deployment carrier, per stage.
+   */
+  stageTimeouts: ResearchStageTimeouts;
+  /**
+   * Issue #6466 part 4 — the per-stage retry-bucket overrides, persisted
+   * here like stageModes: empty by default; a stored value wins over the
+   * deployment carrier, per stage.
+   */
+  stageRetryBuckets: ResearchStageRetryBuckets;
+  /**
+   * Issue #6466 part 3 — the dispatch settlement-wait override (ms). Null by
+   * default (the deployment carrier governs, then the 120 s default); a
+   * stored value wins, raisable to 10–15x through the settings surface.
+   */
+  settlementWaitMs: number | null;
 }
 
 /**
@@ -145,6 +168,9 @@ export const RESEARCH_CONFIG_DEFAULTS: ResearchConfig = {
   rulesVersion: "1.0.0",
   stageModes: {},
   rules: {},
+  stageTimeouts: {},
+  stageRetryBuckets: {},
+  settlementWaitMs: null,
 };
 
 /** Storage idiom mirrors mas_settings (key/value/updated_at, DELETE+INSERT). */
@@ -201,6 +227,10 @@ export const RESEARCH_CONFIG_SCHEMA: ConfigSchemaField[] = [
   { key: "feePerContract", label: "Fee per contract ($)", type: "number", default: RESEARCH_CONFIG_DEFAULTS.feePerContract, hint: "Scenario economics." },
   { key: "slippagePerContract", label: "Slippage per contract ($)", type: "number", default: RESEARCH_CONFIG_DEFAULTS.slippagePerContract, hint: "Scenario economics." },
   { key: "maxCandidates", label: "Max candidates per run", type: "number", default: RESEARCH_CONFIG_DEFAULTS.maxCandidates, hint: "OODA budget." },
+  // Issue #6466 part 3 — the dispatch settlement wait, editable on the
+  // settings surface (empty = the deployment carrier governs, then the
+  // 120 s default; 10,000–1,800,000 ms).
+  { key: "settlementWaitMs", label: "Settlement wait (ms, empty = default)", type: "nullable-number", default: RESEARCH_CONFIG_DEFAULTS.settlementWaitMs, hint: "How long a research dispatch waits for the engine run to settle; 10,000–1,800,000 ms." },
 ];
 
 function parseStoredValue(key: ResearchConfigKey, raw: string): unknown {
@@ -269,6 +299,13 @@ export function validateResearchConfig(config: ResearchConfig): string[] {
   // mode. `stageModes` names the carrier in the message.
   const stageModes = validateResearchStageModes(config.stageModes, "stageModes");
   errors.push(...stageModes.errors);
+  // Issue #6466 part 4 — the stored per-stage timeouts and retry buckets are
+  // judged by the job config's validators, by name, same rule as stageModes.
+  errors.push(...validateResearchStageTimeouts(config.stageTimeouts, "stageTimeouts").errors);
+  errors.push(...validateResearchStageRetryBuckets(config.stageRetryBuckets, "stageRetryBuckets").errors);
+  // Issue #6466 part 3 — the stored settlement wait is judged by its
+  // validator, by name; an out-of-range value cannot persist.
+  errors.push(...validateResearchSettlementWaitMs(config.settlementWaitMs, "settlementWaitMs").errors);
   // Issue #6037 (a) - the strategy-rule block is judged by its own validator, so
   // an out-of-bound rule or a bad weight sum cannot persist and silently change
   // a decision.

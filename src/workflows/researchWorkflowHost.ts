@@ -63,7 +63,15 @@ export interface StartResearchJobWorkflowInput {
   definition: Record<string, unknown>;
   /** `research:<runId>` — the one canonical job id. */
   engineJobId: string;
+  /** The research run id, carried on the dispatch event (defaults to the job id without the `research:` prefix). */
+  runId?: string;
   trigger: JobRunTrigger;
+  /** Test seam: the residency (in-memory stores in tests, following the existing `startWorkflow` seam pattern). */
+  residency?: ResearchWorkflowResidency;
+  /** Dispatch-event seam: the host logs `job.run.dispatched` through it when given (the production caller wires the structured logger). */
+  dispatchLogger?: {
+    info: (type: string, fields: Record<string, unknown>) => void;
+  };
   /** Test seam: the workflow starter (same shape as the options host). */
   startWorkflow?: (
     jobId: string,
@@ -82,11 +90,18 @@ export interface StartResearchJobWorkflowResult {
  * instance for it. A re-dispatch of an in-flight run attaches to the existing
  * instance: no second define (no version bump under a running run) and no
  * second create.
+ *
+ * Issue #6466 part 2 — a fresh start stamps the dispatch on the instance row
+ * (the workflow instance id, the start time, state "idle") and logs the
+ * dispatch event, BEFORE the settlement poller runs — so the OODA page and
+ * the ledger show the run from dispatch, and a settlement timeout can name
+ * the instance it waited on. An attached re-dispatch stamps nothing: the row
+ * already carries the in-flight instance.
  */
 export async function startResearchJobWorkflow(
   input: StartResearchJobWorkflowInput,
 ): Promise<StartResearchJobWorkflowResult> {
-  const residency = researchWorkflowResidency(input.env);
+  const residency = input.residency ?? researchWorkflowResidency(input.env);
   if (!residency) {
     throw new Error(
       "job_pipeline_workflow_not_configured: the JOB_PIPELINE_WORKFLOW binding (or the AGENT_DB it reads) is not configured in this deployment; the run was not dispatched.",
@@ -107,10 +122,23 @@ export async function startResearchJobWorkflow(
     return { instanceId: attached.instanceId, attached: true };
   }
   await defineControl.defineJob(input.definition as never);
+  const stampDispatch = async (instanceId: string): Promise<void> => {
+    await defineControl.stampWorkflowDispatch(input.engineJobId, {
+      workflowInstanceId: instanceId,
+      startedAt: new Date().toISOString(),
+    });
+    input.dispatchLogger?.info("job.run.dispatched", {
+      jobId: input.engineJobId,
+      runId: input.runId ?? input.engineJobId.replace(/^research:/, ""),
+      workflowInstanceId: instanceId,
+      trigger: input.trigger,
+    });
+  };
   if (input.startWorkflow) {
     const started = await input.startWorkflow(input.engineJobId, {
       trigger: input.trigger,
     });
+    await stampDispatch(started.instanceId);
     return { instanceId: started.instanceId, attached: false };
   }
   const workflow = input.env.JOB_PIPELINE_WORKFLOW as unknown as ManagedWorkflowBinding;
@@ -119,6 +147,7 @@ export async function startResearchJobWorkflow(
     params: { jobId: input.engineJobId, trigger: input.trigger },
     workflowName: "JOB_PIPELINE_WORKFLOW",
   });
+  await stampDispatch(started.workflowId);
   return { instanceId: started.workflowId, attached: false };
 }
 /** The terminal instance states: any other state is still in flight. */
@@ -129,10 +158,23 @@ export interface AwaitResearchJobSettlementInput {
   engineJobId: string;
   /** Poll cadence; default 1000 ms. */
   intervalMs?: number;
-  /** Bound; default 120 000 ms — the run's own budget is the stage timeouts'. */
+  /**
+   * Bound; default 120 000 ms — the run's own budget is the stage timeouts'.
+   * Issue #6466 part 3 — the bound is externalized: the dispatch passes the
+   * effective settlement wait (stored research config over the
+   * `RESEARCH_SETTLEMENT_WAIT_MS` deployment carrier over this default).
+   */
   timeoutMs?: number;
   /** Test seams. */
-  readJob?: (engineJobId: string) => Promise<{ instance: { state: string } | null } & Record<string, unknown>>;
+  readJob?: (engineJobId: string) => Promise<
+    {
+      instance: {
+        state: string;
+        runWorkflowInstanceId?: string | null;
+        runStartedAt?: string | null;
+      } | null;
+    } & Record<string, unknown>
+  >;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 }
@@ -162,7 +204,13 @@ export async function awaitResearchJobSettlement(
   const readJob =
     input.readJob ??
     ((jobId: string) => control.getJob(jobId) as unknown as Promise<
-      { instance: { state: string } | null } & Record<string, unknown>
+      {
+        instance: {
+          state: string;
+          runWorkflowInstanceId?: string | null;
+          runStartedAt?: string | null;
+        } | null;
+      } & Record<string, unknown>
     >);
   const intervalMs = input.intervalMs ?? 1000;
   const timeoutMs = input.timeoutMs ?? 120_000;
@@ -174,8 +222,17 @@ export async function awaitResearchJobSettlement(
   while (!TERMINAL_RESEARCH_RUN_STATES.has(state)) {
     await sleep(intervalMs);
     if (now() - startedAt >= timeoutMs) {
+      // Issue #6466 part 2 — the timeout names the stamped workflow instance
+      // and its start time when the row carries one, so the page can show
+      // which engine run the wait gave up on (the 2026-11-24 run sat idle
+      // past the wait with no instance recorded at all).
+      const instanceId = view.instance?.runWorkflowInstanceId;
+      const runStartedAt = view.instance?.runStartedAt;
+      const stamped = instanceId
+        ? ` (workflow instance ${instanceId}${runStartedAt ? `, started ${runStartedAt}` : ""})`
+        : "";
       throw new Error(
-        `research_workflow_run_timeout: run ${input.engineJobId} did not reach a terminal state within ${timeoutMs}ms (last state: ${state}); the run may still be in flight — read it back instead of re-dispatching.`,
+        `research_workflow_run_timeout: run ${input.engineJobId} did not reach a terminal state within ${timeoutMs}ms (last state: ${state}); the run may still be in flight — read it back instead of re-dispatching.${stamped}`,
       );
     }
     view = await readJob(input.engineJobId);

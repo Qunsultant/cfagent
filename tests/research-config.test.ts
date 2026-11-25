@@ -73,4 +73,61 @@ describe("ResearchConfigService", () => {
     snap.maxIdeas = 99;
     expect(svc.load().maxIdeas).toBe(RESEARCH_CONFIG_DEFAULTS.maxIdeas);
   });
+
+  it("#6466 — settlement wait: null by default (the deployment default governs)", () => {
+    expect(RESEARCH_CONFIG_DEFAULTS.settlementWaitMs).toBeNull();
+    expect(new ResearchConfigService(memStore()).load().settlementWaitMs).toBeNull();
+  });
+
+  it("#6466 — settlement wait: a stored value round-trips", () => {
+    const store = memStore();
+    const svc = new ResearchConfigService(store);
+    const { config, errors } = svc.save({ settlementWaitMs: 1_500_000 });
+    expect(errors).toEqual([]);
+    expect(config.settlementWaitMs).toBe(1_500_000);
+    expect(new ResearchConfigService(store).load().settlementWaitMs).toBe(1_500_000);
+  });
+
+  it("#6466 — settlement wait: an out-of-range value is refused atomically", () => {
+    const store = memStore();
+    const svc = new ResearchConfigService(store);
+    const { errors } = svc.save({ settlementWaitMs: 2_000_000 });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors.join(" ")).toMatch(/settlementWaitMs/);
+    expect(store.raw.size).toBe(0);
+  });
+
+  it("#6466 — stage timeouts: a stored per-stage map round-trips", () => {
+    const store = memStore();
+    const svc = new ResearchConfigService(store);
+    const { config, errors } = svc.save({ stageTimeouts: { analyze: 900_000 } });
+    expect(errors).toEqual([]);
+    expect(config.stageTimeouts).toEqual({ analyze: 900_000 });
+    expect(new ResearchConfigService(store).load().stageTimeouts).toEqual({ analyze: 900_000 });
+  });
+
+  it("#6466 — stage timeouts: an unknown stage is refused atomically", () => {
+    const store = memStore();
+    const svc = new ResearchConfigService(store);
+    const { errors } = svc.save({ stageTimeouts: { nope: 1000 } as never });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(store.raw.size).toBe(0);
+  });
+
+  it("#6466 — stage retry buckets: a stored per-stage map round-trips", () => {
+    const store = memStore();
+    const svc = new ResearchConfigService(store);
+    const { config, errors } = svc.save({ stageRetryBuckets: { feed: "delivery" } });
+    expect(errors).toEqual([]);
+    expect(config.stageRetryBuckets).toEqual({ feed: "delivery" });
+    expect(new ResearchConfigService(store).load().stageRetryBuckets).toEqual({ feed: "delivery" });
+  });
+
+  it("#6466 — stage retry buckets: an unknown bucket is refused atomically", () => {
+    const store = memStore();
+    const svc = new ResearchConfigService(store);
+    const { errors } = svc.save({ stageRetryBuckets: { feed: "nope" } as never });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(store.raw.size).toBe(0);
+  });
 });

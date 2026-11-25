@@ -88,6 +88,7 @@ import {
   type JobPipelineControl,
   type JobPipelineDeps,
   type JobStepJournal,
+  type JobStepJournalMeta,
 } from "./jobPipelineEngine";
 // Type-only: the observer set is a value at runtime, but this module
 // must never import the OTel provider chain as a value — see the
@@ -192,7 +193,9 @@ function resolveWiredObservers(
  */
 function wrapJournal(outer: JobStepJournal, inner: JobStepJournal): JobStepJournal {
   return {
-    do: async <T>(name: string, fn: () => Promise<T>): Promise<T> =>
-      outer.do(name, () => inner.do(name, fn)),
+    // Issue #6466 part 5 — the run context forwards through the wrap, so
+    // the OTel journal sees the run id the engine passed in.
+    do: async <T>(name: string, fn: () => Promise<T>, meta?: JobStepJournalMeta): Promise<T> =>
+      outer.do(name, () => inner.do(name, fn, meta), meta),
   };
 }

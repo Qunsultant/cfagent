@@ -5,8 +5,9 @@
  * renders directly from the shell (`Chat.tsx` `TAB_CONTENT`), NOT through
  * the Platform Admin page — the six moved sections live in their own hub
  * now. Its views are the sub-route scheme in `dataHubView.ts`:
- * data-providers (DataProvidersPanel + BYOK cards), data-lifecycle
- * (DataLifecyclePanel), downloads (DownloadsPanel).
+ * data-providers (DataProvidersPanel + BYOK cards), feeds (FeedsPanel),
+ * data-lifecycle (DataLifecyclePanel), downloads (DownloadsPanel),
+ * pipeline-policy (PipelinePolicyPanel, #6147 S3).
  *
  * View state follows the URL (`?view=`), the same pattern as
  * PlatformAdminPage and SchedulesHome: the component re-reads the URL on
@@ -21,6 +22,7 @@ import { FeedsPanel } from "./FeedsPanel";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import { DataLifecyclePanel } from "./DataLifecyclePanel";
 import { DownloadsPanel } from "./DownloadsPanel";
+import { PipelinePolicyPanel } from "./PipelinePolicyPanel";
 import { navigateToTab, subscribeToRouteChanges } from "./router";
 import {
   DATA_HUB_VIEW_LABELS,
@@ -103,6 +105,13 @@ export function DataHubHome({ userLogin }: DataHubHomeProps = {}) {
       <TabPanel idBase="data-hub" tabId="downloads" active={deepLink.view === "downloads"}>
         <Card>
           <DownloadsPanel userLogin={userLogin} />
+        </Card>
+      </TabPanel>
+
+      <TabPanel idBase="data-hub" tabId="pipeline-policy" active={deepLink.view === "pipeline-policy"}>
+        <Card>
+          <CardHeader title="Pipeline Policy" subtitle="Retry budgets and notifications — per-tenant settings, effective on the next run" />
+          <PipelinePolicyPanel />
         </Card>
       </TabPanel>
       </PageSection>
