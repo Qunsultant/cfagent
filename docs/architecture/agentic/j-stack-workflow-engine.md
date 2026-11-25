@@ -963,8 +963,12 @@ the registry.
 **The one reserved step.** A step is a name into the platform step
 library, with one exception: `wait.event` is executed by the engine, not
 by a registered handler (#3955). A `wait.event` step waits for ONE named
-event (`params.event`) under an optional declared bound
-(`params.timeoutMs`, milliseconds; absent means the host's own maximum)
+event (`params.event`) under a bound that is always bounded: `params.timeoutMs` when the job declares
+one, otherwise `pipeline.waitDefaultTimeoutMs` from the one policy resolver
+(settings beat env; default one hour, clamped to the platform ceiling). A
+wait never inherits the platform's 24-hour maximum by omission — an
+unbounded wait is a live instance, and the cost direction (2026-11-25)
+forbids that shape (see #6547, #6546, #6549)
 and resolves to a declared outcome that becomes the step's output — and
 therefore the next step's input:
 

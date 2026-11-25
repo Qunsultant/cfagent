@@ -307,7 +307,7 @@ export interface JobEventWaitRequest {
   stepName: string;
   /** The event type the delivery side sends. */
   event: string;
-  /** The declared bound in ms; null = no bound declared (the host's maximum). */
+  /** The declared bound in ms. Absent from the job, the engine passes the configured default (#6551); null is possible only for a caller that addresses the channel directly. */
   timeoutMs: number | null;
 }
 
@@ -4141,7 +4141,11 @@ export class JobPipelineControl {
         nodePath: path,
         stepName: `wait:${stepExecutionId(ctx.runId, path, stepIndex, shardKey, itemIndex)}`,
         event,
-        timeoutMs: typeof rawTimeout === "number" ? rawTimeout : null,
+        // Issue #6551 — a wait with no declared bound runs under the
+        // configured default, never the platform's 24h maximum: an unbounded
+        // wait is a live instance, and the cost direction forbids that shape.
+        timeoutMs:
+          typeof rawTimeout === "number" ? rawTimeout : this.policy.waitDefaultTimeoutMs,
       });
     } catch (error) {
       if (error instanceof JobPipelineError) throw error;

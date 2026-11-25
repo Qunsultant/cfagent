@@ -92,7 +92,7 @@ describe("durable event-wait stage (#3955)", () => {
     expect(seen).toHaveLength(1);
     expect(seen[0].event).toBe("approval.decided");
     expect(seen[0].jobId).toBe("approval");
-    expect(seen[0].timeoutMs).toBeNull();
+    expect(seen[0].timeoutMs).toBe(3_600_000);
     // The wait's outcome is the step's output, and the next step's input.
     const waited = await h.stores.artifacts.getArtifact(dispatch.runId, "root/step-0");
     expect(waited).toEqual({
