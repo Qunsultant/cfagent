@@ -1,4 +1,5 @@
 import type { StrategyDefinition } from "./types";
+import { catalogIdsForResearchStructure } from "../../../shared/optionsStrategyVocabulary";
 
 export function normalizeStrategyName(name: string): string {
   return name.toLowerCase().replace(/[’']/g, "").replace(/[^a-z0-9]+/g, "");
@@ -39,7 +40,11 @@ export class StrategyRegistry {
   }
 
   resolve(name: string): string[] {
-    return this.byName.get(normalizeStrategyName(name)) ?? [];
+    const registered = this.byName.get(normalizeStrategyName(name));
+    if (registered && registered.length > 0) return registered;
+    // Issue #6507: OODA structure names resolve through the one shared
+    // vocabulary, so a research name and its screen id never diverge.
+    return catalogIdsForResearchStructure(name);
   }
 
   /** Resolves names/ids, expanding "all"; unknown names are returned separately. */

@@ -14,6 +14,7 @@
  */
 
 import type { ResearchConfig } from "./researchConfig";
+import { researchStructureForCatalogId } from "../shared/optionsStrategyVocabulary";
 import type {
   ResearchLeg,
   StructureEconomics,
@@ -473,6 +474,19 @@ function draftThesis(
  * The defaults are unchanged, which is what keeps this slice behaviour-neutral.
  */
 
+/**
+ * Issue #6507: the OODA structure names now come from the one shared
+ * vocabulary catalog, keyed by the canonical screen-registry id. A missing
+ * catalog row fails loudly here rather than silently dropping a structure.
+ */
+function researchStructure(catalogId: string): string {
+  const name = researchStructureForCatalogId(catalogId);
+  if (!name) {
+    throw new Error(`No OODA structure is catalogued for screen strategy ${catalogId}`);
+  }
+  return name;
+}
+
 export function structuresForOutlook(
   outlook: Outlook,
   ownershipAllowed: boolean,
@@ -480,20 +494,32 @@ export function structuresForOutlook(
 ): string[] {
   switch (outlook) {
     case "bullish": {
-      const list = ["bull_call_spread", "bull_put_spread"];
-      if (ownershipAllowed) list.push("cash_secured_put");
-      if (pmccEnabled) list.push("pmcc");
+      const list = [
+        researchStructure("call_debit_spread"),
+        researchStructure("put_credit_spread"),
+      ];
+      if (ownershipAllowed) list.push(researchStructure("cash_secured_put"));
+      if (pmccEnabled) list.push(researchStructure("poor_mans_covered_call"));
       return list;
     }
     case "bearish":
-      return ["bear_put_spread", "bear_call_spread"];
+      return [
+        researchStructure("put_debit_spread"),
+        researchStructure("call_credit_spread"),
+      ];
     case "range_bound": {
-      const list = ["iron_condor", "butterfly"];
-      if (pmccEnabled) list.push("pmcc");
+      const list = [
+        researchStructure("iron_condor"),
+        researchStructure("long_call_butterfly"),
+      ];
+      if (pmccEnabled) list.push(researchStructure("poor_mans_covered_call"));
       return list;
     }
     case "volatile":
-      return ["long_straddle", "long_strangle"];
+      return [
+        researchStructure("long_straddle"),
+        researchStructure("long_strangle"),
+      ];
     default:
       return [];
   }
