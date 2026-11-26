@@ -1220,13 +1220,24 @@ descriptor names the stage), from the hand-off the past run gave it: the
 predecessor's `stage-output`, read fail-closed (`stage_input_missing`) through
 the same `stageHandoffKey` a re-run uses — sequential children chain, so child
 i>0 consumes child i-1's output, while a first child and every child of a
-parallel parent consume the parent's. The downstream rule is explicit, never
+parallel parent consume the parent's. Presence is judged by the artifact's
+KEY, never by its value: a predecessor that genuinely produced `null` (the
+research chain's noop root) recorded exactly that, and a replay reproduces it
+instead of refusing — "absent" and "recorded null" are different facts. The downstream rule is explicit, never
 silent: the stages AFTER the replayed one do not re-execute. And "one stage"
 has one meaning — a node that owns downstream stages is a composite, refused
 by name (`replay_stage_composite`) with the stages that can be replayed
 instead; the whole-run operation is `replayRun`. The surface is the existing
 `POST /api/jobs/:id/runs/:runId/replay?stage=job:2`, so it gains a selector,
 not a second endpoint.
+
+**The surface (#6362).** The OODA page's per-stage control (`ResearchStageControl`,
+#5917) offers Run / Re-run / Stop / Resume / Cancel, and now **Replay** for a
+completed or failed stage: it posts `{op: "replay"}` to the existing research
+stage route, which resolves the run on screen and calls `replayStage`. Re-run
+and Replay are kept distinct on purpose — a re-run continues the run it
+belongs to, a replay mints a separate execution — and the confirmation names
+the new run id, so a second execution is never created silently.
 
 ### 3.10 Pause / resume / cancel / rerun
 

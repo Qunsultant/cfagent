@@ -2601,6 +2601,14 @@ export class JobPipelineControl {
    *
    * `stageHandoffKey` owns which artifact that is, so run / re-run /
    * resume / replay all feed a stage what the run fed it.
+   *
+   * **"Absent" and "recorded null" are different facts (#6362).** A stage
+   * whose predecessor genuinely produced null (the research chain's noop
+   * root, for one) consumed exactly that null — refusing it would make the
+   * first stage of a chain un-replayable while the run itself fed it fine.
+   * Presence is therefore answered by whether the artifact KEY exists,
+   * never by whether the value is null; the value itself is returned as
+   * recorded, including null.
    */
   private async stageInput(
     definition: JobDefinition,
@@ -2614,17 +2622,17 @@ export class JobPipelineControl {
         `Stage "${jobStageId(nodePath)}" of job "${definition.jobId}" cannot be addressed independently: the job processes in memory, so its stages' hand-offs were never persisted.`,
       );
     }
-    const input = await this.deps.stores.artifacts.getArtifact(
-      runId,
-      this.stageHandoffKey(definition, nodePath),
-    );
-    if (input === null) {
+    const key = this.stageHandoffKey(definition, nodePath);
+    const keys = await this.deps.stores.artifacts.listArtifactKeys(runId);
+    if (!keys.includes(key)) {
       throw new JobPipelineError(
         "stage_input_missing",
         `Stage "${jobStageId(nodePath)}" of job "${definition.jobId}" has no persisted input in run ${runId}: its predecessor's hand-off is absent. Refusing rather than fabricating input.`,
       );
     }
-    return input;
+    // The key exists, so the hand-off was recorded — reproduce it verbatim,
+    // including a recorded null.
+    return this.deps.stores.artifacts.getArtifact(runId, key);
   }
 
   /**
