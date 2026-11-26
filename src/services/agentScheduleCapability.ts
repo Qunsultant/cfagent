@@ -46,6 +46,7 @@ import {
   AGENTIC_LOOP_UNAVAILABLE_REASON,
   type ScheduleProvenance,
 } from "../schedule";
+import type { AgentScheduleLoopSettings } from "./agentScheduleLoopSettings";
 import type { Permission } from "../security/authorization";
 import {
   authorize,
@@ -522,7 +523,7 @@ export function agentScheduleProvenance(
 
 export interface PendingScheduleApproval {
   id: string;
-  kind: "sdk" | "goal" | "workflow-stage";
+  kind: "sdk" | "goal" | "workflow-stage" | "agentic-loop";
   requestedBy: string;
   agentId: string;
   requestedAt: string;
@@ -653,6 +654,9 @@ export interface AgentWorkflowStageScheduleAdapter {
 export interface AgentScheduleExecutorDeps {
   pdp: (input: AgentSchedulePdpInput) => Promise<AgentSchedulePdpOutcome>;
   config?: AgentScheduleApprovalConfig;
+  resolveAgentScheduleLoopSettings?: (
+    login: string,
+  ) => Promise<AgentScheduleLoopSettings | null>;
   nowMs: () => number;
   nowIso: () => string;
   recordLedger: (record: JobRunRecord) => void | Promise<void>;
@@ -668,7 +672,12 @@ export interface AgentScheduleExecutorDeps {
   };
 }
 
-export type AgentScheduleActionRequest =
+export interface AgentScheduleLoopOrigin {
+  scheduleId: string;
+  runId: string;
+}
+
+export type AgentScheduleActionRequest = (
   | {
       action: "create";
       kind: "sdk";
@@ -759,7 +768,9 @@ export type AgentScheduleActionRequest =
       principal: AgentSchedulePrincipal;
       tenantId: string;
       scheduleId: string;
-    };
+      approvedPendingId?: string;
+    }
+) & { loopOrigin?: AgentScheduleLoopOrigin };
 
 /** Coded refusal outcomes for an agent schedule action (issue #6482 adds below-frequency-floor). */
 export type AgentScheduleRefusalCode =
@@ -924,6 +935,7 @@ export async function executeAgentScheduleAction(
     classifyAgentScheduleRequest(input, deps.config, { arming: isArmingAction });
 
   try {
+    const loopOrigin = request.loopOrigin;
     let requestedExecutionMode: unknown;
     if (
       (request.action === "create" || request.action === "update") &&
@@ -934,11 +946,25 @@ export async function executeAgentScheduleAction(
       requestedExecutionMode = request.executionMode;
     }
     if (requestedExecutionMode === "agentic-loop") {
-      return deny(
-        AGENTIC_LOOP_UNAVAILABLE_REASON,
-        request.action === "update" ? request.scheduleId : null,
-        "unsupported",
+      if (request.kind !== "goal") {
+        return deny(
+          "Agentic-loop execution is supported only for goal schedules.",
+          request.action === "update" ? request.scheduleId : null,
+          "unsupported",
+        );
+      }
+      const settings = await deps.resolveAgentScheduleLoopSettings?.(
+        principal.login,
       );
+      if (!settings?.enabled) {
+        return deny(
+          settings
+            ? "Agentic-loop scheduling is disabled by the owner-managed kill switch."
+            : AGENTIC_LOOP_UNAVAILABLE_REASON,
+          request.action === "update" ? request.scheduleId : null,
+          "unsupported",
+        );
+      }
     }
 
     // --- Load the target for non-create actions (existence + ownership + classification inputs).
@@ -1113,15 +1139,31 @@ export async function executeAgentScheduleAction(
     if (!classification.schedulable) {
       const scheduleId =
         action !== "create" && action !== "list" ? (request as { scheduleId: string }).scheduleId : null;
-      // Issue #6482 — a floor refusal is a coded outcome, not a plain
-      // denial: it surfaces as "below-frequency-floor" so callers can
-      // tell a refused arm from a denied one (and so an approved
-      // pending id, which only skips the approval gate below, can
-      // never arm a below-floor schedule).
       const code = classification.denialReason.includes(SCHEDULE_BELOW_FREQUENCY_FLOOR)
         ? "below-frequency-floor"
         : "denied";
       return deny(classification.denialReason, scheduleId, code);
+    }
+
+    const requestScheduleId =
+      "scheduleId" in request ? request.scheduleId : undefined;
+    const loopRearmNeedsApproval =
+      loopOrigin !== undefined &&
+      ((action === "create") ||
+        (action === "update" &&
+          (requestScheduleId === loopOrigin.scheduleId ||
+            requestedExecutionMode === "agentic-loop")) ||
+        (action === "resume" &&
+          requestScheduleId === loopOrigin.scheduleId));
+    if (loopRearmNeedsApproval) {
+      classification = {
+        ...classification,
+        requiresApproval: true,
+        approvalReasons: [
+          ...classification.approvalReasons,
+          `agentic loop ${loopOrigin.scheduleId} cannot re-arm itself or create a successor without the existing action:approve schedule-approval flow`,
+        ],
+      };
     }
 
     // --- PDP.
@@ -1153,18 +1195,45 @@ export async function executeAgentScheduleAction(
       }
     }
 
+    if (loopOrigin) {
+      const settings = await deps.resolveAgentScheduleLoopSettings?.(
+        principal.login,
+      );
+      if (!settings?.enabled) {
+        return deny(
+          settings
+            ? "Agentic-loop schedule actions are disabled by the owner-managed kill switch."
+            : AGENTIC_LOOP_UNAVAILABLE_REASON,
+          "scheduleId" in request ? request.scheduleId : null,
+          "denied",
+        );
+      }
+    }
+
+    if (
+      loopOrigin &&
+      action === "trigger" &&
+      kind === "goal" &&
+      targetGoal?.executionMode === "agentic-loop"
+    ) {
+      return deny(
+        "An agentic loop cannot trigger another agentic-loop schedule; the owner must trigger it from the scheduler.",
+        requestScheduleId ?? null,
+        "unsupported",
+      );
+    }
+
     // --- Approval gate (create + update only: arming work). An
     // approvedPendingId skips the gate: the approve endpoint verified
     // the decision and marks the approval approved after arming.
     if (
       classification.schedulable &&
       classification.requiresApproval &&
-      (AGENT_SCHEDULE_APPROVAL_GATED_ACTIONS as readonly string[]).includes(action)
+      ((AGENT_SCHEDULE_APPROVAL_GATED_ACTIONS as readonly string[]).includes(action) ||
+        loopRearmNeedsApproval)
     ) {
       const approvedPendingId =
-        request.action === "create" || request.action === "update"
-          ? (request as { approvedPendingId?: string }).approvedPendingId
-          : undefined;
+        (request as { approvedPendingId?: string }).approvedPendingId;
       if (approvedPendingId) {
         const pending = await deps.pendingApprovals.load();
         if (!resolvePendingScheduleApproval(pending, approvedPendingId)) {
@@ -1176,7 +1245,14 @@ export async function executeAgentScheduleAction(
         }
       } else {
         const pendingId = `pending-${crypto.randomUUID()}`;
-        const definition =
+        const definition = action === "resume"
+          ? {
+              action: "resume",
+              kind,
+              scheduleId: (request as { scheduleId: string }).scheduleId,
+              ...(loopOrigin ? { loopOrigin } : {}),
+            }
+          :
           request.action === "create" && request.kind === "sdk"
             ? { callback: request.callback, timing: request.timing, payload: request.payload }
             : request.action === "create" && request.kind === "workflow-stage"
@@ -1187,7 +1263,11 @@ export async function executeAgentScheduleAction(
                   ? { scheduleId: request.scheduleId, timing: request.timing, payload: request.payload }
                   : request.action === "update" && request.kind === "workflow-stage"
                     ? { scheduleId: request.scheduleId, timing: request.timing, reason: request.reason }
-                    : { scheduleId: (request as { scheduleId: string }).scheduleId, goal: (request as { goal: unknown }).goal };
+                    : {
+                        scheduleId: (request as { scheduleId: string }).scheduleId,
+                        goal: (request as { goal: unknown }).goal,
+                        ...(loopOrigin ? { loopOrigin } : {}),
+                      };
         const pending = await deps.pendingApprovals.load();
         await deps.pendingApprovals.save(
           recordPendingScheduleApproval(pending, {

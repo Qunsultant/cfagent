@@ -152,6 +152,9 @@ import type {
 export type {
   SubmitMessagesResult,
   ThinkSubmissionInspection,
+  StepContext as ThinkStepContext,
+  TurnConfig as ThinkTurnConfig,
+  TurnContext as ThinkTurnContext,
 } from "@cloudflare/think";
 // Issue #2693: the code-declared scheduled-task types, re-exported
 // here so the observe-only declaration module

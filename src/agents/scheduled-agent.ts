@@ -1,4 +1,10 @@
 import { PortThink } from "../actors/thinkAdapter";
+import type {
+  ThinkStepContext,
+  ThinkTurnContext,
+  ThinkTurnConfig,
+} from "../actors/thinkAdapter";
+import { createAgentScheduleManagementTool } from "./mcpAdapter";
 import { AGENTIC_SPEND_AGENT_ID } from "../payments/ledger";
 import { actorGateway } from "../services/cloudflareActorGateway";
 import {
@@ -39,7 +45,6 @@ import {
 } from "../services/feedJobs";
 
 import {
-  AGENTIC_LOOP_UNAVAILABLE_REASON,
   type ScheduledGoal,
   type ScheduleTick,
 } from "../schedule";
@@ -123,10 +128,15 @@ import {
   executeAgentScheduleAction,
   resolvePendingScheduleApproval,
   type AgentGoalScheduleAdapter,
+  type AgentScheduleLoopOrigin,
   type AgentScheduleActionResult,
   type AgentScheduleExecutorDeps,
   type PendingScheduleApproval,
 } from "../services/agentScheduleCapability";
+import {
+  type AgentScheduleLoopSettings,
+  type AgentScheduleLoopSettingsResolution,
+} from "../services/agentScheduleLoopSettings";
 import { resolveIaaaTenant } from "../security/iaaaGithubEndToEnd";
 import {
   DEPLOYMENT_DEFAULT_TENANT_ID,
@@ -502,6 +512,34 @@ export const SCHEDULED_AGENT_AUDIT_ACTOR = "scheduled-agent";
  */
 export const PENDING_SCHEDULE_APPROVALS_KEY = "pendingScheduleApprovals";
 
+type AgenticLoopStopReason =
+  | "cost-cap"
+  | "time-cap"
+  | "turn-cap"
+  | "kill-switch"
+  | "usage-unavailable"
+  | "settings-unavailable";
+
+interface ActiveAgenticLoop {
+  login: string;
+  scheduleId: string;
+  runId: string;
+  prompt: string;
+  requestId?: string;
+  settings: AgentScheduleLoopSettings;
+  controller: AbortController;
+  startedAtMs: number;
+  usedModelTokens: number;
+  turns: number;
+  stopReason?: AgenticLoopStopReason;
+}
+
+type AgenticLoopRunOutcome =
+  | { status: "completed"; usedModelTokens: number; turns: number }
+  | { status: "approval-required"; usedModelTokens: number; turns: number; pendingApprovalId: string }
+  | { status: "skipped"; detail: string; usedModelTokens: number; turns: number }
+  | { status: "failed"; detail: string; usedModelTokens: number; turns: number };
+
 export class ScheduledAgent extends PortThink {
   /**
    * #2840: in-memory firing claims for this isolate (the
@@ -510,6 +548,8 @@ export class ScheduledAgent extends PortThink {
    * goal id; see src/services/goalFiringClaims.ts.
    */
   private goalFiringClaims = new Map<string, GoalFiringMarker>();
+  private activeAgenticLoop?: ActiveAgenticLoop;
+  private agenticLoopTurnQueue: Promise<void> = Promise.resolve();
 
   /**
    * Issue #3121 Phase 2 (#3123) — the unified schedule store for
@@ -1192,6 +1232,115 @@ export class ScheduledAgent extends PortThink {
         message: "[ScheduledAgent][onStart] Could not arm the heartbeat alarm (the hourly watchdog will re-arm it):",
         error: error instanceof Error ? error.message : String(error),
       });
+    }
+  }
+
+  override async beforeTurn(
+    ctx: ThinkTurnContext,
+  ): Promise<ThinkTurnConfig | void> {
+    const base = await super.beforeTurn(ctx);
+    const active = this.activeAgenticLoop;
+    if (
+      !active ||
+      ctx.body?.agentScheduleLoopRunId !== active.runId
+    ) {
+      return base;
+    }
+    if (!ctx.requestId) {
+      active.stopReason = "settings-unavailable";
+      active.controller.abort("agentic-loop request identity unavailable");
+      throw new Error("Agentic-loop request identity is required for metered execution.");
+    }
+    active.requestId = ctx.requestId;
+
+    const scheduleTool = createAgentScheduleManagementTool({
+      env: this.env,
+      actingLogin: () => active.login,
+      loopOrigin: () => ({
+        scheduleId: active.scheduleId,
+        runId: active.runId,
+      }),
+      goalsOnly: true,
+      execute: (request) =>
+        executeAgentScheduleAction(this.agentScheduleExecutorDeps(), request),
+    });
+    return {
+      ...(base ?? {}),
+      messages: [{ role: "user", content: active.prompt }],
+      tools: {
+        ...((base?.tools ?? {}) as Record<string, unknown>),
+        manage_agent_schedule: scheduleTool,
+      },
+      activeTools: ["manage_agent_schedule"],
+      maxSteps: active.settings.maxTurns,
+      maxOutputTokens: active.settings.maxModelTokens,
+    };
+  }
+
+  override async onStepEnd(ctx: ThinkStepContext): Promise<void> {
+    const active = this.activeAgenticLoop;
+    if (
+      !active ||
+      !active.requestId ||
+      this.activeTurn?.requestId !== active.requestId ||
+      active.stopReason
+    ) {
+      return;
+    }
+
+    active.turns++;
+    const usage = ctx.usage;
+    const totalTokens = usage?.totalTokens;
+    const inputTokens = usage?.inputTokens;
+    const outputTokens = usage?.outputTokens;
+    const reportedTokens =
+      typeof totalTokens === "number" && Number.isFinite(totalTokens)
+        ? totalTokens
+        : typeof inputTokens === "number" &&
+            Number.isFinite(inputTokens) &&
+            typeof outputTokens === "number" &&
+            Number.isFinite(outputTokens)
+          ? inputTokens + outputTokens
+          : undefined;
+    if (
+      reportedTokens === undefined ||
+      !Number.isSafeInteger(reportedTokens) ||
+      reportedTokens < 0 ||
+      !Number.isSafeInteger(active.usedModelTokens + reportedTokens)
+    ) {
+      active.stopReason = "usage-unavailable";
+      active.controller.abort("provider usage unavailable");
+      return;
+    }
+    active.usedModelTokens += reportedTokens;
+
+    const resolution = await this.resolveAgentScheduleLoopSettingsForLogin(
+      active.login,
+    );
+    if (!resolution.settings) {
+      active.stopReason = "settings-unavailable";
+      active.controller.abort(resolution.issues.join("; ") || "loop settings unavailable");
+      return;
+    }
+    active.settings = resolution.settings;
+    if (!resolution.settings.enabled) {
+      active.stopReason = "kill-switch";
+      active.controller.abort("agentic-loop kill switch is disabled");
+      return;
+    }
+    if (Date.now() - active.startedAtMs >= resolution.settings.maxDurationMs) {
+      active.stopReason = "time-cap";
+      active.controller.abort("configured loop duration reached");
+      return;
+    }
+    if (active.turns >= resolution.settings.maxTurns) {
+      active.stopReason = "turn-cap";
+      active.controller.abort("configured loop turn limit reached");
+      return;
+    }
+    if (active.usedModelTokens >= resolution.settings.maxModelTokens) {
+      active.stopReason = "cost-cap";
+      active.controller.abort("configured model-token cost cap reached");
     }
   }
 
@@ -2166,10 +2315,23 @@ export class ScheduledAgent extends PortThink {
       };
 
       if (goal.executionMode === "agentic-loop") {
-        tick.errors.push(`${goal.id}: ${AGENTIC_LOOP_UNAVAILABLE_REASON}`);
-        tick.jobsSkipped++;
-        await recordGoalRun("skipped", { detail: AGENTIC_LOOP_UNAVAILABLE_REASON });
-        continue;
+        try {
+          if (await this.hasPendingAgenticLoopApproval(goal.id)) {
+            tick.jobsSkipped++;
+            await recordGoalRun("skipped", {
+              detail: "agentic-loop continuation is waiting for owner approval",
+            });
+            continue;
+          }
+        } catch (error) {
+          const detail = `could not read pending agentic-loop approvals: ${
+            error instanceof Error ? error.message : String(error)
+          }`;
+          tick.errors.push(`${goal.id}: ${detail}`);
+          tick.jobsSkipped++;
+          await recordGoalRun("failure", { error: detail });
+          continue;
+        }
       }
 
       // #2840: in-flight firing guard (the screen-lock pattern,
@@ -2230,6 +2392,39 @@ export class ScheduledAgent extends PortThink {
           tick.errors.push(`${goal.id}: budget check rejected: ${budgetOk.reason ?? "disallowed"}`);
           tick.jobsSkipped++;
           await recordGoalRun("skipped", { detail: `budget check rejected: ${budgetOk.reason ?? "disallowed"}` });
+          continue;
+        }
+
+        if (goal.executionMode === "agentic-loop") {
+          const outcome = await this.runBoundedAgenticLoop(goal);
+          const finishedAt = new Date().toISOString();
+          const usageDetail = `used ${outcome.usedModelTokens} provider-reported model tokens across ${outcome.turns} step(s)`;
+          if (outcome.status === "completed") {
+            goal.lastRun = finishedAt;
+            tick.jobsCreated++;
+            await recordGoalRun("success", {
+              descriptor: "bounded agentic loop completed",
+              detail: usageDetail,
+            });
+          } else if (outcome.status === "approval-required") {
+            goal.lastRun = finishedAt;
+            tick.jobsSkipped++;
+            await recordGoalRun("skipped", {
+              detail: `model-token cap reached; continuation awaits owner approval (${outcome.pendingApprovalId}); ${usageDetail}`,
+            });
+          } else if (outcome.status === "skipped") {
+            goal.lastRun = finishedAt;
+            tick.jobsSkipped++;
+            await recordGoalRun("skipped", {
+              detail: `${outcome.detail}; ${usageDetail}`,
+            });
+          } else {
+            tick.errors.push(`${goal.id}: ${outcome.detail}`);
+            tick.jobsSkipped++;
+            await recordGoalRun("failure", {
+              error: `${outcome.detail}; ${usageDetail}`,
+            });
+          }
           continue;
         }
 
@@ -3280,9 +3475,6 @@ export class ScheduledAgent extends PortThink {
      */
     actor?: unknown;
   }): Promise<ScheduledGoal> {
-    if (goal.executionMode === "agentic-loop") {
-      throw new Error(AGENTIC_LOOP_UNAVAILABLE_REASON);
-    }
     const id = goal.id.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
     if (!id) throw new Error("Goal id is required.");
     if (!goal.name.trim()) throw new Error("Goal name is required.");
@@ -3323,6 +3515,22 @@ export class ScheduledAgent extends PortThink {
     // and a goal created without one simply has none ("not
     // recorded", never backfilled).
     const provenance = provenanceFromPayload(goal);
+    if (goal.executionMode === "agentic-loop") {
+      const ownerLogin = provenance?.createdBy;
+      if (typeof ownerLogin !== "string" || !ownerLogin.trim()) {
+        throw new Error("Agentic-loop schedules require a recorded owner login.");
+      }
+      const resolution =
+        await this.resolveAgentScheduleLoopSettingsForLogin(ownerLogin);
+      if (!resolution.settings?.enabled) {
+        throw new Error(
+          resolution.settings
+            ? "Agentic-loop scheduling is disabled by the owner-managed kill switch."
+            : resolution.issues.join("; ") ||
+                "Agentic-loop scheduling requires valid owner-managed bounds.",
+        );
+      }
+    }
     const actor =
       typeof goal.actor === "string" && goal.actor.trim()
         ? goal.actor
@@ -3987,12 +4195,19 @@ export class ScheduledAgent extends PortThink {
         actor,
       );
     }
-    if (tick.jobsCreated === 0 && tick.errors.length === 0) {
+    const currentGoal = goals.find((g: ScheduledGoal) => g.id === id);
+    const waitingOnLoopApproval =
+      currentGoal?.executionMode === "agentic-loop" &&
+      (await this.hasPendingAgenticLoopApproval(id));
+    if (
+      tick.jobsCreated === 0 &&
+      tick.errors.length === 0 &&
+      !waitingOnLoopApproval
+    ) {
       // The restore reuses the same in-memory goals onCron evaluated
       // and saved — no re-read: the snapshot's createdAt values are
       // the stored ones, so the reset save preserves them exactly
       // as the re-read did.
-      const currentGoal = goals.find((g: ScheduledGoal) => g.id === id);
       if (currentGoal) {
         currentGoal.lastRun = origLastRun;
         await this.saveGoals(goals, records);
@@ -4015,6 +4230,258 @@ export class ScheduledAgent extends PortThink {
    * alias-resolved principal (the session precondition of
    * evaluateRoutePep cannot be met inside the DO).
    */
+  private async resolveAgentScheduleLoopSettingsForLogin(
+    login: string,
+  ): Promise<AgentScheduleLoopSettingsResolution> {
+    try {
+      const orchestrator = actorGateway.stub<{
+        getAgentScheduleLoopSettings(): Promise<AgentScheduleLoopSettingsResolution>;
+      }>(this.env.ORCHESTRATOR_AGENT, login);
+      return await orchestrator.getAgentScheduleLoopSettings();
+    } catch (error) {
+      return {
+        settings: null,
+        issues: [
+          `Unable to read owner-managed agentic-loop settings: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        ],
+      };
+    }
+  }
+
+  private async hasPendingAgenticLoopApproval(scheduleId: string): Promise<boolean> {
+    const approvals =
+      (await this.ctx.storage.get<PendingScheduleApproval[]>(
+        PENDING_SCHEDULE_APPROVALS_KEY,
+      )) ?? [];
+    return approvals.some((approval) => {
+      const definition = approval.definition as Record<string, unknown> | null;
+      return (
+        approval.kind === "agentic-loop" &&
+        approval.status === "pending" &&
+        definition?.scheduleId === scheduleId
+      );
+    });
+  }
+
+  private async withAgenticLoopTurn<T>(work: () => Promise<T>): Promise<T> {
+    const previous = this.agenticLoopTurnQueue;
+    let release!: () => void;
+    this.agenticLoopTurnQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await work();
+    } finally {
+      release();
+    }
+  }
+
+  private async requestAgenticLoopContinuationApproval(
+    goal: ScheduledGoal,
+    active: ActiveAgenticLoop,
+  ): Promise<string> {
+    const approvals =
+      (await this.ctx.storage.get<PendingScheduleApproval[]>(
+        PENDING_SCHEDULE_APPROVALS_KEY,
+      )) ?? [];
+    const existing = approvals.find((approval) => {
+      const definition = approval.definition as Record<string, unknown> | null;
+      return (
+        approval.kind === "agentic-loop" &&
+        approval.status === "pending" &&
+        definition?.scheduleId === goal.id
+      );
+    });
+    if (existing) return existing.id;
+
+    const id = `pending-loop-${crypto.randomUUID()}`;
+    const entry: PendingScheduleApproval = {
+      id,
+      kind: "agentic-loop",
+      requestedBy: active.login,
+      agentId: goal.provenance?.agentId ?? AGENTIC_SPEND_AGENT_ID,
+      requestedAt: new Date().toISOString(),
+      definition: {
+        purpose: "continue-agentic-loop",
+        scheduleId: goal.id,
+        runId: active.runId,
+        operation: goal.operation,
+        usedModelTokens: active.usedModelTokens,
+        maxModelTokens: active.settings.maxModelTokens,
+        turns: active.turns,
+      },
+      approvalReasons: [
+        `Provider-reported usage reached ${active.usedModelTokens} model tokens of the configured ${active.settings.maxModelTokens}-token cap. Approving starts one new bounded run; no monetary price is inferred.`,
+      ],
+      status: "pending",
+    };
+    await this.ctx.storage.put(PENDING_SCHEDULE_APPROVALS_KEY, [
+      ...approvals,
+      entry,
+    ]);
+    return id;
+  }
+
+  private async runBoundedAgenticLoop(
+    goal: ScheduledGoal,
+  ): Promise<AgenticLoopRunOutcome> {
+    const login = goal.provenance?.createdBy;
+    if (typeof login !== "string" || !login.trim()) {
+      return {
+        status: "failed",
+        detail: "agentic-loop schedule has no recorded owner login",
+        usedModelTokens: 0,
+        turns: 0,
+      };
+    }
+
+    return this.withAgenticLoopTurn(async () => {
+      const resolution =
+        await this.resolveAgentScheduleLoopSettingsForLogin(login);
+      if (!resolution.settings) {
+        return {
+          status: "failed",
+          detail:
+            resolution.issues.join("; ") ||
+            "owner-managed agentic-loop bounds are unavailable",
+          usedModelTokens: 0,
+          turns: 0,
+        };
+      }
+      if (!resolution.settings.enabled) {
+        return {
+          status: "skipped",
+          detail: "owner-managed agentic-loop kill switch is disabled",
+          usedModelTokens: 0,
+          turns: 0,
+        };
+      }
+
+      const prompt = [
+        `Scheduled goal: ${goal.name}`,
+        `Registered operation: ${goal.operation}`,
+        `Schedule id: ${goal.id}`,
+        "Work only within the available schedule-management capability. Do not create or re-arm schedules unless the owner approves the pending action.",
+      ].join("\n");
+      const active: ActiveAgenticLoop = {
+        login,
+        scheduleId: goal.id,
+        runId: crypto.randomUUID(),
+        prompt,
+        settings: resolution.settings,
+        controller: new AbortController(),
+        startedAtMs: Date.now(),
+        usedModelTokens: 0,
+        turns: 0,
+      };
+      this.activeAgenticLoop = active;
+      const timeout = setTimeout(() => {
+        if (!active.stopReason) {
+          active.stopReason = "time-cap";
+          active.controller.abort("configured loop duration reached");
+        }
+      }, active.settings.maxDurationMs);
+
+      try {
+        await this.lifecycle.start();
+        const result = await this.runTurn({
+          input: prompt,
+          body: { agentScheduleLoopRunId: active.runId },
+          signal: active.controller.signal,
+        });
+
+        if (active.stopReason === "cost-cap") {
+          const pendingApprovalId =
+            await this.requestAgenticLoopContinuationApproval(goal, active);
+          return {
+            status: "approval-required",
+            usedModelTokens: active.usedModelTokens,
+            turns: active.turns,
+            pendingApprovalId,
+          };
+        }
+        if (active.stopReason === "kill-switch") {
+          return {
+            status: "skipped",
+            detail: "owner-managed agentic-loop kill switch was disabled during execution",
+            usedModelTokens: active.usedModelTokens,
+            turns: active.turns,
+          };
+        }
+        if (
+          active.stopReason === "settings-unavailable" ||
+          active.stopReason === "usage-unavailable"
+        ) {
+          return {
+            status: "failed",
+            detail:
+              active.stopReason === "usage-unavailable"
+                ? "provider-reported model usage was unavailable; loop stopped without continuation"
+                : "owner-managed agentic-loop settings became unavailable; loop stopped",
+            usedModelTokens: active.usedModelTokens,
+            turns: active.turns,
+          };
+        }
+        if (result.status === "error" && !active.stopReason) {
+          return {
+            status: "failed",
+            detail: "Think returned an error while executing the scheduled goal",
+            usedModelTokens: active.usedModelTokens,
+            turns: active.turns,
+          };
+        }
+        if (result.status === "skipped" && !active.stopReason) {
+          return {
+            status: "failed",
+            detail: "Think skipped a scheduled goal despite receiving a non-empty prompt",
+            usedModelTokens: active.usedModelTokens,
+            turns: active.turns,
+          };
+        }
+        return {
+          status: "completed",
+          usedModelTokens: active.usedModelTokens,
+          turns: active.turns,
+        };
+      } catch (error) {
+        if (active.stopReason === "cost-cap") {
+          const pendingApprovalId =
+            await this.requestAgenticLoopContinuationApproval(goal, active);
+          return {
+            status: "approval-required",
+            usedModelTokens: active.usedModelTokens,
+            turns: active.turns,
+            pendingApprovalId,
+          };
+        }
+        if (
+          active.stopReason === "time-cap" ||
+          active.stopReason === "turn-cap"
+        ) {
+          return {
+            status: "completed",
+            usedModelTokens: active.usedModelTokens,
+            turns: active.turns,
+          };
+        }
+        return {
+          status: "failed",
+          detail: `Think execution failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          usedModelTokens: active.usedModelTokens,
+          turns: active.turns,
+        };
+      } finally {
+        clearTimeout(timeout);
+        if (this.activeAgenticLoop === active) this.activeAgenticLoop = undefined;
+      }
+    });
+  }
+
   private agentScheduleExecutorDeps(): AgentScheduleExecutorDeps {
     const goalsAdapter: AgentGoalScheduleAdapter = {
       list: async () => (await this.getGoals()) as unknown as Array<Record<string, unknown>>,
@@ -4031,6 +4498,8 @@ export class ScheduledAgent extends PortThink {
     return {
       pdp: (input) => evaluateAgentSchedulePdp(createAgentSchedulePdpDeps(this.env), input),
       config: resolveEnvironmentConfig(this.env).agentSchedule,
+      resolveAgentScheduleLoopSettings: async (login) =>
+        (await this.resolveAgentScheduleLoopSettingsForLogin(login)).settings,
       nowMs: () => Date.now(),
       nowIso: () => new Date().toISOString(),
       recordLedger: (record) => {
@@ -4075,7 +4544,11 @@ export class ScheduledAgent extends PortThink {
   async approvePendingGoalApproval(
     id: string,
     decidedBy: string,
-  ): Promise<{ approval: PendingScheduleApproval; scheduleId?: string }> {
+  ): Promise<{
+    approval: PendingScheduleApproval;
+    scheduleId?: string;
+    continuation?: ScheduleTick;
+  }> {
     const all =
       (await this.ctx.storage.get<PendingScheduleApproval[]>(PENDING_SCHEDULE_APPROVALS_KEY)) ?? [];
     const entry = resolvePendingScheduleApproval(all, id);
@@ -4083,15 +4556,87 @@ export class ScheduledAgent extends PortThink {
     if (entry.status !== "pending") {
       throw new Error(`Pending approval '${id}' is already decided (${entry.status}).`);
     }
+    const def = entry.definition as Record<string, unknown>;
+    if (entry.kind === "agentic-loop") {
+      if (def.purpose !== "continue-agentic-loop") {
+        throw new Error(`Pending approval '${id}' has an unsupported agentic-loop purpose.`);
+      }
+      const scheduleId =
+        typeof def.scheduleId === "string" ? def.scheduleId : "";
+      if (!scheduleId) {
+        throw new Error(`Pending approval '${id}' has no schedule id.`);
+      }
+      const goal = (await this.getGoals()).find((item) => item.id === scheduleId);
+      if (!goal || !goal.enabled) {
+        throw new Error(
+          `Agentic-loop schedule '${scheduleId}' is missing or paused; approval was not consumed.`,
+        );
+      }
+      if (goal.provenance?.createdBy !== entry.requestedBy) {
+        throw new Error(
+          `Agentic-loop schedule '${scheduleId}' no longer belongs to the approval requester.`,
+        );
+      }
+      const settings =
+        await this.resolveAgentScheduleLoopSettingsForLogin(entry.requestedBy);
+      if (!settings.settings?.enabled) {
+        throw new Error(
+          settings.settings
+            ? "Agentic-loop scheduling is disabled by the owner-managed kill switch."
+            : settings.issues.join("; ") ||
+                "Owner-managed agentic-loop bounds are unavailable.",
+        );
+      }
+      const decided = decidePendingScheduleApproval(
+        all,
+        id,
+        "approved",
+        decidedBy,
+        new Date().toISOString(),
+      );
+      await this.ctx.storage.put(PENDING_SCHEDULE_APPROVALS_KEY, decided);
+      const continuation = await this.triggerGoal(scheduleId, undefined, decidedBy);
+      return {
+        approval: decided.find((item) => item.id === id)!,
+        scheduleId,
+        continuation,
+      };
+    }
     if (entry.kind !== "goal") {
       throw new Error(`Pending approval '${id}' is not a goal approval.`);
     }
-    const def = entry.definition as Record<string, unknown>;
+    const loopOriginRaw = def.loopOrigin as Record<string, unknown> | undefined;
+    const loopOrigin: AgentScheduleLoopOrigin | undefined =
+      loopOriginRaw &&
+      typeof loopOriginRaw.scheduleId === "string" &&
+      typeof loopOriginRaw.runId === "string"
+        ? {
+            scheduleId: loopOriginRaw.scheduleId,
+            runId: loopOriginRaw.runId,
+          }
+        : undefined;
+    if (def.loopOrigin !== undefined && !loopOrigin) {
+      throw new Error(`Pending approval '${id}' has an invalid loop origin.`);
+    }
     const deps = this.agentScheduleExecutorDeps();
     const principal = { login: entry.requestedBy, agentId: entry.agentId };
     const tenantId = resolveIaaaTenant(this.env);
     let armed: AgentScheduleActionResult;
-    if (def.scheduleId !== undefined) {
+    if (def.action === "resume") {
+      const kind = def.kind;
+      if (kind !== "goal" || !loopOrigin || typeof def.scheduleId !== "string") {
+        throw new Error(`Pending approval '${id}' has an invalid resume definition.`);
+      }
+      armed = await executeAgentScheduleAction(deps, {
+        action: "resume",
+        kind: "goal",
+        principal,
+        tenantId,
+        scheduleId: def.scheduleId,
+        approvedPendingId: id,
+        loopOrigin,
+      });
+    } else if (def.scheduleId !== undefined) {
       armed = await executeAgentScheduleAction(deps, {
         action: "update",
         kind: "goal",
@@ -4100,6 +4645,7 @@ export class ScheduledAgent extends PortThink {
         scheduleId: String(def.scheduleId),
         goal: def.goal as Record<string, unknown>,
         approvedPendingId: id,
+        ...(loopOrigin ? { loopOrigin } : {}),
       });
     } else {
       armed = await executeAgentScheduleAction(deps, {
@@ -4110,6 +4656,7 @@ export class ScheduledAgent extends PortThink {
         operation: String((def.goal as Record<string, unknown>).operation ?? ""),
         goal: def.goal as Record<string, unknown>,
         approvedPendingId: id,
+        ...(loopOrigin ? { loopOrigin } : {}),
       });
     }
     if (!armed.ok) {

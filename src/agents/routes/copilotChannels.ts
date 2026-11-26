@@ -106,6 +106,7 @@ import {
   writeAgentConfigValue,
   type AgentConfigIdentity,
 } from "../../services/agentConfigRegistry";
+import "../../services/agentScheduleLoopSettings";
 import { SCREENER_ND_AGENT_CLASS } from "../../config/screenerModes";
 import {
   isVoiceSurfaceId,

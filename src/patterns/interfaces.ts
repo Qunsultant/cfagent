@@ -207,6 +207,10 @@ export interface McpToolContext {
   agentScheduleExecute?: (
     request: import("../services/agentScheduleCapability").AgentScheduleActionRequest,
   ) => Promise<import("../services/agentScheduleCapability").AgentScheduleActionResult>;
+  /** Server-authored origin for a schedule-management tool running inside a scheduled loop. */
+  agentScheduleLoopOrigin?: () =>
+    | import("../services/agentScheduleCapability").AgentScheduleLoopOrigin
+    | undefined;
   /**
    * #2428 (Agent Mesh S17): resolver for the current mesh
    * trace's W3C traceparent, populated ONLY by a server-side
