@@ -94,7 +94,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  *  with the (internal_user_id, tenant_id) key + the
  *  agent_identity_attribute_index table + 1 unique index. */
 export const COMBINED_FIXTURE_SHA256 =
-  "8a8750a1c38b816b05d01d7970f5b745cef92c2e85f6fd83379a2fa8a769e497";
+  "347430d98b4fafb92368c185e64437ab0010c31667ffd9d7193207ce7f387607";
 /** All four planes' entries in plane order: D1, DO, ORM, remainder. */
 export const COMBINED_CATALOGUE_ENTRIES: CatalogueEntry[] = [
   ...D1_CATALOGUE_ENTRIES,

@@ -287,6 +287,18 @@ export const REMAINDER_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    // Issue #6557 — the provenance carrier on the instance: the four #3655
+    // facts, stamped at dispatch from the firing schedule payload and read
+    // at settle. One JSON column (four nullable fields), the checkpoint
+    // idiom: the record path reads one carrier, not four columns.
+    code: "schema.do.job_pipeline_instances.alter_table_add_column_run_provenance_json",
+    plane: "do",
+    table: "job_pipeline_instances",
+    statement: `ALTER TABLE job_pipeline_instances ADD COLUMN run_provenance_json TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.do.mas_async_jobs.alter_table_add_column_tenant_id",
     plane: "do",
     table: "mas_async_jobs",

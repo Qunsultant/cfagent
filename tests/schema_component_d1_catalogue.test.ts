@@ -176,6 +176,10 @@ const D1_MIGRATION_SQL_SHA256: Record<number, string> = {
   // #6102 adds migration 0089 (mas_events moves from the DO to D1
   // by replacement: the D1 table + its six indexes): 7 statements.
   89: "c71e3f5330d8bed684bfe29b8afb214320a4d57631874b2c000c9b311225b111",
+  // Issue #6557 — the instance provenance carrier (one ALTER).
+  90: "e01a768735f78765dca5c8175b0a4fa47445da5d44698fcdc51dcf0cc02fc9fc",
+  // Issue #6557 — the four #3655 provenance columns on the run record.
+  91: "512b256bba92bf3f267fb058cfa9245485b3c2bf4333ee2c36fb311a5a49f3f3",
 };
 
 /** Per-version statement counts, measured from the base runner. */
@@ -282,6 +286,9 @@ const D1_MIGRATION_STATEMENT_COUNTS: Record<number, number> = {
   // #6102 adds migration 0089 (mas_events D1 table + six indexes):
   // 7 statements.
   89: 7,
+  // Issue #6557 — one instance ALTER, four record ALTERs.
+  90: 1,
+  91: 4,
 };
 
 /** The 13 seed-DML statements, exact text, measured from the base runner. */
@@ -325,7 +332,7 @@ function expectedD1Model(): SchemaModel {
 }
 
 describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
-  it("catalogues all 290 runner statements: 277 schema + 13 seed", () => {
+  it("catalogues all 295 runner statements: 282 schema + 13 seed", () => {
     const catalogue = buildD1Catalogue();
     // #5086 adds migration 0070 (otel_config_overrides table): 224 → 225.
     // #4767 adds migrations 0071/0072 (4 D1 ALTERs): 225 → 229.
@@ -345,10 +352,12 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
     // #6151 S4 adds migration 0087 (nav admin config: 3 tables + 1 index): 273 → 277.
     // #5160 adds migration 0088 (IDP attributes profile: rebuild + index table): 273 → 279.
     // #6102 adds migration 0089 (mas_events D1 table + six indexes): 283 → 290.
-    // Union: 290 (schema 277, seeds 13).
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(290);
-    expect(catalogue.size()).toBe(290);
-    expect(catalogue.byKind("schema").length).toBe(277);    expect(catalogue.byKind("seed").length).toBe(13);
+    // #6557 adds migrations 0090/0091 (instance provenance carrier + four
+    // record provenance columns): 290 → 295.
+    // Union: 295 (schema 282, seeds 13).
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(295);
+    expect(catalogue.size()).toBe(295);
+    expect(catalogue.byKind("schema").length).toBe(282);    expect(catalogue.byKind("seed").length).toBe(13);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
       const upper = statement.trim().toUpperCase();
@@ -375,7 +384,7 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
     expect(verbs.get("CREATE TABLE")).toBe(115);
     expect(verbs.get("CREATE INDEX")).toBe(66);
     expect(verbs.get("CREATE UNIQUE INDEX")).toBe(11);
-    expect(verbs.get("ALTER TABLE")).toBe(83);    expect(verbs.get("DROP TABLE")).toBe(2);
+    expect(verbs.get("ALTER TABLE")).toBe(88);    expect(verbs.get("DROP TABLE")).toBe(2);
     expect(verbs.get("INSERT OR IGNORE")).toBe(8);
     expect(verbs.get("INSERT INTO")).toBe(2);
     expect(verbs.get("UPDATE")).toBe(3);
@@ -394,8 +403,9 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
     // on rebase: main took 0086 for the outcome facts, then 0087
     // for the nav admin config).
     // #6102 adds migration 0089 (mas_events D1 table + six indexes).
+    // #6557 adds migrations 0090/0091 (provenance).
     expect(versions).toEqual(
-      Array.from({ length: 89 }, (_, i) => i + 1),
+      Array.from({ length: 91 }, (_, i) => i + 1),
     );    const allCodes = new Set<string>();
     for (const version of versions) {
       const codes = D1_MIGRATION_CODES[version];

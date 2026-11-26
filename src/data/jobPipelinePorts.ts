@@ -252,6 +252,58 @@ export interface JobCheckpoint {
   updatedAt: string;
 }
 
+/**
+ * Issue #6557 — the four provenance facts one run's terminal record
+ * carries (#3655): which broker, which data provider, which mode, and
+ * which resolver leg decided the mode. Every field is nullable and an
+ * explicit null is a recorded fact ("the firing payload named none"),
+ * never an absent column — the same "never backfilled, never guessed"
+ * rule the #3655 fields state.
+ */
+export interface JobRunProvenance {
+  brokerId: string | null;
+  dataProviderId: string | null;
+  mode: "live" | "paper" | null;
+  modeSource: "pin" | "selection" | "inference" | null;
+}
+
+/**
+ * Issue #6557 — parse the instance's provenance carrier. Unknown or
+ * malformed values read as null (an explicit "the payload named none"),
+ * never as an inferred fact: the carrier is written by this module's own
+ * serializer and read by three residencies, so a shape drift must fail
+ * closed rather than leak a half-parsed object into a run record.
+ */
+export function parseRunProvenance(
+  raw: string | null | undefined,
+): JobRunProvenance | null {
+  if (raw === null || raw === undefined || raw === "") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const value = parsed as Record<string, unknown>;
+  const text = (field: unknown): string | null =>
+    typeof field === "string" && field.length > 0 ? field : null;
+  const mode =
+    value.mode === "live" || value.mode === "paper" ? value.mode : null;
+  const modeSource =
+    value.modeSource === "pin" ||
+    value.modeSource === "selection" ||
+    value.modeSource === "inference"
+      ? value.modeSource
+      : null;
+  return {
+    brokerId: text(value.brokerId),
+    dataProviderId: text(value.dataProviderId),
+    mode,
+    modeSource,
+  };
+}
+
 /** One job's live instance record (management state + checkpoint). */
 export interface JobInstanceRecord {
   jobId: string;
@@ -315,6 +367,16 @@ export interface JobInstanceRecord {
    * row written before the column existed.
    */
   runDefinitionVersion?: number | null;
+  /**
+   * Issue #6557 — the broker/provider/mode provenance this run executed
+   * under, captured at dispatch from the firing schedule payload (owner
+   * decision 2026-11-25: the payload is the ONLY source). Null on every
+   * other dispatch — manual, retried, replayed, re-run — never an
+   * inferred value. Persisted on the instance (same class of fact as
+   * `runScheduleId`): the settle path can be a different process, and
+   * the terminal record's #3655 fields must survive it.
+   */
+  runProvenance?: JobRunProvenance | null;
   checkpoint: JobCheckpoint | null;
   /**
    * The run's stage-runner checkpoint (#3549): one entry per

@@ -3746,6 +3746,52 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     kind: "schema",
     form: "literal",
   },
+  {
+    // Issue #6557 â€” the provenance carrier on the instance: stamped at
+    // dispatch from the firing schedule payload, read at settle (the
+    // settle path can be another process).
+    code: "schema.d1.job_pipeline_instances.alter_table_add_column_run_provenance_json",
+    plane: "d1",
+    table: "job_pipeline_instances",
+    statement: `ALTER TABLE job_pipeline_instances ADD COLUMN run_provenance_json TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // Issue #6557 â€” the four #3655 provenance fields on the D1 record, so
+    // a D1-recorded run and a DO-recorded run agree on them. The DO table
+    // has carried them since #3655; D1 could not store them.
+    code: "schema.d1.job_run_records.alter_table_add_column_broker_id",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN broker_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.job_run_records.alter_table_add_column_data_provider_id",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN data_provider_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.job_run_records.alter_table_add_column_mode",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN mode TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.job_run_records.alter_table_add_column_mode_source",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN mode_source TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
 ];
 
 /** Per-migration-version code lists, in statement order. */
@@ -4221,6 +4267,19 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
     "schema.d1.job_run_records.alter_table_add_column_xlsx_key",
     "schema.d1.job_run_records.alter_table_add_column_csv_key",
     "schema.d1.job_run_records.alter_table_add_column_report_url",
+  ],
+  // Issue #6557 â€” the instance's provenance carrier (one ALTER, its own
+  // migration because the job-pipeline store applies only this one).
+  90: [
+    "schema.d1.job_pipeline_instances.alter_table_add_column_run_provenance_json",
+  ],
+  // Issue #6557 â€” the four #3655 provenance columns on the run record (the
+  // run-record store applies this one; same split as 0075/0076).
+  91: [
+    "schema.d1.job_run_records.alter_table_add_column_broker_id",
+    "schema.d1.job_run_records.alter_table_add_column_data_provider_id",
+    "schema.d1.job_run_records.alter_table_add_column_mode",
+    "schema.d1.job_run_records.alter_table_add_column_mode_source",
   ],
 };
 

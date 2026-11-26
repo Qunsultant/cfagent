@@ -140,7 +140,8 @@ describe("POST /api/maintenance/recreate-schema (#4383)", () => {
     // column-add steps share one code and differ only by params.
     // Issue #3185 adds the usage_events tenant index to the DO leg: 139 → 140.
     // Issue #6167 adds the host_version remainder ALTER on mas_async_jobs: 140 → 141.
-    expect(body.selected).toHaveLength(141);
+    // Issue #6557 adds the instance provenance ALTER: 141 → 142.
+    expect(body.selected).toHaveLength(142);
     // Issue #4623 adds one probed DO statement (mas_async_jobs.tenant_id).
     // Issue #3185 adds one probed DO statement (usage_events.tenant_id):
     // the fresh CREATE TABLE already carries the column, so the ALTER
@@ -170,7 +171,8 @@ describe("POST /api/maintenance/recreate-schema (#4383)", () => {
     // #4767 adds migrations 0071/0072 (4 remainder ALTERs): 132 → 136.
     // Issue #3185 adds the usage_events tenant index to the DO leg: 139 → 140.
     // Issue #6167 adds the host_version remainder ALTER on mas_async_jobs: 140 → 141.
-    expect(body.report.executed).toHaveLength(141);
+    // Issue #6557 adds the instance provenance ALTER: 141 → 142.
+    expect(body.report.executed).toHaveLength(142);
     expect(body.report.failed).toEqual([]);
     expect(body.verification.ok).toBe(true);
     expect(body.verification.failures).toEqual([]);
@@ -230,8 +232,9 @@ describe("POST /api/maintenance/recreate-schema (#4383)", () => {
     expect(body.report.executed).toHaveLength(0);
     // Issue #3185 adds the usage_events tenant index to the DO leg: 139 → 140.
     // Issue #6167 adds the host_version remainder ALTER on mas_async_jobs: 140 → 141.
-    expect(body.planned).toHaveLength(141);
-    expect(body.notRequested).toHaveLength(141);
+    // Issue #6557 adds the instance provenance ALTER: 141 → 142.
+    expect(body.planned).toHaveLength(142);
+    expect(body.notRequested).toHaveLength(142);
     expect(body.verification.ok).toBe(false); // fresh store, nothing executed
     expect(ctx.audit).toHaveBeenCalledTimes(1);
   });
@@ -248,8 +251,9 @@ describe("POST /api/maintenance/recreate-schema (#4383)", () => {
     expect(status).toBe(200);
     // Issue #3185 adds the usage_events tenant index to the DO leg: 139 → 140.
     // Issue #6167 adds the host_version remainder ALTER on mas_async_jobs: 140 → 141.
-    expect(body.planned).toHaveLength(141);
-    expect(body.notRequested).toHaveLength(140);
+    // Issue #6557 adds the instance provenance ALTER: 141 → 142.
+    expect(body.planned).toHaveLength(142);
+    expect(body.notRequested).toHaveLength(141);
     expect(body.notRequested.map((s: any) => s.code)).not.toContain(
       "schema.do.mas_reports.create_table",
     );

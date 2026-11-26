@@ -2030,6 +2030,9 @@ export const jobPipelineInstances = sqliteTable("job_pipeline_instances", {
   runWorkflowInstanceId: text("run_workflow_instance_id"),
   /** Issue #5887 — the definition version this run was dispatched with. */
   runDefinitionVersion: integer("run_definition_version"),
+  /** Issue #6557 — the broker/provider/mode provenance the firing schedule
+   *  payload carried (JSON; null = no payload provenance, never inferred). */
+  runProvenanceJson: text("run_provenance_json"),
   checkpointJson: text("checkpoint_json"),
   stageCheckpointJson: text("stage_checkpoint_json"),
   stageDesiredJson: text("stage_desired_json"),
@@ -2108,6 +2111,12 @@ export const jobRunRecords = sqliteTable("job_run_records", {
   originRunId: text("origin_run_id"),
   /** Issue #5887 — the definition version the run executed (null = pre-retention row). */
   definitionVersion: integer("definition_version"),
+  /** Issue #6557 — the #3655 provenance fields, now on D1 too (null = no
+   *  firing-payload provenance; the DO table has carried them since #3655). */
+  brokerId: text("broker_id"),
+  dataProviderId: text("data_provider_id"),
+  mode: text("mode"),
+  modeSource: text("mode_source"),
   /** Issue #6099 — the owning tenant of a projected row (null = engine-written, never projected). */
   tenantId: text("tenant_id"),
   /** Issue #6099 — when the row landed via the projector (null = engine-written). */

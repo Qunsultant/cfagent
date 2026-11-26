@@ -159,7 +159,10 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(new Set(executedCodes).size).toBe(
       COMBINED_CATALOGUE_ENTRIES.length,
     );
-    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(519);    // Issue #6167 adds 1 entry (the host_version remainder ALTER
+    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(525);    // Issue #6557 adds 6 entries (migration 0090's instance
+    // provenance ALTER, migration 0091's four record provenance ALTERs,
+    // and the DO remainder twin of the instance ALTER): 519 → 525.
+    // Issue #6167 adds 1 entry (the host_version remainder ALTER
     // on mas_async_jobs): 452 → 453. Issue #5100 (F3 of #5094) adds 13:
     // 453 → 466 entries. Issue #5102 (F5 of #5094) adds 5 entries
     // (migration 0084: 4 job_run_records ALTERs + 1 index):
@@ -222,7 +225,8 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // 517 → 523 statements.
     // #6102 adds migration 0089 (mas_events D1 table + 6 indexes), each one statement:
     // 523 → 530 statements.
-    expect(executedStatements).toBe(530);
+    // Issue #6557 adds 6 entries, each one statement: 530 → 536 statements.
+    expect(executedStatements).toBe(536);
     const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);

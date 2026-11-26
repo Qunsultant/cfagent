@@ -28,6 +28,7 @@ import {
   MIGRATION_0081_JOB_RUN_RECORDS_PROJECTION,
   MIGRATION_0084_JOB_RUN_RECORDS_BINDING,
   MIGRATION_0086_JOB_RUN_RECORDS_OUTCOME_FACTS,
+  MIGRATION_0091_JOB_RUN_RECORD_PROVENANCE,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -58,6 +59,7 @@ export async function ensureJobRunRecordsSchema(db: JobRunRecordDb): Promise<num
     MIGRATION_0081_JOB_RUN_RECORDS_PROJECTION,
     MIGRATION_0084_JOB_RUN_RECORDS_BINDING,
     MIGRATION_0086_JOB_RUN_RECORDS_OUTCOME_FACTS,
+    MIGRATION_0091_JOB_RUN_RECORD_PROVENANCE,
   ]);
 }
 
@@ -110,6 +112,15 @@ function rowToRecord(row: JobRunRecordRow): JobRunRecord {
     ...(row.originRunId != null ? { originRunId: row.originRunId } : {}),
     ...(row.definitionVersion != null
       ? { definitionVersion: row.definitionVersion }
+      : {}),
+    // Issue #6557 — the #3655 provenance fields (migration 0091). Absent
+    // is omitted, like every nullable column above; a consumer treats
+    // absent via `?? null`, never an invented value.
+    ...(row.brokerId != null ? { brokerId: row.brokerId } : {}),
+    ...(row.dataProviderId != null ? { dataProviderId: row.dataProviderId } : {}),
+    ...(row.mode != null ? { mode: row.mode as JobRunRecord["mode"] } : {}),
+    ...(row.modeSource != null
+      ? { modeSource: row.modeSource as JobRunRecord["modeSource"] }
       : {}),
     // Issue #5102 (F5 of #5094) — a row stored before migration
     // 0084 carries none of the four binding columns; the spread
@@ -260,6 +271,13 @@ export class D1JobRunRecordStore {
       kind: record.kind ?? null,
       originRunId: record.originRunId ?? null,
       definitionVersion: record.definitionVersion ?? null,
+      // Issue #6557 — the four #3655 provenance fields, so a D1-recorded
+      // run agrees with a DO-recorded one; null when the dispatch named
+      // none (the explicit null, never an inferred value).
+      brokerId: record.brokerId ?? null,
+      dataProviderId: record.dataProviderId ?? null,
+      mode: record.mode ?? null,
+      modeSource: record.modeSource ?? null,
       // Issue #5102 (F5 of #5094) — the binding tuple, stamped
       // on new rows; null on rows whose call site carried none.
       accountType: record.accountType ?? null,
@@ -293,9 +311,11 @@ export class D1JobRunRecordStore {
    * when it was a no-op (exact replay). Same meta.changes detection
    * as the async-job adapter; same per-job cap prune as record().
    *
-   * Broker provenance (brokerId / dataProviderId / mode /
-   * modeSource) is NOT carried: the D1 table has no columns for it,
-   * and the engine's D1 writes drop it too — the DO row keeps it.
+   * Issue #6557 — broker provenance (brokerId / dataProviderId /
+   * mode / modeSource) IS carried now: migration 0091 added the four
+   * columns, so the projected row keeps the twin's facts instead of
+   * dropping them. The null upgrade still fills only tenant +
+   * projected_at_ms — an engine row's own fields stay authoritative.
    *
    * Issue #5102 (F5 of #5094) — the binding tuple IS carried: the
    * D1 table gained the four columns in migration 0084, so a
@@ -326,6 +346,12 @@ export class D1JobRunRecordStore {
       kind: record.kind ?? null,
       originRunId: record.originRunId ?? null,
       definitionVersion: record.definitionVersion ?? null,
+      // Issue #6557 — the projection carries the DO twin's provenance too
+      // (migration 0091), so the two surfaces agree on the run.
+      brokerId: record.brokerId ?? null,
+      dataProviderId: record.dataProviderId ?? null,
+      mode: record.mode ?? null,
+      modeSource: record.modeSource ?? null,
       // Issue #5102 (F5 of #5094) — the DO twin's binding tuple
       // rides the projection, so the D1 row is not unbound forever.
       accountType: record.accountType ?? null,

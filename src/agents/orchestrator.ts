@@ -105,7 +105,10 @@ import { declareStrategyScanObserveTasks, type ScheduledTasksObserveContext } fr
 import { declareStockCopilotTasks, type ScheduledTasksCopilotContext } from "./orchestrator/scheduledTasksCopilot";
 import { buildOrchestratorSkillSources } from "./orchestrator/skillPacks";
 import { autoRenewETradeTokens, autonomousGoalScreen, autonomousMarketScreen, autonomousStrategyDiscovery, collectIvHistory, expireStaleOrderDraft, runWorkflowStage, sendScheduledReminder, type ScheduledCallbackBroker, type ScheduledCallbackOutcome, type ScheduledCallbacksContext } from "./orchestrator/scheduledCallbacks";
-import { recordScheduleCallbackRun } from "./orchestrator/scheduleCallbackRunRecords";
+import {
+  payloadRunProvenance,
+  recordScheduleCallbackRun,
+} from "./orchestrator/scheduleCallbackRunRecords";
 import {
   STALE_LEDGER_SWEEP_RECORD_ID,
   STALE_ASYNC_JOB_SWEEP_RECORD_ID,
@@ -1302,6 +1305,11 @@ export class OrchestratorAgent extends PortThink {
       typeof record.userLogin === "string" && record.userLogin.trim()
         ? record.userLogin.trim()
         : undefined;
+    // Issue #6557 — the firing payload's broker/provider/mode facts ride
+    // the dispatch onto the run's instance, so the terminal record can
+    // carry them. A payload that names none dispatches with none, and the
+    // run records explicit nulls — never an inferred value.
+    const provenance = payloadRunProvenance(payload);
     await recordScheduleCallbackRun(
       this.ctx.storage.sql,
       "runPipelineJobSchedule",
@@ -1309,7 +1317,10 @@ export class OrchestratorAgent extends PortThink {
       schedule,
       async () => {
         const door = getScheduledAgentDoor(this.env);
-        await door.runPipelineJob(jobId, { userLogin });
+        await door.runPipelineJob(jobId, {
+          userLogin,
+          ...(provenance ? { provenance } : {}),
+        });
         return { outcome: "success", descriptor: `pipeline job ${jobId} dispatched` };
       },
       {

@@ -150,8 +150,10 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // #6151 S4 adds migration 0087 (nav admin config: 3 tables + 1 index): 512 → 516.
     // #5160 adds migration 0088 (IDP attributes profile: rebuild + index table): 512 → 518.
     // #6102 adds migration 0089 (mas_events D1 table + 6 indexes): 522 → 529.
-    // Union: 529.
-    expect(p.steps).toHaveLength(529);
+    // Issue #6557 adds 6 provenance steps (5 D1 ALTERs + the DO remainder
+    // twin): 529 → 535.
+    // Union: 535.
+    expect(p.steps).toHaveLength(535);
     expect(p.skipped).toHaveLength(1);
     expect(p.skipped[0].code).toBe(SEED_FORM_CODE);
     expect(p.skipped[0].reason).toMatch(/call site/i);
@@ -196,8 +198,9 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // #6151 S4 adds migration 0087 (nav admin config: 3 tables + 1 index): 512 → 516.
     // #5160 adds migration 0088 (IDP attributes profile: rebuild + index table): 512 → 518.
     // #6102 adds migration 0089 (mas_events D1 table + 6 indexes): 522 → 529.
-    // Union: 529.
-    expect(harness).toHaveLength(529);    // Production move 1: the rebuild CREATE for agent_price_catalogue
+    // Issue #6557 adds 6 provenance steps: 529 → 535.
+    // Union: 535.
+    expect(harness).toHaveLength(535);    // Production move 1: the rebuild CREATE for agent_price_catalogue
     // must stay after the RENAME that clears its table (a second
     // table-creation for the same table cannot run before the rename
     // on real SQLite). Production move 2: the legacy seed is hoisted
@@ -380,7 +383,8 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
     // #6102 adds migration 0089 (mas_events D1 table + 6 indexes): the
     // projected-model walk already has them (the ORM CREATE carries
     // the table), so the leg skips seven more: 18 → 25.
-    expect(selected.schema).toHaveLength(297);
+    // Issue #6557 adds 5 D1 provenance ALTER steps: 297 → 302.
+    expect(selected.schema).toHaveLength(302);
     expect(selected.seeds).toHaveLength(13);
     expect(selected.skipped).toHaveLength(25);
     expect(
@@ -404,7 +408,8 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
     // #5865 adds migration 0074 (definition history): 136 → 137.
     // Issue #3185 adds the usage_events tenant index to the DO leg: 139 → 140.
     // Issue #6167 adds the host_version remainder ALTER on mas_async_jobs: 140 → 141.
-    expect(selected.schema).toHaveLength(141);
+    // Issue #6557 adds the instance provenance ALTER: 141 → 142.
+    expect(selected.schema).toHaveLength(142);
     expect(selected.seeds).toHaveLength(0);
     // Issue #3185 adds one probed DO statement (usage_events.tenant_id):
     // the fresh CREATE TABLE already carries the column, so the ALTER

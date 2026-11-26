@@ -173,6 +173,7 @@ import type { ThinkScheduledTasks } from "../actors/thinkAdapter";
 import type {
   JobInstanceRecord,
   JobDefinition,
+  JobRunProvenance,
 } from "../data/jobPipelinePorts";
 import type { JobStagesRead, JobStatusView } from "../services/jobPipelineEngine";
 import { resolveRunNowTrigger } from "../services/jobPipelineEngine";
@@ -1196,7 +1197,12 @@ export class ScheduledAgent extends PortThink {
   /** Run one pipeline job now and settle it; returns the outcome view. */
   async runPipelineJob(
     jobId: string,
-    opts?: { userLogin?: string; trigger?: JobRunTrigger },
+    opts?: {
+      userLogin?: string;
+      trigger?: JobRunTrigger;
+      /** Issue #6557 — the firing schedule payload's provenance. */
+      provenance?: JobRunProvenance | null;
+    },
   ): Promise<{ jobId: string; runId: string; state: string; error?: string }> {
     const ctx = this.pipelineContext();
     const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
@@ -1211,7 +1217,12 @@ export class ScheduledAgent extends PortThink {
       opts?.trigger !== undefined
         ? normalizeJobRunTrigger(opts.trigger)
         : resolveRunNowTrigger(definition);
-    const dispatch = await control.runJob(jobId, { trigger });
+    // Issue #6557 — a scheduled firing passes the payload's provenance;
+    // every other caller passes none and the run records nulls.
+    const dispatch = await control.runJob(jobId, {
+      trigger,
+      ...(opts?.provenance ? { provenance: opts.provenance } : {}),
+    });
     if (!dispatch.completion) {
       return { jobId, runId: dispatch.runId, state: dispatch.state };
     }

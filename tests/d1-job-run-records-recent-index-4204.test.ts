@@ -145,7 +145,8 @@ describe("4204 migration 0073 — D1 job_run_records recent-read index", () => {
     // identity index) to the same store.
     // Issue #5102 adds 0084 (the binding tuple + binding index) to the same store.
     // Issue #6006 adds 0086 (the outcome facts, 9 ALTERs) to the same store.
-    expect(applied).toEqual([47, 72, 73, 76, 81, 84, 86]);
+    // Issue #6557 adds migration 0091 (the four provenance columns).
+    expect(applied).toEqual([47, 72, 73, 76, 81, 84, 86, 91]);
     const indexes = mock.sqlite
       .prepare(
         "SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'job_run_records'",

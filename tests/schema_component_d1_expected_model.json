@@ -3805,6 +3805,11 @@
           "name": "run_definition_version",
           "type": "INTEGER",
           "pk": 0
+        },
+        {
+          "name": "run_provenance_json",
+          "type": "TEXT",
+          "pk": 0
         }
       ],
       "constraints": {}
@@ -4003,6 +4008,26 @@
         },
         {
           "name": "report_url",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "broker_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "data_provider_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "mode",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "mode_source",
           "type": "TEXT",
           "pk": 0
         }

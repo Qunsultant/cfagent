@@ -23,6 +23,7 @@
  */
 import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
 import type { SqlStorage } from "../../orm";
+import type { JobRunProvenance } from "../../data/jobPipelinePorts";
 import {
   buildCronDispatchRecord,
   type CronDispatchRecordInput,
@@ -262,6 +263,32 @@ function payloadProvenance(payload: unknown): {
     ...(typeof p.accountId === "string" && p.accountId ? { accountId: p.accountId } : {}),
     ...(typeof p.bindingScope === "string" && p.bindingScope ? { bindingScope: p.bindingScope } : {}),
     ...(typeof p.bindingSource === "string" && p.bindingSource ? { bindingSource: p.bindingSource } : {}),
+  };
+}
+
+/**
+ * Issue #6557 — the four provenance facts a firing schedule payload
+ * carries, as the engine's `JobRunProvenance` carrier. Null when the
+ * payload names none of them (the engine then records explicit nulls);
+ * otherwise every field is present, with a null for the fact the payload
+ * omitted — never an inferred value. Reads the SAME parser the schedule
+ * run record uses, so the two surfaces cannot drift.
+ */
+export function payloadRunProvenance(payload: unknown): JobRunProvenance | null {
+  const p = payloadProvenance(payload);
+  if (
+    p.brokerId === undefined &&
+    p.dataProviderId === undefined &&
+    p.mode === undefined &&
+    p.modeSource === undefined
+  ) {
+    return null;
+  }
+  return {
+    brokerId: p.brokerId ?? null,
+    dataProviderId: p.dataProviderId ?? null,
+    mode: p.mode ?? null,
+    modeSource: p.modeSource ?? null,
   };
 }
 

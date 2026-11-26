@@ -3805,6 +3805,11 @@
           "name": "run_definition_version",
           "type": "INTEGER",
           "pk": 0
+        },
+        {
+          "name": "run_provenance_json",
+          "type": "TEXT",
+          "pk": 0
         }
       ],
       "constraints": {}
