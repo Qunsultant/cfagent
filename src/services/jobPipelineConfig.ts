@@ -85,6 +85,14 @@ export type JobPipelineErrorCode =
   | "stage_restart_rejected"
   | "replay_pre_retention_run"
   | "replay_definition_version_unresolved"
+  // Issue #5278 â€” the execution half: a resume/replay re-enters the run
+  // on the definition version it started under, so the same two facts
+  // refuse by name here rather than silently re-reading today's
+  // definition:
+  //  - the run predates the definition-version stamp (#5887);
+  //  - the stamped version is no longer resolvable.
+  | "resume_pre_retention_run"
+  | "resume_definition_version_unresolved"
   | "stage_port_unavailable";
 
 export class JobPipelineError extends Error {
