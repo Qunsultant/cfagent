@@ -1149,6 +1149,17 @@ never pass a policy — operator control of retry budgets is filed as
 (`src/services/resilience.ts:37`) without an injected RNG, so it uses
 `Math.random` — a determinism gap filed as #5280.
 
+**Live queries (#5279, query half).** `queryJob(jobId)` answers what only the
+executing process can prove: `live` (one of the run's units is executing here
+right now), the active `stage:unit` list, and the steps started so far. A run
+executing elsewhere — another isolate, the workflow residency — reads
+`live: false`, which is the honest answer from here; `getJob` remains the
+stored view. Read-only by contract: no write, no state advance. The signal
+half is deliberately not built: delivery to a parked `wait.event` already
+exists (`sendEvent`), while a *recorded*, boundary-honoured signal needs
+semantics the owner must name — recorded as a decision on #5279 rather than
+guessed here.
+
 **Per-step retry (#6396).** Retry is per-node by default, and a step now
 overrides it: `JobStepConfig.retry.bucket` names a bucket from the ONE policy
 list (`RETRY_BUCKET_NAMES`), validated at define — an unknown name refuses by
