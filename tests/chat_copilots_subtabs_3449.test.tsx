@@ -59,6 +59,10 @@ vi.mock("../src/client/StockCopilotPanel", () => ({
   StockCopilotPanel: () => <div data-testid="stock-copilot-panel">Stock Copilot Panel Surface</div>,
 }));
 
+vi.mock("../src/client/chat/SchedulerCopilotSurface", () => ({
+  SchedulerCopilotSurface: () => <div data-testid="scheduler-copilot-surface">Scheduler Surface</div>,
+}));
+
 import {
   DEFAULT_COPILOTS,
   getRegisteredCopilots,
@@ -93,6 +97,7 @@ describe("Copilot Registry & Extensibility (#3449)", () => {
     expect(isValidChatSubView("options")).toBe(true);
     expect(isValidChatSubView("stock")).toBe(true);
     expect(isValidChatSubView("biz")).toBe(true);
+    expect(isValidChatSubView("scheduler")).toBe(true);
     expect(isValidChatSubView("non_existent_view")).toBe(false);
     expect(isValidChatSubView(null)).toBe(false);
     expect(isValidChatSubView(123)).toBe(false);
@@ -180,16 +185,28 @@ describe("AgentChatTabContent Multi-Copilot Sub-Tabs & View Isolation (#3449)", 
     }
   });
 
-  it("renders all 4 copilot tabs in CapabilityNavBar", async () => {
+  it("renders the 4 registered copilots and the Scheduler tab in CapabilityNavBar", async () => {
     await renderChat();
 
     const tabs = container!.querySelectorAll(".chat-capability-subnav [role='tab']");
-    expect(tabs.length).toBeGreaterThanOrEqual(4);
+    expect(tabs.length).toBeGreaterThanOrEqual(5);
     const tabTexts = Array.from(tabs).map((t) => t.textContent || "");
     expect(tabTexts.some((txt) => txt.includes("General Copilot"))).toBe(true);
     expect(tabTexts.some((txt) => txt.includes("Options Copilot"))).toBe(true);
     expect(tabTexts.some((txt) => txt.includes("Stock Copilot"))).toBe(true);
     expect(tabTexts.some((txt) => txt.includes("BizCopilot"))).toBe(true);
+    expect(tabTexts.some((txt) => txt.includes("Scheduler"))).toBe(true);
+  });
+
+  it("in scheduler view: keeps the chat URL view and renders its surface beside the shared conversation", async () => {
+    window.history.replaceState({}, "", "/?tab=chat&view=scheduler");
+
+    await renderChat();
+
+    expect(container!.querySelector("[data-testid='scheduler-copilot-surface']")).not.toBeNull();
+    expect(container!.querySelector(".chat-input-bar")).not.toBeNull();
+    expect(container!.querySelector(".messages-stream")).not.toBeNull();
+    expect(window.location.search).toContain("view=scheduler");
   });
 
   it("in default/general view: StockCopilotPanel is NOT rendered, chat composer is active", async () => {

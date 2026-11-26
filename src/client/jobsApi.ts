@@ -13,6 +13,7 @@ import type { OpportunityHuntResult } from "../services/opportunityHunt";
 import type { UnifiedScheduleRecord } from "../data/unifiedSchedulePorts";
 import type { ScheduleProvenance } from "../schedule";
 import type { ScheduleSource } from "../config/scheduleSourceModes";
+import type { PendingScheduleApproval } from "../services/agentScheduleCapability";
 // The one transport for this module: apiFetch polls the 202
 // async-job contract (#3309) — a queued list/create/detail call
 // answers 202 with a statusUrl and the caller gets the completed
@@ -407,6 +408,45 @@ export async function listSchedules(
   const data = (await res.json().catch(() => ({}))) as any;
   if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
   return data.schedules || data || [];
+}
+
+/** Pending approvals for schedules owned by this OrchestratorAgent instance. */
+export async function listPendingScheduleApprovals(
+  userLogin: string,
+): Promise<PendingScheduleApproval[]> {
+  const data = await api<{ approvals: PendingScheduleApproval[] }>(
+    "/api/schedules/approvals",
+    { headers: { "x-user-login": userLogin } },
+  );
+  return data.approvals || [];
+}
+
+/** Pending goal approvals owned by the current ScheduledAgent instance. */
+export async function listPendingGoalScheduleApprovals(): Promise<PendingScheduleApproval[]> {
+  const data = await api<{ approvals: PendingScheduleApproval[] }>(
+    "/api/schedule/goals/approvals",
+  );
+  return data.approvals || [];
+}
+
+export async function decideScheduleApproval(
+  id: string,
+  decision: "approve" | "reject",
+  userLogin: string,
+): Promise<void> {
+  await api(`/api/schedules/approvals/${encodeURIComponent(id)}/${decision}`, {
+    method: "POST",
+    headers: { "x-user-login": userLogin },
+  });
+}
+
+export async function decideGoalScheduleApproval(
+  id: string,
+  decision: "approve" | "reject",
+): Promise<void> {
+  await api(`/api/schedule/goals/approvals/${encodeURIComponent(id)}/${decision}`, {
+    method: "POST",
+  });
 }
 
 /** One schedule's detail (the raw SDK schedule, or a paused list item). */

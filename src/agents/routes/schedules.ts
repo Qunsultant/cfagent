@@ -1480,8 +1480,17 @@ export async function handleSchedulesRoutes(
           action: "approve",
           nowMs: Date.now(),
         });
-        if (pdp.enforced && !pdp.allowed) {
-          return Response.json({ error: `Approval denied by policy: ${pdp.reason ?? "action:approve not granted"}` }, { status: 403 });
+        if (!pdp.enforced || !pdp.allowed) {
+          const reason = pdp.enforced
+            ? pdp.reason ?? "action:approve not granted"
+            : "PDP enforcement is disabled";
+          ctx.audit("agent.schedule.approval-denied", "orchestrator", {
+            pendingApprovalId: approvalId,
+            decidedBy: trusted.userLogin,
+            pdpEnforced: pdp.enforced,
+            reason,
+          });
+          return Response.json({ error: `Approval denied by policy: ${reason}` }, { status: 403 });
         }
         const port = createPendingScheduleApprovalPort(ctx.agentCtx.storage.sql);
         const entry = resolvePendingScheduleApproval(await port.load(), approvalId);

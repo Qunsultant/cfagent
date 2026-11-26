@@ -149,6 +149,26 @@ describe(" pause / resume (#273)", () => {
   });
 });
 
+describe("agent schedule approvals fail closed when PDP is disabled (#3122)", () => {
+  it("denies and audits approval decisions without enforced policy", async () => {
+    const res = await call("POST", "/api/schedules/approvals/not-found/approve");
+
+    expect(res?.status).toBe(403);
+    expect(await res!.json()).toEqual({
+      error: "Approval denied by policy: PDP enforcement is disabled",
+    });
+    expect(ctx.audit).toHaveBeenCalledWith(
+      "agent.schedule.approval-denied",
+      "orchestrator",
+      expect.objectContaining({
+        pendingApprovalId: "not-found",
+        decidedBy: "venus",
+        pdpEnforced: false,
+      }),
+    );
+  });
+});
+
 describe("PUT /api/schedules/:id (#273)", () => {
   it("changes an interval job's frequency atomically (cancel + recreate)", async () => {
     // Issue #4235 — the update carries the explicit per-schedule

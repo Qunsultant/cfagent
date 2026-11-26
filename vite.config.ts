@@ -1,5 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { fileURLToPath } from "node:url";
+
+const configPath = (relativePath: string) =>
+  fileURLToPath(new URL(relativePath, import.meta.url));
 
 export default defineConfig({
   plugins: [react()],
@@ -28,11 +32,11 @@ export default defineConfig({
   },
   resolve: {
     alias: [
-      { find: /^(\.\/|\.\.\/.*\/)TradeExecutionPreview$/, replacement: new URL("./src/client/TradeExecutionPreview.tsx", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1") },
-      { find: /^(\.\/|\.\.\/.*\/)tradeExecutionPreview$/, replacement: new URL("./src/client/tradeExecutionPreview.ts", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1") },
-      { find: /^(\.\/|\.\.\/.*\/)SchedulesHome$/, replacement: new URL("./src/client/SchedulesHome.tsx", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1") },
-      { find: /^(\.\/|\.\.\/.*\/)schedulesHome$/, replacement: new URL("./src/client/schedulesHome.ts", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1") },
-      { find: "@", replacement: "/src" },
+      { find: /^(\.\/|\.\.\/.*\/)TradeExecutionPreview$/, replacement: configPath("./src/client/TradeExecutionPreview.tsx") },
+      { find: /^(\.\/|\.\.\/.*\/)tradeExecutionPreview$/, replacement: configPath("./src/client/tradeExecutionPreview.ts") },
+      { find: /^(\.\/|\.\.\/.*\/)SchedulesHome$/, replacement: configPath("./src/client/SchedulesHome.tsx") },
+      { find: /^(\.\/|\.\.\/.*\/)schedulesHome$/, replacement: configPath("./src/client/schedulesHome.ts") },
+      { find: "@", replacement: configPath("./src") },
     ],
   },
   // @ts-expect-error vitest configuration options
@@ -47,10 +51,10 @@ export default defineConfig({
     // under Node resolves `cloudflare:workers` — a scheme the ESM loader cannot
     // load. The stub only provides the base class; tests never instantiate one.
     alias: {
-      "cloudflare:workers": new URL("./tests/stubs/cloudflareWorkers.ts", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"),
+      "cloudflare:workers": configPath("./tests/stubs/cloudflareWorkers.ts"),
       // The /workflows alias stays: both workflow classes are
       // still ThinkWorkflow by ADR 0004 W13.
-      "@cloudflare/think/workflows": new URL("./tests/stubs/cloudflareThinkWorkflows.ts", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"),
+      "@cloudflare/think/workflows": configPath("./tests/stubs/cloudflareThinkWorkflows.ts"),
       // Issue #2003 (tracker #1951): TEST-ONLY bare alias, fully
       // replacing "@cloudflare/think" under Node vitest. The real
       // package's runtime graph reaches workerd-only imports
@@ -64,7 +68,7 @@ export default defineConfig({
       // package. It restores the bare alias #1738 removed, as a
       // test-only alias, because foundation #1962 reintroduced a
       // bare Think import through src/actors/thinkAdapter.ts.
-      "@cloudflare/think": new URL("./tests/stubs/cloudflareThink.ts", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"),
+      "@cloudflare/think": configPath("./tests/stubs/cloudflareThink.ts"),
     },
   },
 });
