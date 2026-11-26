@@ -1809,7 +1809,7 @@ describe("6503 step 11: declared tasks seed exactly one stored row", () => {
   function copilotCtx(mockD1: MockD1Database, flagOn: boolean) {
     return {
       env: {
-        ...(flagOn ? { STOCK_COPILOT_PAPER_ENABLED: "1" } : {}),
+        STOCK_COPILOT_PAPER_ENABLED: flagOn ? "1" : "0",
         AGENT_DB: mockD1,
       } as never,
       agentCtx: {} as never,

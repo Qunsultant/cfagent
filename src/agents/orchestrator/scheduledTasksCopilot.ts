@@ -5,8 +5,8 @@
  * and the cycle invocation, through the explicit context below).
  *
  * The task is declared ONLY on instances where both gates hold:
- * - the STOCK_COPILOT_PAPER_ENABLED flag is on (default OFF — flag-off
- *   instances declare nothing, run no cycles, place no orders), and
+ * - the STOCK_COPILOT_PAPER_ENABLED setting resolves to on
+ *   (explicitly disabled instances declare nothing, run no cycles, place no orders), and
  * - the instance holds a screener execution context (the per-login
  *   instances that carry an acting identity; context-less instances
  *   declare nothing, exactly as the #2693 observe task gates).
