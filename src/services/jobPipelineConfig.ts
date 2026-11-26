@@ -20,6 +20,7 @@ import {
   DEFAULT_JOB_EXECUTION_MODE,
   EPHEMERAL_GUARANTEE_CONTRACT,
   type JobExecutionMode,
+  type JobInstanceScope,
   type JobNodeConfig,
   type JobScheduleConfig,
   type ResolvedJobConfig,
@@ -139,6 +140,22 @@ function modeField<T extends string>(
     );
   }
   return value as T;
+}
+
+/**
+ * Issue #6555 — resolve a definition's instance scope. Absent
+ * means "job" (the historical one-run-per-jobId guard); "run"
+ * opts the definition into run-per-row mode. Anything else is
+ * a named refusal, never a silent downgrade to single mode.
+ */
+export function resolveInstanceScope(raw: unknown): JobInstanceScope {
+  if (raw === undefined) return "job";
+  if (raw !== "job" && raw !== "run") {
+    throw invalid(
+      `Job definition "instanceScope" must be "job" or "run"; got ${JSON.stringify(raw)}.`,
+    );
+  }
+  return raw;
 }
 
 /** Resolve a (partial) execution mode over the defaults, validating every axis. */
@@ -380,6 +397,14 @@ export function resolveJobDefinition(raw: unknown): JobDefinitionInput {
     },
     executionMode: resolveExecutionMode(root.executionMode),
     schedule: root.schedule ?? { enabled: false },
+    // Issue #6555 — the definition's instance scope, resolved
+    // from its top-level `instanceScope` field. Default "job"
+    // keeps the historical one-run-per-jobId guard; "run" opts
+    // the definition into run-per-row mode. Not an execution-mode
+    // axis (#4772 pins exactly four), it is a dispatch property
+    // of the definition, changeable via configureJob like any
+    // other config field.
+    instanceScope: resolveInstanceScope(raw.instanceScope),
   };
   assertExecutionModeSupported(config.executionMode);
   return {

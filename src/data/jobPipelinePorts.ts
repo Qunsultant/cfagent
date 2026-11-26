@@ -59,6 +59,41 @@ export function jobPipelineArtifactId(runId: string, artifactKey: string): strin
   return `${runId}\u0001${artifactKey}`;
 }
 
+/**
+ * Issue #6555 — what a job's live instance row is scoped to.
+ * "job" is the job's single management row (the historical
+ * shape: one run per jobId). "run" is one run's own row in
+ * run-per-row mode, keyed by (jobId, runKey).
+ */
+export type JobInstanceScope = "job" | "run";
+
+/**
+ * Issue #6555 — the store key of one run's own instance row:
+ * the job id, the run marker, and the run's dedup key, joined
+ * by the unit separator (the same composite-key precedent as
+ * `jobPipelineArtifactId`). Job ids and run keys never contain
+ * U+0001, so the key parses back unambiguously.
+ */
+export function jobPipelineRunInstanceId(jobId: string, runKey: string): string {
+  return `${jobId}\u0001run\u0001${runKey}`;
+}
+
+/** Parse a stored instance key back into its job, scope, and run key. */
+export function parseJobPipelineInstanceId(key: string): {
+  jobId: string;
+  instanceScope: JobInstanceScope;
+  runKey: string | null;
+} {
+  const marker = "\u0001run\u0001";
+  const idx = key.indexOf(marker);
+  if (idx === -1) return { jobId: key, instanceScope: "job", runKey: null };
+  return {
+    jobId: key.slice(0, idx),
+    instanceScope: "run",
+    runKey: key.slice(idx + marker.length),
+  };
+}
+
 /** How a node's children and shards fan out. */
 export type JobConcurrencyMode = "sequential" | "parallel";
 /** batch = all input items in one pass; online = item-by-item as a stream. */
@@ -204,6 +239,16 @@ export interface ResolvedJobConfig {
   outputs: { reports: string[]; formats: string[]; channels: string[] };
   executionMode: JobExecutionMode;
   schedule: JobScheduleConfig;
+  /**
+   * Issue #6555 — what the live instance row is scoped to.
+   * "job" (default): one run per jobId, the historical guard.
+   * "run": run-per-row mode — concurrent submissions of the
+   * definition each get their own run and instance row.
+   * Resolved from the definition's top-level `instanceScope`
+   * field; not an execution-mode axis (#4772 pins exactly
+   * four axes), it is a dispatch property of the definition.
+   */
+  instanceScope: JobInstanceScope;
 }
 
 /** A stored job definition: the recursive root, its raw configuration, and its resolved form. */
@@ -307,6 +352,20 @@ export function parseRunProvenance(
 /** One job's live instance record (management state + checkpoint). */
 export interface JobInstanceRecord {
   jobId: string;
+  /**
+   * Issue #6555 — the row's scope. "job" (or absent, the
+   * historical shape) is the job's single management row;
+   * "run" is one run's own row in run-per-row mode, keyed by
+   * (jobId, runKey) and stored under the composite key.
+   */
+  instanceScope?: JobInstanceScope;
+  /**
+   * Issue #6555 — the run this row belongs to, in run-per-row
+   * mode: the submission's dedup key (the dispatching async
+   * job id when one dispatched the run, else the run id).
+   * Null/absent on management rows.
+   */
+  runKey?: string | null;
   state: JobRunState;
   desiredState: JobDesiredState;
   currentRunId: string | null;
@@ -415,7 +474,13 @@ export interface JobDefinitionStore {
 
 /** Live instance state and checkpoints. */
 export interface JobInstanceStore {
-  getInstance(jobId: string): Promise<JobInstanceRecord | null>;
+  /**
+   * The job's management row (runKey absent), or one run's own
+   * row in run-per-row mode (runKey = the run's dedup key,
+   * #6555). A runKey lookup that finds no row reads as null —
+   * the honest "no such run" state.
+   */
+  getInstance(jobId: string, runKey?: string | null): Promise<JobInstanceRecord | null>;
   saveInstance(record: JobInstanceRecord): Promise<void>;
 }
 
