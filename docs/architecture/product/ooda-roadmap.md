@@ -25,8 +25,37 @@
 | **I5** | Scale, latency & unit cost | H2 | #6381, #6327, #6336, #6389, #6447, #6333, #6343, #6344 |
 | **I6** | Research depth & configurability | H2 | #6360, #6363, #6364, #6365, #6366, #6373, #6037, #6359 |
 | **I7** | Security, tenancy & trust boundary | H2–H3 | #3961, #6379, #6337, #6392 |
-| **I8** | Engine platform maturity & portability | H3 | #6324, #6325, #6326, #6358, #6384, #6387, #6397, #6335, #6546, #6554, #6558, #6564, #5277, #5281, #5780, #3956–#3973 |
+| **I8** | **J-stack** engine maturity & portability | H2–H3 | #6324, #6325, #6326, #6358, #6384, #6387, #6397, #6335, #6546, #6554, #6558, #6564, #5277, #5281, #5780, #3956–#3973 |
 | **I9** | Commercialisation & ecosystem | H3 | research quota family *(new)*, API/MCP tier, #5757, #6338, #5769 |
+
+### 1.1 J-stack improvements at a glance
+
+The engine improvements live in five initiatives; only the OODA-blocking ones sit early by dependency, not by preference. This table is the index — every row is an existing issue.
+
+| J-stack improvement | Issue | Where | Why it matters commercially |
+|---|---|---|---|
+| Stage inputs actually reach steps | #6355 | **H1 · I1** | without it every control and every report is theatre |
+| Per-stage replay of a past run | #6400 (merged) | H1 · I2 | the reproducibility claim, per stage |
+| Replay/recovery residency fixes | #6398, #6399, #6401 | **H1 · I2** | "press replay" works instead of 404ing |
+| Job-level pause/cancel used by OODA | #6390 | H1 · I2 | a runaway analyze turn is stoppable |
+| Per-stage `maxParallel` + budget carriers | #6389, #6447 | H2 · I5 | bounded cost per run |
+| Shard-aware research steps | #6327 | H2 · I5 | bigger universes, same wall-clock |
+| Exec-mode combination matrix | #6336 | H2 · I5 | no unexplained refusals |
+| Tenant scoping in the engine | #3961 | H2 · I7 | the precondition for selling to desks |
+| Retry `timed_out` units within budget | #6326 | **H2 · I8** | a whole failure class becomes completions |
+| Partial-run outcome (`partial` state) | #6325 | **H2 · I8** | a partial result becomes sellable, not a failure |
+| One trace per run | #6358 | **H2 · I8** | diagnosis and support cost |
+| Schedule backfill | #6397 | **H2 · I8** | a missed morning is caught up, not lost |
+| Stage-completed consumer seam | #6392 | H2–H3 · I7 | queue-driven stages (#6376) |
+| Async-job convergence into the engine | #6554 | H3 · I8 | removes a parallel runtime |
+| Deadline abort on the converged path | #6546, #6558 | H3 · I8 | bounded hangs, no zombie work |
+| Execution context on records/artifacts | #6384, #6387 | H3 · I8 | audit joins across surfaces |
+| Transactional semantics (decision) | #6335 | H3 · I8 | failure semantics under partial writes |
+| Engine capability series | #3956–#3973 | H3 · I8 | the platform feature set competitors lack |
+| Portability (docker/CI, second substrate) | #5277, #5281, #5780 | H3 · I8 | vendor independence |
+| Engine container / programme | #6324 | H3 · I8 | the parent that holds the series together |
+
+**Promoted from H3 to H2 by this table:** #6325, #6326, #6358, #6397 — four cheap engine wins that cut support load and unlock partial-result selling *before* the platform programme completes. The rest stay H3 because they are platform investments, not OODA blockers.
 
 ---
 
@@ -141,7 +170,9 @@
 
 ## 4. H3 — Make it a platform & a business (2–4 quarters)
 
-### I8 — Engine platform maturity & portability
+### I8 — J-stack engine maturity & portability (H2–H3)
+
+**Promoted into H2:** #6325 (partial outcome), #6326 (retry `timed_out`), #6358 (one trace per run), #6397 (schedule backfill) — each is small, each removes a recurring support burden, and none depends on the rest of the programme.
 
 **Scope.** #6324 (the improvement container), #6325 (partial outcome), #6326 (retry `timed_out`), #6358 (one trace per run), #6384/#6387 (execution context on records/artifacts), #6397 (schedule backfill), #6335 (transactional semantics decision), #6546/#6554/#6558/#6564 (async-job convergence and deadline abort), the #3956–#3973 engine-gap series, and portability #5277/#5281/#5780.
 
