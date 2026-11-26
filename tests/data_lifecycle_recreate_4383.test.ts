@@ -242,10 +242,15 @@ async function makeWorld(
   const funnel = vi.fn();
   const d1 = new MockD1Database();
   // The framework-owned tables the D1 leg's indexes attach to.
+  // `unified_schedules` carries the full migration-0092 shape
+  // (#6503): the D1 leg's kind/state/created indexes attach to
+  // its columns, so a 2-column stub would fail their creation.
   d1.sqlite.exec(
     `CREATE TABLE cf_agents_jobs (time TEXT, exclusive TEXT, singleflight TEXT, running TEXT, execution_started_at TEXT, hung_timeout_seconds TEXT)`,
   );
-  d1.sqlite.exec(`CREATE TABLE unified_schedules (id TEXT, created_at TEXT)`);
+  d1.sqlite.exec(
+    `CREATE TABLE unified_schedules (id TEXT PRIMARY KEY, kind TEXT NOT NULL, state TEXT NOT NULL, callback TEXT, operation TEXT, definition_json TEXT NOT NULL, owner_login TEXT, provenance_json TEXT, alarm_id TEXT, paused_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+  );
 
   for (const [login, id] of [
     [OP, OP_ID],
@@ -410,13 +415,18 @@ describe("recreate, tenant scope (#4383)", () => {
     // #6151 S4 adds migration 0087 (nav admin config: 3 tables + 1 index): 300 → 304.
     // #5160 adds migration 0088 (IDP attributes profile: rebuild + index table): 300 → 306.
     // Issue #6557 adds 5 D1 provenance ALTERs: 310 → 315.
-    // Union: 315.
     // #6102 adds migration 0089 (mas_events D1 table + 6 indexes): the
     // projected-model walk already has them (the ORM CREATE carries
     // the table), so the D1 leg skips seven more: 18 → 25. Selected
-    // stays 310.
-    expect(body.d1.selected).toHaveLength(315);
-    expect(body.d1.skipped).toHaveLength(25);
+    // stays 315.
+    // #6503 adds migration 0092 (D1 unified_schedules table + 3 indexes + 6 seeds): the 3 D1 indexes are selected (+3) and retire the remainder created_idx (−1); the 6 seeds are skipped on this world (the stub table exists, so its creation is not selected) — 315 → 317.
+    // Union: 317.
+    expect(body.d1.selected).toHaveLength(317);
+    // #6503's 0092 adds 8 skipped D1 steps on this world: the 6
+    // seeds (their table's creation is not selected), the table
+    // creation itself (the stub table exists), and the retired
+    // remainder created_idx — 25 → 33.
+    expect(body.d1.skipped).toHaveLength(33);
     // Two member instances (alice, bob), each planning the fresh DO leg.
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {
@@ -518,8 +528,11 @@ describe("recreate, tenant scope (#4383)", () => {
     // #6151 S4 adds migration 0087 (nav admin config: 3 tables + 1 index): 300 → 304.
     // #5160 adds migration 0088 (IDP attributes profile: rebuild + index table): 300 → 306.
     // Issue #6557 adds 5 D1 provenance ALTERs: 310 → 315.
-    // Union: 315.
-    expect(body.d1.report.executed).toHaveLength(315);
+    // #6102 adds migration 0089 (mas_events D1 table + 6 indexes): the
+    // projected-model walk already has them, so the D1 leg skips seven more.
+    // #6503 adds migration 0092 (D1 unified_schedules table + 3 indexes + 6 seeds): the 3 D1 indexes are selected (+3) and retire the remainder created_idx (−1) — 315 → 317.
+    // Union: 317.
+    expect(body.d1.report.executed).toHaveLength(317);
     expect(body.d1.verification.ok).toBe(true);
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {

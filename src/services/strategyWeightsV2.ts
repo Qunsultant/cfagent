@@ -80,6 +80,11 @@ export const STRATEGY_WEIGHTS_V2_READERS = [
   { path: "src/services/championChallenger.ts", purpose: "challenger evaluation + weights-table bootstrap" },
   { path: "src/services/fitDiscoveryRunner.ts", purpose: "fit-discovery runner: bounds and policy evaluation" },
   { path: "src/services/proposalChallengerBridge.ts", purpose: "type-only: regime vocabulary" },
+  // #6503 — scheduled-screening tick (new file, the screening path
+  // extracted into the unified scheduler): builds v2 slices from the
+  // screened ideas and runs the adjustment; the adjustment self-checks
+  // the kill switch (halted, nothing applied) and the tick records it.
+  { path: "src/services/scheduledScreeningSteps.ts", purpose: "scheduled-screening tick: runs the v2 weights adjustment over the screened ideas (kill-switch self-checked)" },
 ] as const;
 
 /**

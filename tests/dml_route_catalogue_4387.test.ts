@@ -59,6 +59,7 @@ import {
   handleMaintenanceRoutes,
   type MaintenanceRouteContext,
 } from "../src/agents/routes/maintenance";
+import { createMemoryAuditStore } from "../src/security/iaaaAudit";
 import {
   handleOrchestratorMigrationRoutes,
   migrationInsertSql,
@@ -263,7 +264,10 @@ async function postClear(
 ) {
   const req = new Request(`https://agent.test${CLEAR_PATH}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    // Issue #6503 step 8b — the clear-table rows this file pins are
+    // platform-admin only; the caller header rides with the admin
+    // ctx built by makeAdminMaintenanceCtx below.
+    headers: { "Content-Type": "application/json", "x-user-login": ADMIN_LOGIN },
     body: JSON.stringify(body),
   });
   const res = await handleMaintenanceRoutes(
@@ -277,13 +281,38 @@ async function postClear(
 }
 
 describe("maintenance clear characterization: meta + events (#4387)", () => {
+  // Issue #6503 step 8b — the clear-table rows this section pins
+  // are platform-admin only: the ctx carries the file's admin
+  // identity (mapKv alias + memory membership store, defined
+  // below for the import section and reused here, not a second
+  // shape). postClear sends the matching x-user-login header.
+  function makeAdminMaintenanceCtx(db: DatabaseSync): MaintenanceRouteContext {
+    const store = createMemoryMembershipStore();
+    void store.put(platformAdminMembership(ADMIN_ID));
+    return {
+      agentCtx: { storage: { sql: makeSql(db) } },
+      audit: vi.fn(),
+      // Issue #6503 step 9 (G2) — the gated clear-table audit
+      // blocks without a working audit store; the fixture carries
+      // the memory store.
+      auditStore: createMemoryAuditStore(),
+      getScreenerExecutionContext: async () => undefined,
+      flagAliasKv: mapKv({
+        [`${IAAA_ALIAS_KEY_PREFIX}login:${ADMIN_LOGIN}`]: JSON.stringify({
+          githubLogin: ADMIN_LOGIN,
+          internalUserId: ADMIN_ID,
+          recordedAtMs: 1,
+          source: "wired-login",
+        }),
+      }),
+      flagMembershipStore: store,
+    } as unknown as MaintenanceRouteContext;
+  }
+
   it("preview counts without deleting and without auditing", async () => {
     const db = new DatabaseSync(":memory:");
     seedClearTables(db);
-    const ctx = {
-      agentCtx: { storage: { sql: makeSql(db) } },
-      audit: vi.fn(),
-    } as unknown as MaintenanceRouteContext;
+    const ctx = makeAdminMaintenanceCtx(db);
     for (const [table, expected] of [
       ["mas_job_outcomes_meta", 1],
       ["mas_events", 3],
@@ -300,10 +329,7 @@ describe("maintenance clear characterization: meta + events (#4387)", () => {
   it("confirm clears the watermark row; outcomes are untouched by this path", async () => {
     const db = new DatabaseSync(":memory:");
     seedClearTables(db);
-    const ctx = {
-      agentCtx: { storage: { sql: makeSql(db) } },
-      audit: vi.fn(),
-    } as unknown as MaintenanceRouteContext;
+    const ctx = makeAdminMaintenanceCtx(db);
     const { status, body } = await postClear(ctx, {
       table: "mas_job_outcomes_meta",
       confirm: true,
@@ -321,10 +347,7 @@ describe("maintenance clear characterization: meta + events (#4387)", () => {
   it("confirm clears audit history only with the second confirmation (#2489)", async () => {
     const db = new DatabaseSync(":memory:");
     seedClearTables(db);
-    const ctx = {
-      agentCtx: { storage: { sql: makeSql(db) } },
-      audit: vi.fn(),
-    } as unknown as MaintenanceRouteContext;
+    const ctx = makeAdminMaintenanceCtx(db);
     const refused = await postClear(ctx, { table: "mas_events", confirm: true });
     expect(refused.status).toBe(400);
     expect(countRows(db, "mas_events")).toBe(3);
@@ -341,10 +364,7 @@ describe("maintenance clear characterization: meta + events (#4387)", () => {
 
   it("missing tables preview and confirm at zero, never 500", async () => {
     const fresh = new DatabaseSync(":memory:");
-    const ctx = {
-      agentCtx: { storage: { sql: makeSql(fresh) } },
-      audit: vi.fn(),
-    } as unknown as MaintenanceRouteContext;
+    const ctx = makeAdminMaintenanceCtx(fresh);
     for (const table of ["mas_job_outcomes_meta", "mas_events"] as const) {
       const preview = await postClear(ctx, { table });
       expect(preview.status).toBe(200);

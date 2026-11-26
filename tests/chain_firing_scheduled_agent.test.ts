@@ -28,6 +28,9 @@ vi.mock("agents", () => ({
 
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
 import { compileGoal } from "../src/orchestrate";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 
 function makeCtx() {
   const store = new Map<string, unknown>();
@@ -42,8 +45,11 @@ function makeCtx() {
   };
 }
 
-function makeEnv(budgetAllowed = true) {
+function makeEnv(budgetAllowed = true, mockD1 = new MockD1Database()) {
   return {
+    // #6503 — goals live in the D1 unified store only (fail-closed
+    // without AGENT_DB); the agent never reads the "goals" KV key.
+    AGENT_DB: mockD1,
     PAYMENTS_AGENT: {
       idFromName: () => "payments-default",
       get: () => ({
@@ -62,17 +68,34 @@ function dueCron() {
   return `0 ${now.getUTCHours()} * * *`;
 }
 
-// NOTE: each test uses a distinct synthesized id. `getGoals` returns
-// the shared module-level DEFAULT_SCHEDULES array on an empty store,
-// and materialize pushes into it — reusing an id across tests would
-// leak a stamped goal from an earlier test into a later one (a
-// pre-existing test-harness hazard, not lane behavior).
+// NOTE: each test uses a distinct synthesized id. Post-#6503 each
+// test also gets its own MockD1, so no goal state leaks across
+// tests — but the first store op lazily ensures the schema and
+// migration 0092's goals seed lands the 9 built-in goals, so
+// materializedAgent prunes them: the tick must see ONLY the
+// materialized goal (same pattern as the #6503 G3 goals-tick file).
+async function pruneSeededGoals(mockD1: MockD1Database, keepIds: string[]) {
+  const store = createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules;
+  const keep = new Set(keepIds);
+  for (const row of await store.listByKind("goal")) {
+    if (!keep.has(row.id)) await store.remove(row.id);
+  }
+}
+
+/** Plant one goal row into `mockD1`, sweeping the migration seeds. */
+async function plantGoal(mockD1: MockD1Database, goal: any) {
+  const store = createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules;
+  await store.save(goalToRecord(goal));
+  await pruneSeededGoals(mockD1, [String(goal.id)]);
+}
+
 async function materializedAgent(
   id = "synth-do-fire",
   opts: { budgetAllowed?: boolean } = {},
 ) {
   const { ctx, store } = makeCtx();
-  const agent = new (ScheduledAgent as any)(ctx, makeEnv(opts.budgetAllowed ?? true));
+  const mockD1 = new MockD1Database();
+  const agent = new (ScheduledAgent as any)(ctx, makeEnv(opts.budgetAllowed ?? true, mockD1));
   const chain = compileGoal("Create a NASDAQ100 screen and send it to Slack", {
     budgetCents: 5000,
     budgetCapCents: 10000,
@@ -85,6 +108,7 @@ async function materializedAgent(
   expect(record.status).toBe("pending");
   await agent.approveSynthesizedSchedule(id);
   const goal = await agent.materializeSynthesizedSchedule(id);
+  await pruneSeededGoals(mockD1, [id]);
   return { agent, store, goal };
 }
 
@@ -134,7 +158,6 @@ describe("materialization in ScheduledAgent (#1517)", () => {
 
   it("onCron fires a materialized, approved, due goal and stamps goal + record", async () => {
     const { agent, store, goal } = await materializedAgent();
-    store.set("goals", [goal]);
     const tick = await agent.onCron();
     expect(tick.jobsCreated).toBe(1);
     expect(tick.jobsSkipped).toBe(0);
@@ -150,7 +173,6 @@ describe("materialization in ScheduledAgent (#1517)", () => {
   it("onCron never fires a killed, halted, or orphan chain goal", async () => {
     const { agent, store, goal } = await materializedAgent("synth-do-killed");
     await agent.killSynthesizedSchedule("synth-do-killed");
-    store.set("goals", [goal]);
     const killedTick = await agent.onCron();
     expect(killedTick.jobsCreated).toBe(0);
     expect(killedTick.jobsSkipped).toBe(1);
@@ -158,7 +180,6 @@ describe("materialization in ScheduledAgent (#1517)", () => {
     expect(killedTick.errors.join(" ")).toMatch(/killed/);
 
     const { agent: agent2, store: store2, goal: goal2 } = await materializedAgent("synth-do-halted");
-    store2.set("goals", [goal2]);
     const haltedTick = await agent2.onCron({ halted: true });
     expect(haltedTick.jobsCreated).toBe(0);
     expect(haltedTick.errors.join(" ")).toMatch(/halted/);
@@ -173,8 +194,12 @@ describe("materialization in ScheduledAgent (#1517)", () => {
       enabled: true,
     };
     const { ctx: ctx4, store: store4 } = makeCtx();
-    const agent4 = new (ScheduledAgent as any)(ctx4, makeEnv());
-    store4.set("goals", [orphan]);
+    const mockD1 = new MockD1Database();
+    const agent4 = new (ScheduledAgent as any)(ctx4, makeEnv(true, mockD1));
+    // #6503 — the orphan goal is planted in D1 (the "goals" KV key
+    // is dead); the migration-0092 seeds are swept so the tick sees
+    // only the orphan.
+    await plantGoal(mockD1, orphan);
     const orphanTick = await agent4.onCron();
     expect(orphanTick.jobsCreated).toBe(0);
     expect(orphanTick.jobsSkipped).toBe(1);
@@ -183,7 +208,6 @@ describe("materialization in ScheduledAgent (#1517)", () => {
 
   it("onCron budget rejection fires nothing and leaves the record due", async () => {
     const { agent, store, goal } = await materializedAgent("synth-do-budget", { budgetAllowed: false });
-    store.set("goals", [goal]);
     const tick = await agent.onCron();
     expect(tick.jobsCreated).toBe(0);
     const synth = (await agent.listSynthesizedSchedules()) as any[];

@@ -27,6 +27,8 @@ vi.mock("agents", () => ({
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
 import { compileGoal } from "../src/orchestrate";
 import { createChainLegExecutor } from "../src/agentic/chainExecutor";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 
 function makeCtx() {
   const store = new Map<string, unknown>();
@@ -41,8 +43,11 @@ function makeCtx() {
   };
 }
 
-function makeEnv(budgetAllowed = true) {
+function makeEnv(budgetAllowed = true, mockD1 = new MockD1Database()) {
   return {
+    // #6503 — goals live in the D1 unified store only (fail-closed
+    // without AGENT_DB); the agent never reads the "goals" KV key.
+    AGENT_DB: mockD1,
     PAYMENTS_AGENT: {
       idFromName: () => "payments-default",
       get: () => ({
@@ -62,7 +67,8 @@ function dueCron() {
 
 async function materializedAgent(id: string) {
   const { ctx } = makeCtx();
-  const agent = new (ScheduledAgent as any)(ctx, makeEnv());
+  const mockD1 = new MockD1Database();
+  const agent = new (ScheduledAgent as any)(ctx, makeEnv(true, mockD1));
   const chain = compileGoal("Create a NASDAQ100 screen and send it to Slack", {
     budgetCents: 5000,
     budgetCapCents: 10000,
@@ -71,14 +77,17 @@ async function materializedAgent(id: string) {
   await agent.synthesizeSchedule(chain, { id, cron: dueCron() });
   await agent.approveSynthesizedSchedule(id);
   const goal = await agent.materializeSynthesizedSchedule(id);
-  // Baseline hour-06 flake (not #1747): getGoals() seeds
-  // DEFAULT_SCHEDULES on first read, and daily-qa-sweep (cron
-  // "0 6 * * *", enabled, no lastRun) is due for the whole UTC
-  // hour 06, so its generic-path job inflated jobsCreated to 2
-  // during that hour. This file asserts chain-firing counts, so
-  // scope the tick to the chain goal only. Production seeding is
-  // unchanged.
-  await ctx.storage.put("goals", [goal]);
+  // #6503 — the old hour-06 flake workaround (overwriting the "goals"
+  // KV key) is dead with the key. The same scope is kept by pruning
+  // migration 0092's seeded built-ins from D1 after materialize, so
+  // the tick sees ONLY the chain goal: daily-qa-sweep (cron
+  // "0 6 * * *", enabled) would otherwise fire during UTC hour 06
+  // and inflate jobsCreated to 2. Same pattern as the #6503 G3
+  // goals-tick file.
+  const store = createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules;
+  for (const row of await store.listByKind("goal")) {
+    if (row.id !== id) await store.remove(row.id);
+  }
   return agent;
 }
 

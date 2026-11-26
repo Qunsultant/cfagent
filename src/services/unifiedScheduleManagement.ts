@@ -54,37 +54,46 @@ import { resolveCronEntryPoint } from "./consolidatedCronEntries";
 import { canonicalJson } from "./scheduleDedupe";
 import { classifyScheduleKind } from "./scheduleKinds";
 import { SCHEDULE_LIST_KIND_IDS, type ScheduleListKind } from "../config/scheduleListModes";
-import { RENEWAL_DISPATCH_CRON, RETENTION_DISPATCH_CRON, RETENTION_RECORD_ID, TOKEN_RENEWAL_RECORD_ID } from "./heartbeatDueChecks";
+import { RETENTION_RECORD_ID, TOKEN_RENEWAL_RECORD_ID } from "./heartbeatDueChecks";
+import { NIGHTLY_RESEARCH_RECORD_ID } from "./researchScheduleGuard";
+import { DEFAULT_SCHEDULE_MIN_INTERVAL_SECONDS } from "../config/scheduleFrequencyFloor";
+import { isBelowFrequencyFloorError } from "./scheduleFrequencyFloor";
 import {
-  nightlyResearchDispatchCron,
-  NIGHTLY_RESEARCH_RECORD_ID,
-  type ResearchFireHourConfig,
-} from "./researchScheduleGuard";
-import { DEFAULT_RESEARCH_JOB_CONFIG } from "../config/researchJobConfig";
-import {
-  STALE_LEDGER_SWEEP_DISPATCH_CRON,
   STALE_LEDGER_SWEEP_RECORD_ID,
-  STALE_ASYNC_JOB_SWEEP_DISPATCH_CRON,
   STALE_ASYNC_JOB_SWEEP_RECORD_ID,
-  SCHEDULE_WATCHDOG_DISPATCH_CRON,
   SCHEDULE_WATCHDOG_RECORD_ID,
 } from "./sweepWatchdogSchedule";
 
-/** Issue #4239 — re-exported beside the builder that uses it. */
+/** Issue #4239 — re-exported beside the seed specs that use it. */
 export { TOKEN_RENEWAL_RECORD_ID } from "./heartbeatDueChecks";
 
-/** Issue #4240 — re-exported beside the builder that uses it. */
+/** Issue #4240 — re-exported beside the seed specs that use it. */
 export { RETENTION_RECORD_ID } from "./heartbeatDueChecks";
 
-/** Issue #4241 — re-exported beside the builder that uses it. */
+/** Issue #4241 — re-exported beside the seed specs that use it. */
 export { NIGHTLY_RESEARCH_RECORD_ID } from "./researchScheduleGuard";
 
-/** Issue #4242 — re-exported beside the builders that use them. */
+/** Issue #4242 — re-exported beside the seed specs that use them. */
 export {
   STALE_LEDGER_SWEEP_RECORD_ID,
   STALE_ASYNC_JOB_SWEEP_RECORD_ID,
   SCHEDULE_WATCHDOG_RECORD_ID,
 } from "./sweepWatchdogSchedule";
+
+/**
+ * Issue #6503 — the six stored system schedules, by record id.
+ * The one job identity for these duties: a stored record (by id)
+ * and a live alarm for the same duty (by callback) are the same
+ * job, so the list collapses them to one row (#5890).
+ */
+export const SYSTEM_SCHEDULE_RECORD_IDS: ReadonlySet<string> = new Set([
+  TOKEN_RENEWAL_RECORD_ID,
+  RETENTION_RECORD_ID,
+  NIGHTLY_RESEARCH_RECORD_ID,
+  STALE_LEDGER_SWEEP_RECORD_ID,
+  STALE_ASYNC_JOB_SWEEP_RECORD_ID,
+  SCHEDULE_WATCHDOG_RECORD_ID,
+]);
 import type { ScheduledGoal } from "../schedule";
 import { isSubDailyCron, isSubDailyInterval, isValidCron } from "../schedule";
 
@@ -130,12 +139,14 @@ export const DECLARED_TASK_CALLBACK = "_runDeclaredScheduledTask";
  *   `{schedule, retry}` only, so two different tasks that resolved
  *   to the same schedule share one hash (both declared tasks show
  *   `1cc4bdea8e8b678cdc2258188071a26f`).
- * - A derived-record duty keys by its catalogue id: the live alarm
- *   (by callback) and the derived record (by id) are the same job —
- *   but ONLY when the catalogue entry's source is `derived-record`.
- *   A creatable callback (`autonomousMarketScreen`, …) is a job
- *   family, not one job: two user screens under it are two jobs, so
- *   they never collapse.
+ * - A stored system duty keys by its catalogue id: the live alarm
+ *   (by callback) and the stored record (by id) are the same job —
+ *   for the six system duties (`SYSTEM_SCHEDULE_RECORD_IDS`) and
+ *   for the ticker-push feed, whose catalogue entry's source is
+ *   `derived-record` (the feed, not a schedule). A creatable
+ *   callback (`autonomousMarketScreen`, …) is a job family, not
+ *   one job: two user screens under it are two jobs, so they never
+ *   collapse.
  * - Anything else keys by its own row id, so distinct user
  *   schedules keep distinct rows.
  */
@@ -173,11 +184,15 @@ export function scheduleJobKeyOf(input: ScheduleJobKeyInput): string {
   if (callback) {
     const byCallback = jobCatalogueEntryForCallback(callback);
     if (byCallback?.source === "derived-record") return `job:${byCallback.id}`;
+    if (byCallback && SYSTEM_SCHEDULE_RECORD_IDS.has(byCallback.id)) {
+      return `job:${byCallback.id}`;
+    }
   }
   const id = typeof holder.id === "string" ? holder.id : undefined;
   if (id) {
     const byId = jobCatalogueEntryForId(id);
     if (byId?.source === "derived-record") return `job:${byId.id}`;
+    if (SYSTEM_SCHEDULE_RECORD_IDS.has(id)) return `job:${id}`;
   }
   return `row:${id ?? "unknown"}`;
 }
@@ -213,21 +228,23 @@ export function declaredTaskIdOf(
  * The Schedules home merges at least seven sources into one table
  * with no source identity. The derivation below is the one reader
  * that attributes a row: it runs over the list shape
- * (`unifiedRecordToListItem`, the route-appended derived rows, and
- * the no-record alarm branch), so the row, its Source column, its
- * filter value and its detail dialog can never disagree. Pure and
- * total: every input yields exactly one source — a row whose
- * creation was never recorded reads "unknown" / "not recorded",
- * never a fabricated source.
+ * (`unifiedRecordToListItem` and the no-record alarm branch), so
+ * the row, its Source column, its filter value and its detail
+ * dialog can never disagree. Pure and total: every input yields
+ * exactly one source — a row whose creation was never recorded
+ * reads "unknown" / "not recorded", never a fabricated source.
  *
  * Rule order is load-bearing (first match wins): a ticker-push row
  * IS a derived-record catalogue entry, so the kind check precedes
  * the catalogue check; a sweep interval alarm runs under the same
- * callback as the derived sweep record, so the derived-record check
- * (stable id, provenance reason) precedes the callback check. The
- * #5880 job catalogue is the home of job identity: a derived
- * record resolves by its catalogue id, a callback/operation row by
- * its catalogue entry — no second id scheme is invented here.
+ * callback as the stored sweep record, so the sweep-alarm check
+ * precedes the provenance check. The #5880 job catalogue is the
+ * home of job identity: a stored system record resolves by its
+ * catalogue id, a callback/operation row by its catalogue entry —
+ * no second id scheme is invented here. (#6503: the six system
+ * duties are stored records now, so they resolve by their system
+ * provenance — or, for the sweeps/watchdog, as sweep alarms —
+ * never as derived records.)
  * ================================================================= */
 
 /** The three sweep/watchdog `scheduleEvery` guard callbacks (`src/agents/orchestrator.ts`). */
@@ -339,19 +356,6 @@ export function resolveScheduleSource(input: ScheduleSourceInput): ScheduleSourc
   if (input.kind === "ticker-push") {
     return { kind: "ticker-push", job: input.id, origin: "TickerAgent feed", agent: "TickerAgent" };
   }
-  // A derived record, by its stable catalogue id — or, for the IV
-  // collection (whose record id is its alarm id), by the provenance
-  // reason the builder stamps on the record and the payload.
-  const derivedById = jobCatalogueEntryForId(input.id);
-  if (derivedById?.source === "derived-record") {
-    return { kind: "derived", job: input.id, origin: "system due-check" };
-  }
-  if (typeof provenance?.reason === "string" && provenance.reason) {
-    const derivedByReason = jobCatalogueEntryForId(provenance.reason);
-    if (derivedByReason?.source === "derived-record") {
-      return { kind: "derived", job: provenance.reason, origin: "system due-check" };
-    }
-  }
   // A seeded built-in goal: tick-polled by the ScheduledAgent.
   if (input.kind === "goal" && isBuiltinScheduledGoalId(input.id)) {
     return { kind: "seeded", job: input.id, origin: "ScheduledAgent tick", agent: "ScheduledAgent" };
@@ -379,9 +383,9 @@ export function resolveScheduleSource(input: ScheduleSourceInput): ScheduleSourc
   if (callback === "runPipelineJobSchedule" || (jobId !== undefined && jobId.startsWith("jobdef:"))) {
     return { kind: "pipeline-job", job: jobId ?? input.id, origin: provenanceOrigin(provenance) };
   }
-  // A sweep/watchdog interval alarm: the same job as the derived
-  // row, a different row — the callback names the duty, never the
-  // derived record's id.
+  // A sweep/watchdog interval alarm: the same job as the stored
+  // sweep record — the callback names the duty, never the stored
+  // record's id.
   if ((SWEEP_ALARM_CALLBACKS as readonly string[]).includes(callback)) {
     return {
       kind: "sweep-alarm",
@@ -452,6 +456,166 @@ export async function filterUndeclaredTasks<T>(
     out[taskId] = task;
   }
   return out;
+}
+
+/* =================================================================
+ * Issue #6503 (step 11) — declared tasks seed one stored row.
+ * ================================================================= */
+
+/** One code-declared task to seed a stored row for. */
+export interface DeclaredTaskSeedSpec {
+  /** The task id `getScheduledTasks()` declares it under. */
+  taskId: string;
+  /** The Think schedule string the declaration carries ("every 1 hour", …). */
+  schedule: string;
+  /** The owning login, where the declaration knows one. */
+  ownerLogin?: string | null;
+}
+
+/** What one seed pass did (for tests + the reconcile log). */
+export interface SeedDeclaredTaskRecordsResult {
+  /** Task ids that gained a stored row on this pass. */
+  seeded: string[];
+}
+
+/**
+ * Issue #6503 (step 11) — parse a Think interval schedule
+ * ("every N minutes" / "every N hours", the only interval forms
+ * the two Orchestrator declarations use) to seconds, or null
+ * when the string is not an interval. Cron strings are not
+ * intervals: the seeder below records those under `cron` instead.
+ */
+export function declaredTaskIntervalSeconds(schedule: string): number | null {
+  const match = /^\s*every\s+(\d+)\s*(minutes?|hours?)\s*$/i.exec(schedule ?? "");
+  if (!match) return null;
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  return /hour/i.test(match[2] as string) ? amount * 3600 : amount * 60;
+}
+
+/**
+ * Issue #6503 (step 11) — seed exactly one stored D1 row per
+ * declared task, on first declaration only.
+ *
+ * - A missing row is seeded: id = task id, kind `screen` (the
+ *   same kind the pause path stores a declared task under, so the
+ *   pause / resume / delete / trigger verbs accept the seeded row
+ *   unchanged), state `active`, callback
+ *   `_runDeclaredScheduledTask`, definition carrying the Think
+ *   schedule + the `{ taskId }` payload the task-id reader
+ *   (`declaredTaskIdOf`) needs. The seeded row is active because
+ *   the declaration is already live today — seeding must not
+ *   change whether the task fires; it only gives the firing a
+ *   stored row to be the source of truth afterwards.
+ * - An existing row is NEVER overwritten, whatever its state: an
+ *   operator's pause, re-time, or delete is theirs, and a second
+ *   reconcile finds the row and leaves it alone — so repeated
+ *   reconciles seed exactly one row and never resurrect a
+ *   `deleted` tombstone.
+ * - A row the seeder cannot write (store failure) is skipped,
+ *   never thrown: seeding must not break the declaration, and
+ *   the next reconcile retries it. The declaration filter after
+ *   this call fails closed on an unreadable store anyway.
+ *
+ * Callers seed ONLY tasks they actually declare: a flag-gated
+ * task whose flag is off never reaches this function (its
+ * declaration does not exist), so no row is seeded for it, and
+ * the row seeds on the first reconcile after the flag flips on.
+ */
+export async function seedDeclaredTaskRecords(
+  store: Pick<UnifiedStoreLike, "get" | "save">,
+  specs: DeclaredTaskSeedSpec[],
+  nowIso: string,
+): Promise<SeedDeclaredTaskRecordsResult> {
+  const seeded: string[] = [];
+  for (const spec of specs) {
+    let existing: UnifiedScheduleRecord | undefined;
+    try {
+      existing = await store.get(spec.taskId);
+    } catch {
+      continue;
+    }
+    if (existing) continue;
+    const intervalSeconds = declaredTaskIntervalSeconds(spec.schedule);
+    const isCron =
+      intervalSeconds === null && /^\S+ \S+ \S+ \S+ \S+$/.test(spec.schedule.trim());
+    const record: UnifiedScheduleRecord = {
+      id: spec.taskId,
+      kind: "screen",
+      state: "active",
+      callback: DECLARED_TASK_CALLBACK,
+      definition: {
+        ...(intervalSeconds !== null
+          ? { type: "interval", intervalSeconds }
+          : isCron
+            ? { type: "cron", cron: spec.schedule.trim() }
+            : {}),
+        callback: DECLARED_TASK_CALLBACK,
+        payload: { taskId: spec.taskId },
+        schedule: spec.schedule,
+      },
+      ...(spec.ownerLogin ? { ownerLogin: spec.ownerLogin } : {}),
+      provenance: systemProvenance(`declared-task:${spec.taskId}`, new Date(nowIso)),
+      alarmId: null,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+    try {
+      await store.save(record);
+    } catch {
+      continue;
+    }
+    seeded.push(spec.taskId);
+  }
+  return { seeded };
+}
+
+/**
+ * Issue #6503 (G3) — resolve the stored record a firing belongs
+ * to, for the paused gate on the firing paths. One resolver serves
+ * both readers (the schedule-callback wrapper and the watchdog
+ * sweep) so the id → record mapping cannot drift between them.
+ *
+ * A firing names its row two ways, and neither alone is enough:
+ * - `scheduleId` — the linkage id: the payload's stamped
+ *   scheduleId when one was stamped (trigger route), else the SDK
+ *   schedule object's id. For screen/stage rows the record id IS
+ *   the alarm id, so a direct get hits.
+ * - `alarmId` — the SDK alarm id. The six system rows are keyed
+ *   by catalogue id with the SDK id in `alarmId` instead, so a
+ *   direct get misses and the list scan by alarmId is the hit.
+ *
+ * Returns undefined when no stored row answers for the firing: a
+ * legacy alarm-only firing with no unified row has no pause to
+ * honor, and the caller fires it (the kill-switch precedent: a
+ * gate that cannot resolve its state degrades to firing allowed).
+ * A store read failure also returns undefined — the gate never
+ * breaks a firing on a store it cannot read.
+ */
+export async function findStoredRecordForFiring(
+  store: Pick<UnifiedStoreLike, "get" | "list">,
+  ids: { scheduleId?: string | null; alarmId?: string | null },
+): Promise<UnifiedScheduleRecord | undefined> {
+  const candidates = [ids.scheduleId, ids.alarmId].filter(
+    (id): id is string => typeof id === "string" && id.length > 0,
+  );
+  for (const id of candidates) {
+    try {
+      const record = await store.get(id);
+      if (record) return record;
+    } catch {
+      // A failed get falls through to the alarmId scan below; a
+      // failed scan returns undefined (fail-open, see above).
+    }
+  }
+  const alarmId = ids.alarmId;
+  if (typeof alarmId !== "string" || !alarmId) return undefined;
+  try {
+    const all = await store.list();
+    return all.find((record) => record.alarmId === alarmId);
+  } catch {
+    return undefined;
+  }
 }
 
 /** The alarms port: the Agents SDK scheduler behind an interface. */
@@ -811,39 +975,6 @@ export interface TokenRenewalLastRun {
   outcome?: string;
 }
 
-/**
- * A token-renewal unified record, DERIVED — not stored, not
- * alarm-adopted. There is no steady-state alarm to adopt: the
- * duty fires through the heartbeat due-check (#4234,
- * runRenewTokensEntryPoint, RENEWAL_DISPATCH_CRON), and legacy
- * alarms are removed by migrateLegacyScreenSchedules. The cron
- * is read from RENEWAL_DISPATCH_CRON, never re-literalized, so
- * the record and the firing check can never disagree about the
- * cadence; the entry point is the ledger job id the runs join
- * on. Kind `internal` (the #4238 seventh kind), state `active`
- * — the duty IS live through the heartbeat, not disabled like
- * the Worker-cron inventory rows. An `existing` record keeps its
- * creation time.
- */
-export function tokenRenewalToRecord(
-  nowIso: string,
-  existing?: UnifiedScheduleRecord | null,
-): UnifiedScheduleRecord {
-  return {
-    id: TOKEN_RENEWAL_RECORD_ID,
-    kind: "internal",
-    state: "active",
-    callback: "autoRenewETradeTokens",
-    definition: {
-      type: "cron",
-      cron: RENEWAL_DISPATCH_CRON,
-      entryPoint: "renewTokens",
-    },
-    provenance: systemProvenance(TOKEN_RENEWAL_ORIGIN, new Date(nowIso)),
-    createdAt: existing?.createdAt ?? nowIso,
-    updatedAt: nowIso,
-  };
-}
 
 /**
  * Issue #3121 #4240 — the retention record's origin, named
@@ -862,39 +993,6 @@ export interface RetentionLastRun {
   detail?: string;
 }
 
-/**
- * A retention unified record, DERIVED — not stored, not
- * alarm-adopted. There is no steady-state alarm to adopt: the
- * duty fires through the heartbeat due-check (#4234,
- * runRetentionEntryPoint, RETENTION_DISPATCH_CRON), and the
- * Worker cron is OFF per #4112. The cron is read from
- * RETENTION_DISPATCH_CRON, never re-literalized, so the record
- * and the firing check can never disagree about the cadence; the
- * entry point is the ledger job id the runs join on. Kind
- * `internal` (the #4238 seventh kind), state `active` — the duty
- * IS live through the heartbeat, not disabled like the
- * Worker-cron inventory rows. An `existing` record keeps its
- * creation time.
- */
-export function retentionToRecord(
-  nowIso: string,
-  existing?: UnifiedScheduleRecord | null,
-): UnifiedScheduleRecord {
-  return {
-    id: RETENTION_RECORD_ID,
-    kind: "internal",
-    state: "active",
-    callback: "retention",
-    definition: {
-      type: "cron",
-      cron: RETENTION_DISPATCH_CRON,
-      entryPoint: "retention",
-    },
-    provenance: systemProvenance(RETENTION_ORIGIN, new Date(nowIso)),
-    createdAt: existing?.createdAt ?? nowIso,
-    updatedAt: nowIso,
-  };
-}
 
 /**
  * Issue #3121 #4241 — the nightly research record's origin, named
@@ -911,46 +1009,6 @@ export interface NightlyResearchLastRun {
   outcome?: string;
 }
 
-/**
- * A nightly research unified record, DERIVED — not stored, not
- * alarm-adopted. There is no steady-state alarm to adopt: the duty
- * fires through the every-30-minute tick rider (#354, dispatchTickRiders posts
- * /research/scheduled-tick on every tick; the route's guard decides
- * fire/no-fire), and the Worker cron is OFF per #4112. The cron is
- * read from nightlyResearchDispatchCron (derived from the resolved
- * research config, issue #6030), never re-literalized, so
- * the record and the firing guard can never disagree about the
- * cadence; the entry point is the ledger job id the runs join on
- * (jobId = record id). Kind `internal` (the #4238 seventh kind),
- * state `active` — the duty IS live through the tick, not disabled
- * like the Worker-cron inventory rows. (The Nov-12 definition
- * recorded `disabled` — "firing waits on #4234"; #4234 has since
- * landed as 55e3e1f, the alarm tick dispatches the research POST,
- * so the wait is over. A failed run writes no ledger row — its
- * failure is recorded by the #2037 tick-outcome sink — so the
- * last run shown is the last successful firing.) An `existing`
- * record keeps its creation time.
- */
-export function nightlyResearchToRecord(
-  nowIso: string,
-  existing?: UnifiedScheduleRecord | null,
-  config: ResearchFireHourConfig = DEFAULT_RESEARCH_JOB_CONFIG,
-): UnifiedScheduleRecord {
-  return {
-    id: NIGHTLY_RESEARCH_RECORD_ID,
-    kind: "internal",
-    state: "active",
-    callback: "nightly-research",
-    definition: {
-      type: "cron",
-      cron: nightlyResearchDispatchCron(config),
-      entryPoint: "nightly-research",
-    },
-    provenance: systemProvenance(NIGHTLY_RESEARCH_ORIGIN, new Date(nowIso)),
-    createdAt: existing?.createdAt ?? nowIso,
-    updatedAt: nowIso,
-  };
-}
 
 /**
  * Issue #3121 #4242 — the stale-ledger-task sweep record's origin,
@@ -1001,96 +1059,208 @@ export interface ScheduleWatchdogLastRun {
   detail?: string;
 }
 
+
+
+
+/* =================================================================
+ * Issue #6503 — the six stored system schedules, seeded once.
+ * ================================================================= */
+
 /**
- * A stale-ledger-task sweep unified record, DERIVED — not stored,
- * not alarm-adopted. The sweep IS live through its SDK alarm (armed
- * once per user from onStart, 6-hour interval), so the record reads
- * state `active`. The cron is read from
- * STALE_LEDGER_SWEEP_DISPATCH_CRON, never re-literalized, so the
- * record and the arming can never disagree about the cadence; the
- * entry point is the ledger job id the runs join on (jobId =
- * record id). Kind `internal` (the #4238 seventh kind). An
- * `existing` record keeps its creation time.
+ * The six system duties as stored schedules: the catalogue id is
+ * the record id (identity, ledger joins, and client ids are
+ * preserved), kind `internal`, created paused on the monthly
+ * interval (2,592,000s, the floor default) unless the caller
+ * passes a longer effective floor. Callbacks are the LIVE firing
+ * callbacks — `runResearchSchedule` for nightly research (the
+ * retired derived builder's `"nightly-research"` callback names
+ * no method; the catalogue already carried the live one) and `retention`
+ * (the OrchestratorAgent method that dispatches through the
+ * trigger-retention route, the pass's single implementation).
+ * The ledger sweep is per-user: its payload carries the userLogin
+ * the reconcile was called with.
  */
-export function staleLedgerSweepToRecord(
-  nowIso: string,
-  existing?: UnifiedScheduleRecord | null,
-): UnifiedScheduleRecord {
-  return {
-    id: STALE_LEDGER_SWEEP_RECORD_ID,
-    kind: "internal",
-    state: "active",
-    callback: "sweepStaleLedgerTasks",
-    definition: {
-      type: "cron",
-      cron: STALE_LEDGER_SWEEP_DISPATCH_CRON,
-      entryPoint: "sweep-stale-ledger-tasks",
+export interface SystemScheduleSeedSpec {
+  id: string;
+  callback: string;
+  origin: string;
+  payload?: Record<string, unknown>;
+}
+
+export function systemScheduleSeedSpecs(userLogin?: string | null): SystemScheduleSeedSpec[] {
+  return [
+    { id: TOKEN_RENEWAL_RECORD_ID, callback: "autoRenewETradeTokens", origin: TOKEN_RENEWAL_ORIGIN },
+    { id: RETENTION_RECORD_ID, callback: "retention", origin: RETENTION_ORIGIN },
+    { id: NIGHTLY_RESEARCH_RECORD_ID, callback: "runResearchSchedule", origin: NIGHTLY_RESEARCH_ORIGIN },
+    {
+      id: STALE_LEDGER_SWEEP_RECORD_ID,
+      callback: "sweepStaleLedgerTasks",
+      origin: STALE_LEDGER_SWEEP_ORIGIN,
+      ...(userLogin ? { payload: { userLogin } } : {}),
     },
-    provenance: systemProvenance(STALE_LEDGER_SWEEP_ORIGIN, new Date(nowIso)),
-    createdAt: existing?.createdAt ?? nowIso,
-    updatedAt: nowIso,
-  };
+    { id: STALE_ASYNC_JOB_SWEEP_RECORD_ID, callback: "sweepStaleAsyncJobs", origin: STALE_ASYNC_JOB_SWEEP_ORIGIN },
+    { id: SCHEDULE_WATCHDOG_RECORD_ID, callback: "watchdogMissedSchedules", origin: SCHEDULE_WATCHDOG_ORIGIN },
+  ];
+}
+
+/** What one reconcile did (for the onStart log + tests). */
+export interface ReconcileSystemSchedulesResult {
+  /** Ids seeded on this run (missing records created paused). */
+  seeded: string[];
+  /** Ids of active records re-armed on this run (dead alarm recovered). */
+  armed: string[];
+  /** Ids of active records whose live alarm was adopted (alarmId stamped). */
+  adopted: string[];
+  /** Ids of stale sub-floor alarms cancelled on this run. */
+  cancelledStaleAlarms: string[];
+  /** True when the ledger-sweep seed was skipped for want of a userLogin. */
+  skippedLedgerSweepNoUser: boolean;
 }
 
 /**
- * A stale-async-job sweep unified record, DERIVED — not stored, not
- * alarm-adopted. The sweep IS live through its SDK alarm (armed
- * once per instance from onStart, 15-minute interval), so the
- * record reads state `active`. The cron is read from
- * STALE_ASYNC_JOB_SWEEP_DISPATCH_CRON, never re-literalized; the
- * entry point is the ledger job id the runs join on (jobId =
- * record id). Kind `internal` (the #4238 seventh kind). An
- * `existing` record keeps its creation time.
+ * Issue #6503 — seed + reconcile the six stored system schedules.
+ * Runs on the Orchestrator onStart maintenance path, replacing the
+ * `ensure*` scheduleEvery arms (deleted, not kept as alternates).
+ *
+ * - A missing record is seeded: id = catalogue id, kind
+ *   `internal`, state `paused`, monthly interval, no alarm. A
+ *   seeded schedule never fires until a platform admin resumes it.
+ * - An existing record is NEVER overwritten: an operator's pause /
+ *   re-time / delete is theirs. An active record whose alarm died
+ *   is re-armed at its stored timing (net 1 of the body's "sweeps
+ *   when the store is wedged": a restart recovers a dead alarm);
+ *   an active record whose live alarm exists but whose alarmId is
+ *   stale adopts it (the #4238 adoption precedent).
+ * - Stale sub-floor alarms for the six callbacks are cancelled —
+ *   the pre-consolidation 6h/15m arms — EXCEPT an alarm a stored
+ *   active record claims (a floor raise never retroactively kills
+ *   a live schedule: the floor is enforced on arms, not on
+ *   already-armed alarms).
+ * - The ledger sweep seeds only when a userLogin is known: one
+ *   stored record per user, system-owned, with the userLogin in
+ *   the payload. Without a user there is no ledger to sweep.
+ *
+ * Best-effort at the call site (onStart never blocks startup on
+ * it), but the function itself throws on a store/alarm failure so
+ * the caller can log it — a silent skip would hide a missing seed.
  */
-export function staleAsyncJobSweepToRecord(
+export async function reconcileSystemScheduleRecords(
+  deps: UnifiedManagementDeps,
   nowIso: string,
-  existing?: UnifiedScheduleRecord | null,
-): UnifiedScheduleRecord {
-  return {
-    id: STALE_ASYNC_JOB_SWEEP_RECORD_ID,
-    kind: "internal",
-    state: "active",
-    callback: "sweepStaleAsyncJobs",
-    definition: {
-      type: "cron",
-      cron: STALE_ASYNC_JOB_SWEEP_DISPATCH_CRON,
-      entryPoint: "sweep-stale-async-jobs",
-    },
-    provenance: systemProvenance(STALE_ASYNC_JOB_SWEEP_ORIGIN, new Date(nowIso)),
-    createdAt: existing?.createdAt ?? nowIso,
-    updatedAt: nowIso,
+  options?: { userLogin?: string | null; intervalSeconds?: number },
+): Promise<ReconcileSystemSchedulesResult> {
+  const intervalSeconds = Math.max(
+    DEFAULT_SCHEDULE_MIN_INTERVAL_SECONDS,
+    options?.intervalSeconds ?? DEFAULT_SCHEDULE_MIN_INTERVAL_SECONDS,
+  );
+  const specs = systemScheduleSeedSpecs(options?.userLogin ?? null);
+  const result: ReconcileSystemSchedulesResult = {
+    seeded: [],
+    armed: [],
+    adopted: [],
+    cancelledStaleAlarms: [],
+    skippedLedgerSweepNoUser: false,
   };
-}
-
-/**
- * A missed-schedule watchdog unified record, DERIVED — not stored,
- * not alarm-adopted. The watchdog IS live through its SDK alarm
- * (armed once per instance from onStart, 15-minute interval), so
- * the record reads state `active`. The cron is read from
- * SCHEDULE_WATCHDOG_DISPATCH_CRON, never re-literalized; the entry
- * point is the record id (its runs join on the pre-existing
- * heartbeat job id — see scheduleIdToLedgerJobId). Kind `internal`
- * (the #4238 seventh kind). An `existing` record keeps its
- * creation time.
- */
-export function scheduleWatchdogToRecord(
-  nowIso: string,
-  existing?: UnifiedScheduleRecord | null,
-): UnifiedScheduleRecord {
-  return {
-    id: SCHEDULE_WATCHDOG_RECORD_ID,
-    kind: "internal",
-    state: "active",
-    callback: "watchdogMissedSchedules",
-    definition: {
-      type: "cron",
-      cron: SCHEDULE_WATCHDOG_DISPATCH_CRON,
-      entryPoint: "schedule-watchdog",
-    },
-    provenance: systemProvenance(SCHEDULE_WATCHDOG_ORIGIN, new Date(nowIso)),
-    createdAt: existing?.createdAt ?? nowIso,
-    updatedAt: nowIso,
+  const alarms = await deps.alarms.list().catch(() => [] as ScheduleAlarmLike[]);
+  const alarmByCallback = new Map<string, ScheduleAlarmLike[]>();
+  for (const alarm of alarms) {
+    const list = alarmByCallback.get(alarm.callback) ?? [];
+    list.push(alarm);
+    alarmByCallback.set(alarm.callback, list);
+  }
+  const alarmPayloadUser = (alarm: ScheduleAlarmLike): string | null => {
+    const payload = alarm.payload as { userLogin?: unknown } | null | undefined;
+    return typeof payload?.userLogin === "string" ? payload.userLogin : null;
   };
+  for (const spec of specs) {
+    if (spec.id === STALE_LEDGER_SWEEP_RECORD_ID && !spec.payload) {
+      result.skippedLedgerSweepNoUser = true;
+      continue;
+    }
+    const existing = await deps.store.get(spec.id);
+    if (!existing) {
+      const record: UnifiedScheduleRecord = {
+        id: spec.id,
+        kind: "internal",
+        state: "paused",
+        callback: spec.callback,
+        definition: {
+          type: "interval",
+          intervalSeconds,
+          callback: spec.callback,
+          ...(spec.payload ? { payload: spec.payload } : {}),
+        },
+        provenance: systemProvenance(spec.origin, new Date(nowIso)),
+        alarmId: null,
+        pausedAt: nowIso,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      await deps.store.save(record);
+      result.seeded.push(spec.id);
+      continue;
+    }
+    if (existing.state !== "active") continue;
+    const timing = timingFromRecordDefinition(existing.definition);
+    if (!timing) continue;
+    const callback =
+      existing.callback ??
+      (typeof existing.definition.callback === "string" ? existing.definition.callback : "");
+    if (!callback) continue;
+    const candidates = (alarmByCallback.get(callback) ?? []).filter((alarm) => {
+      if (spec.payload) return alarmPayloadUser(alarm) === (spec.payload.userLogin as string);
+      return true;
+    });
+    // A live alarm is the one the record claims (by alarmId, whatever
+    // its interval — a floor raise never retroactively kills a live
+    // schedule), or, for a record with no alarmId, an at-or-above-
+    // floor alarm for the callback (adopted, the #4238 precedent).
+    // A sub-floor arm no record claims is stale, never adopted: the
+    // cancellation below removes it and the record re-arms at its
+    // stored timing instead.
+    const live = existing.alarmId
+      ? candidates.find((alarm) => alarm.id === existing.alarmId)
+      : candidates.find(
+          (alarm) => typeof alarm.intervalSeconds !== "number" || alarm.intervalSeconds >= intervalSeconds,
+        );
+    if (live) {
+      if (existing.alarmId !== live.id) {
+        await deps.store.save({ ...existing, alarmId: live.id, updatedAt: nowIso });
+        result.adopted.push(spec.id);
+      }
+      continue;
+    }
+    const idempotent =
+      typeof existing.definition.idempotent === "boolean" ? existing.definition.idempotent : undefined;
+    const armed = await deps.alarms.arm(
+      timing,
+      callback,
+      existing.definition.payload,
+      ...(idempotent === undefined ? [] : [{ idempotent }]),
+    );
+    await deps.store.save({ ...existing, alarmId: armed.id, updatedAt: nowIso });
+    result.armed.push(spec.id);
+  }
+  // Cancel stale sub-floor arms for the six callbacks: the
+  // pre-consolidation interval arms (6h/15m). An alarm a stored
+  // active record claims is a live schedule, never a stale arm.
+  const claimedAlarmIds = new Set<string>();
+  for (const record of await deps.store.list()) {
+    if (record.state === "active" && record.alarmId) claimedAlarmIds.add(record.alarmId);
+  }
+  for (const spec of specs) {
+    for (const alarm of alarmByCallback.get(spec.callback) ?? []) {
+      if (typeof alarm.intervalSeconds !== "number") continue;
+      if (alarm.intervalSeconds >= intervalSeconds) continue;
+      if (claimedAlarmIds.has(alarm.id)) continue;
+      try {
+        if (await deps.alarms.cancel(alarm.id)) result.cancelledStaleAlarms.push(alarm.id);
+      } catch {
+        // Best-effort: the next onStart retries.
+      }
+    }
+  }
+  return result;
 }
 
 /** True when an alarm payload carries a stage address (jobId + nodePath). */
@@ -1224,6 +1394,7 @@ export async function createWorkflowStageSchedule(
   deps: UnifiedManagementDeps,
   input: WorkflowStageScheduleCreateInput,
   nowIso: string,
+  opts?: { startPaused?: boolean },
 ): Promise<UnifiedOpResult> {
   // Issue #6482 — paused by default: a stage schedule is created
   // paused and the SDK is never armed at creation, so nothing can
@@ -1243,7 +1414,39 @@ export async function createWorkflowStageSchedule(
     nowIso,
   );
   await deps.store.save(record);
+  // Issue #6503 — when the start-paused control is off, the schedule
+  // starts active instead: creation records paused and resumes
+  // immediately through the one arming template. Absent (the
+  // default) keeps the #6482 paused-by-default behavior.
+  if (opts?.startPaused === false) {
+    return activateCreatedSchedule(deps, record, nowIso);
+  }
   return { ok: true, record };
+}
+
+/**
+ * Issue #6503 — activate a just-created schedule when the
+ * start-paused control is off: creation records the schedule paused
+ * and resume is the one arming template, so activation resumes it
+ * immediately. Resume throws on an arm refusal (it returns
+ * {ok:false} only for state/derivation refusals), so the throw is
+ * caught here: the just-created record is removed and the create
+ * fails as a whole instead of leaving a paused schedule the caller
+ * did not ask for. A below-floor refusal is a 400 (the caller's
+ * timing cannot start active); any other arm failure is a 500.
+ */
+export async function activateCreatedSchedule(
+  deps: UnifiedManagementDeps,
+  record: UnifiedScheduleRecord,
+  nowIso: string,
+): Promise<UnifiedOpResult> {
+  try {
+    return await resumeUnifiedSchedule(deps, record.id, nowIso);
+  } catch (err) {
+    await deleteUnifiedSchedule(deps, record.id).catch(() => undefined);
+    const message = err instanceof Error ? err.message : String(err);
+    return fail(message, isBelowFrequencyFloorError(err) ? 400 : 500);
+  }
 }
 
 /** Ticker-push health as the Schedules home renders it (#4237). */
@@ -1439,10 +1642,9 @@ export function unifiedRecordToListItem(record: UnifiedScheduleRecord, nextRun?:
     type?: string;
   };
   // Issue #5889 — the record's provenance rides the list item (the
-  // payload's stamp wins; a record-only stamp, like the derived
-  // builders', is the fallback), and the row's source is derived
-  // from it once, here, so the column, the filters and the detail
-  // dialog can never disagree.
+  // payload's stamp wins; a record-only stamp is the fallback),
+  // and the row's source is derived from it once, here, so the
+  // column, the filters and the detail dialog can never disagree.
   const provenance =
     provenanceFromPayload(def.payload) ??
     provenanceFromPayload({ provenance: record.provenance });
@@ -1593,7 +1795,7 @@ export function timingFromRecordDefinition(def: Record<string, unknown>): Resolv
 /* =================================================================
  * Issue #5890 — one row per job: the collapse and the arm-time
  * hygiene. Pure functions over the list shape, so the service list
- * and the route list (which appends the derived rows after this
+ * and the route list (which appends the ticker-push row after this
  * service) collapse through the same reader.
  * ================================================================= */
 
@@ -1850,10 +2052,10 @@ export async function listUnifiedScheduleItems(
     const item = unifiedRecordToListItem(record);
     if (!typeParam || item.type === typeParam) items.push(item);
   }
-  // Issue #5890 — one row per job: the same taskId / derived duty
-  // rendered as several rows (duplicate arms, stale per-alarm paused
-  // records) collapses to its winner here, so every reader of this
-  // list sees the one row.
+  // Issue #5890 — one row per job: the same taskId / stored system
+  // duty rendered as several rows (duplicate arms, stale per-alarm
+  // paused records) collapses to its winner here, so every reader
+  // of this list sees the one row.
   return collapseScheduleListItems(items);
 }
 
@@ -1868,135 +2070,12 @@ function goalSurfaceError(action: string): { ok: false; error: string; status: n
   );
 }
 
-/**
- * Issue #4239 — the token-renewal record is derived, not stored:
- * there is no alarm to pause, resume, trigger, or update, and
- * nothing to delete. Management refuses with the record's own
- * name instead of a 404 for a row the home lists (a 404 would
- * say the schedule does not exist; it does — it is derived).
- * The manual trigger stays on its existing route,
- * POST /api/schedules/trigger-renew.
- */
-function isDerivedTokenRenewalRecord(id: string): boolean {
-  return id === TOKEN_RENEWAL_RECORD_ID;
-}
-
-function derivedTokenRenewalError(
-  verb: string,
-): { ok: false; error: string; status: number } {
-  return fail(
-    `Schedule 'token-renewal' is a derived record with no alarm to ${verb}.`,
-    400,
-  );
-}
-
-/**
- * Issue #4240 — the retention record is derived, not stored:
- * there is no alarm to pause, resume, trigger, or update, and
- * nothing to delete. Management refuses with the record's own
- * name instead of a 404 for a row the home lists (a 404 would
- * say the schedule does not exist; it does — it is derived).
- * The manual trigger stays on its existing route,
- * POST /api/schedules/trigger-retention.
- */
-function isDerivedRetentionRecord(id: string): boolean {
-  return id === RETENTION_RECORD_ID;
-}
-
-function derivedRetentionError(
-  verb: string,
-): { ok: false; error: string; status: number } {
-  return fail(
-    `Schedule 'retention' is a derived record with no alarm to ${verb}.`,
-    400,
-  );
-}
-
-/**
- * Issue #4241 — the nightly research record is derived, not stored:
- * there is no alarm to pause, resume, trigger, or update, and
- * nothing to delete. Management refuses with the record's own
- * name instead of a 404 for a row the home lists (a 404 would
- * say the schedule does not exist; it does — it is derived).
- * The run fires on the tick; there is no manual trigger route
- * for it (the manual research route is unchanged).
- */
-function isDerivedNightlyResearchRecord(id: string): boolean {
-  return id === NIGHTLY_RESEARCH_RECORD_ID;
-}
-
-function derivedNightlyResearchError(
-  verb: string,
-): { ok: false; error: string; status: number } {
-  return fail(
-    `Schedule 'nightly-research' is a derived record with no alarm to ${verb}.`,
-    400,
-  );
-}
-
-/**
- * Issue #4242 — the three sweep/watchdog records are derived, not
- * stored: there is no alarm to pause, resume, trigger, or update,
- * and nothing to delete. Management refuses with the record's own
- * name instead of a 404 for a row the home lists (a 404 would
- * say the schedule does not exist; it does — it is derived). The
- * duties fire on their own SDK alarms; there is no manual trigger
- * route for them.
- */
-function isDerivedStaleLedgerSweepRecord(id: string): boolean {
-  return id === STALE_LEDGER_SWEEP_RECORD_ID;
-}
-
-function isDerivedStaleAsyncJobSweepRecord(id: string): boolean {
-  return id === STALE_ASYNC_JOB_SWEEP_RECORD_ID;
-}
-
-function isDerivedScheduleWatchdogRecord(id: string): boolean {
-  return id === SCHEDULE_WATCHDOG_RECORD_ID;
-}
-
-function derivedStaleLedgerSweepError(
-  verb: string,
-): { ok: false; error: string; status: number } {
-  return fail(
-    `Schedule 'sweep-stale-ledger-tasks' is a derived record with no alarm to ${verb}.`,
-    400,
-  );
-}
-
-function derivedStaleAsyncJobSweepError(
-  verb: string,
-): { ok: false; error: string; status: number } {
-  return fail(
-    `Schedule 'sweep-stale-async-jobs' is a derived record with no alarm to ${verb}.`,
-    400,
-  );
-}
-
-function derivedScheduleWatchdogError(
-  verb: string,
-): { ok: false; error: string; status: number } {
-  return fail(
-    `Schedule 'schedule-watchdog' is a derived record with no alarm to ${verb}.`,
-    400,
-  );
-}
 
 export async function pauseUnifiedSchedule(
   deps: UnifiedManagementDeps,
   id: string,
   nowIso: string,
 ): Promise<UnifiedOpResult> {
-  // Issue #4239 — a derived record has no alarm to pause.
-  if (isDerivedTokenRenewalRecord(id)) return derivedTokenRenewalError("pause");
-  // Issue #4240 — a derived record has no alarm to pause.
-  if (isDerivedRetentionRecord(id)) return derivedRetentionError("pause");
-  // Issue #4241 — a derived record has no alarm to pause.
-  if (isDerivedNightlyResearchRecord(id)) return derivedNightlyResearchError("pause");
-  // Issue #4242 — derived records have no alarm to pause.
-  if (isDerivedStaleLedgerSweepRecord(id)) return derivedStaleLedgerSweepError("pause");
-  if (isDerivedStaleAsyncJobSweepRecord(id)) return derivedStaleAsyncJobSweepError("pause");
-  if (isDerivedScheduleWatchdogRecord(id)) return derivedScheduleWatchdogError("pause");
   const existing = await deps.store.get(id);
   if (existing) {
     if (existing.kind === "goal") return goalSurfaceError("pause");
@@ -2086,16 +2165,6 @@ export async function resumeUnifiedSchedule(
   id: string,
   nowIso: string,
 ): Promise<UnifiedOpResult> {
-  // Issue #4239 — a derived record has no alarm to resume.
-  if (isDerivedTokenRenewalRecord(id)) return derivedTokenRenewalError("resume");
-  // Issue #4240 — a derived record has no alarm to resume.
-  if (isDerivedRetentionRecord(id)) return derivedRetentionError("resume");
-  // Issue #4241 — a derived record has no alarm to resume.
-  if (isDerivedNightlyResearchRecord(id)) return derivedNightlyResearchError("resume");
-  // Issue #4242 — derived records have no alarm to resume.
-  if (isDerivedStaleLedgerSweepRecord(id)) return derivedStaleLedgerSweepError("resume");
-  if (isDerivedStaleAsyncJobSweepRecord(id)) return derivedStaleAsyncJobSweepError("resume");
-  if (isDerivedScheduleWatchdogRecord(id)) return derivedScheduleWatchdogError("resume");
   const record = await deps.store.get(id);
   if (!record) {
     return fail(`Schedule '${id}' is not paused`, 404);
@@ -2184,20 +2253,9 @@ export async function deleteUnifiedSchedule(
   deps: UnifiedManagementDeps,
   id: string,
 ): Promise<DeleteUnifiedScheduleResult> {
-  // Issue #5891 — a derived record refuses delete with a named
-  // error, like pause / resume / trigger / update refuse it
-  // (#4239–#4242). The #4237 no-op precedent is retired: it told
-  // the UI the delete had succeeded while the row re-derived on
-  // every list.
-  if (isDerivedTokenRenewalRecord(id)) return derivedTokenRenewalError("delete");
-  // Issue #5891 — a derived record refuses delete (see above).
-  if (isDerivedRetentionRecord(id)) return derivedRetentionError("delete");
-  // Issue #5891 — a derived record refuses delete (see above).
-  if (isDerivedNightlyResearchRecord(id)) return derivedNightlyResearchError("delete");
-  // Issue #5891 — derived records refuse delete (see above).
-  if (isDerivedStaleLedgerSweepRecord(id)) return derivedStaleLedgerSweepError("delete");
-  if (isDerivedStaleAsyncJobSweepRecord(id)) return derivedStaleAsyncJobSweepError("delete");
-  if (isDerivedScheduleWatchdogRecord(id)) return derivedScheduleWatchdogError("delete");
+  // Issue #6503 — the six system duties are stored records now, so
+  // delete removes them like any stored row (no derived refusal);
+  // a deleted system row is re-seeded paused by the next reconcile.
   const record = await deps.store.get(id);
   if (record) {
     // Issue #5891 — a goal deletes through the goals surface, and
@@ -2280,16 +2338,6 @@ export async function triggerUnifiedSchedule(
   | { ok: true; scheduleId: string; callback: string }
   | { ok: false; error: string; status: number }
 > {
-  // Issue #4239 — a derived record has no alarm to trigger.
-  if (isDerivedTokenRenewalRecord(id)) return derivedTokenRenewalError("trigger");
-  // Issue #4240 — a derived record has no alarm to trigger.
-  if (isDerivedRetentionRecord(id)) return derivedRetentionError("trigger");
-  // Issue #4241 — a derived record has no alarm to trigger.
-  if (isDerivedNightlyResearchRecord(id)) return derivedNightlyResearchError("trigger");
-  // Issue #4242 — derived records have no alarm to trigger.
-  if (isDerivedStaleLedgerSweepRecord(id)) return derivedStaleLedgerSweepError("trigger");
-  if (isDerivedStaleAsyncJobSweepRecord(id)) return derivedStaleAsyncJobSweepError("trigger");
-  if (isDerivedScheduleWatchdogRecord(id)) return derivedScheduleWatchdogError("trigger");
   const record = await deps.store.get(id);
   // Issue #4237 — a non-screen kind is refused with its own name:
   // the goal-surface text is wrong for a live feed (or a worker
@@ -2307,7 +2355,13 @@ export async function triggerUnifiedSchedule(
   }
   const payload =
     alarm.payload && typeof alarm.payload === "object"
-      ? { ...(alarm.payload as Record<string, unknown>), trigger: "manual", scheduleId: record?.id ?? id }
+      // Issue #6503 — a Run-now click is a "triggered" dispatch
+      // (#5028/#3214), not a manual one: the run is user-initiated
+      // but it is not a UX one-off, and the money gate treats the
+      // two differently (triggered may checkout; see
+      // isAttendedTrigger in jobRunRecordPorts.ts). The per-day
+      // triggered-run limit is #6504, not this slice.
+      ? { ...(alarm.payload as Record<string, unknown>), trigger: "triggered", scheduleId: record?.id ?? id }
       : alarm.payload;
   await run(alarm.callback, payload);
   return { ok: true, scheduleId: record?.id ?? id, callback: alarm.callback };
@@ -2414,10 +2468,10 @@ function bulkErrorMessage(err: unknown): string {
 /**
  * Issue #5878 — one bulk verb over a scope: filter the home-list rows
  * to the scope, then run the single-row verb per row and report
- * per-row outcomes. A row's refusal (derived record, goal surface,
- * unmanageable kind, missing alarm, a thrown store/alarm error)
- * refuses only that row — the batch always runs to the end and the
- * summary counts what happened.
+ * per-row outcomes. A row's refusal (goal surface, unmanageable
+ * kind, missing alarm, a thrown store/alarm error) refuses only
+ * that row — the batch always runs to the end and the summary
+ * counts what happened.
  *
  * The per-row dispatch re-reads the row's stored record at execution
  * time, so the already-in-state outcomes come from the store, not
@@ -2430,11 +2484,10 @@ function bulkErrorMessage(err: unknown): string {
  * - trigger: no pre-skip — the single-row verb itself refuses a
  *   paused row with its 409, and every other refusal, so the reason
  *   is always the single-row reason.
- * A row with no stored record (a derived row, a legacy alarm with no
- * record, a row that vanished after the list loaded) goes straight
- * to the single-row verb: derived ids refuse with their named
- * errors, legacy alarms act, a missing row 404s — each as a per-row
- * refusal. A resume over a record-less row first asks the alarms
+ * A row with no stored record (a legacy alarm with no record, a
+ * row that vanished after the list loaded) goes straight to the
+ * single-row verb: legacy alarms act, a missing row 404s — each
+ * as a per-row refusal. A resume over a record-less row first asks the alarms
  * port: a live alarm means the row is active (`already-active`), so
  * a live legacy alarm is never misreported as refused-not-paused.
  */
@@ -2778,16 +2831,6 @@ export async function updateUnifiedSchedule(
   body: ScheduleUpdateRequest,
   nowMs: number,
 ): Promise<UnifiedOpResult> {
-  // Issue #4239 — a derived record has no alarm to update.
-  if (isDerivedTokenRenewalRecord(id)) return derivedTokenRenewalError("update");
-  // Issue #4240 — a derived record has no alarm to update.
-  if (isDerivedRetentionRecord(id)) return derivedRetentionError("update");
-  // Issue #4241 — a derived record has no alarm to update.
-  if (isDerivedNightlyResearchRecord(id)) return derivedNightlyResearchError("update");
-  // Issue #4242 — derived records have no alarm to update.
-  if (isDerivedStaleLedgerSweepRecord(id)) return derivedStaleLedgerSweepError("update");
-  if (isDerivedStaleAsyncJobSweepRecord(id)) return derivedStaleAsyncJobSweepError("update");
-  if (isDerivedScheduleWatchdogRecord(id)) return derivedScheduleWatchdogError("update");
   const nowIso = new Date(nowMs).toISOString();
   const record = await deps.store.get(id);
   // Issue #4237 — see triggerUnifiedSchedule: refuse a non-screen

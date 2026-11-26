@@ -91,6 +91,8 @@ vi.mock("../src/security/etradeOAuth", () => ({
 }));
 
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 import {
   buildJobRunRecord,
   normalizeJobRunRecord,
@@ -196,9 +198,10 @@ class MockD1Database {
   }
 }
 
-function makeCtx(initialGoals?: any[]) {
+// #6503 — the "goals" KV key is dead: goals live in the D1 unified
+// store only (fail-closed without AGENT_DB). Fixtures plant via D1.
+function makeCtx() {
   const store = new Map<string, unknown>();
-  if (initialGoals) store.set("goals", initialGoals);
   return {
     storage: {
       get: async (k: string) => (store.has(k) ? store.get(k) : undefined),
@@ -210,6 +213,10 @@ function makeCtx(initialGoals?: any[]) {
 
 function makeEnv() {
   return {
+    // #6503 — goals live in the D1 unified store only (fail-closed
+    // without AGENT_DB). This file's own node:sqlite MockD1Database
+    // (above) is the store; the tick resolves it from the env.
+    AGENT_DB: new MockD1Database(),
     PAYMENTS_AGENT: {
       idFromName: () => "default",
       get: () => ({ budgetCheck: async () => ({ allowed: true }) }),
@@ -475,8 +482,18 @@ describe("migration 0084 + adapters (#5102)", () => {
 describe("scheduled-agent funnel (#5102)", () => {
   it("a fired non-broker goal still records, with explicit nulls", async () => {
     vi.setSystemTime(new Date("2026-11-03T06:00:00Z"));
-    const ctx = makeCtx([testGoal()]);
+    const ctx = makeCtx();
     const env = makeEnv();
+    // #6503 — plant the fixture goal in D1, sweeping migration
+    // 0092's seeded built-ins so the tick sees ONLY test-goal
+    // (same pattern as the #6503 G3 goals-tick file).
+    const store = createD1UnifiedSchedulePorts({
+      d1: (env as any).AGENT_DB as never,
+    }).unifiedSchedules;
+    await store.save(goalToRecord(testGoal() as any));
+    for (const row of await store.listByKind("goal")) {
+      if (row.id !== "test-goal") await store.remove(row.id);
+    }
     const agent = new ScheduledAgent(ctx as never, env as never);
     const tick = await agent.onCron(env as never, { halted: false } as never);
     expect(tick.jobsCreated).toBe(1);

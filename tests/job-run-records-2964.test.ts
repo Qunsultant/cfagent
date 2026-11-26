@@ -63,6 +63,10 @@ vi.mock("../src/security/etradeOAuth", () => ({
 
 import { createJob } from "../src/orchestrate";
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { goalToRecord } from "../src/services/unifiedScheduleManagement";
+import { createMemoryAuditStore } from "../src/security/iaaaAudit";
 import {
   buildJobRunRecord,
   pruneJobRuns,
@@ -113,13 +117,39 @@ function makeCtx(initialGoals?: any[]) {
   };
 }
 
-function makeEnv() {
+/**
+ * Issue #6503 — the fixture goal is planted in the D1 schedule
+ * store, not the DO KV "goals" key (which the agent no longer
+ * reads). Planting exactly one goal keeps each tick isolated: an
+ * empty store would re-seed all nine built-in goals. Same pattern
+ * as tests/index_list_goals_scheduled_1980.test.ts.
+ */
+async function plantGoals(mockD1: MockD1Database, goals: Array<Record<string, unknown>>) {
+  const store = createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules;
+  for (const goal of goals) {
+    await store.save(goalToRecord(goal as never));
+  }
+  // The D1 store seeds the nine built-in goal rows on first use, so
+  // a planted fixture alone is not the whole store: a built-in due
+  // at the test's clock fires too (daily-qa-sweep shares the 06:00
+  // cron, so the fired-goal tick would create 2 jobs, not 1).
+  // Remove the seeded rows, keeping only the fixture goal(s) —
+  // same cleanup as tests/schedules_create_route.test.ts. The
+  // store stays non-empty, so the empty-store re-seed does not fire.
+  const keep = new Set(goals.map((goal) => String(goal.id)));
+  for (const row of await store.listByKind("goal")) {
+    if (!keep.has(row.id)) await store.remove(row.id);
+  }
+}
+
+function makeEnv(mockD1?: MockD1Database) {
   return {
     PAYMENTS_AGENT: {
       idFromName: () => "default",
       get: () => ({ budgetCheck: async () => ({ allowed: true }) }),
     },
     SESSION_STORE: null,
+    ...(mockD1 ? { AGENT_DB: mockD1 } : {}),
   };
 }
 
@@ -365,8 +395,10 @@ describe("job run record stores (#2964)", () => {
 describe("ScheduledAgent per-run records (#2964)", () => {
   it("a fired goal leaves one success record with the created job id", async () => {
     vi.setSystemTime(new Date("2026-11-03T06:00:00Z"));
-    const ctx = makeCtx([testGoal()]);
-    const env = makeEnv();
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [testGoal()]);
+    const ctx = makeCtx();
+    const env = makeEnv(mockD1);
     const agent = new ScheduledAgent(ctx as never, env as never);
     const tick = await agent.onCron(env as never, { halted: false } as never);
     expect(tick.jobsCreated).toBe(1);
@@ -381,10 +413,12 @@ describe("ScheduledAgent per-run records (#2964)", () => {
 
   it("a skipped goal leaves one skipped record with its reason, never silent", async () => {
     vi.setSystemTime(new Date("2026-11-03T03:00:00Z"));
-    const ctx = makeCtx([
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [
       testGoal({ id: "index-refresh-holdings", operation: "index.refresh_holdings", cron: "0 3 * * *" }),
     ]);
-    const env = makeEnv();
+    const ctx = makeCtx();
+    const env = makeEnv(mockD1);
     const agent = new ScheduledAgent(ctx as never, env as never);
     const tick = await agent.onCron(env as never, { halted: false } as never);
     expect(tick.jobsSkipped).toBe(1);
@@ -397,8 +431,10 @@ describe("ScheduledAgent per-run records (#2964)", () => {
   it("a failed goal leaves one failure record with the error text", async () => {
     vi.setSystemTime(new Date("2026-11-03T06:00:00Z"));
     vi.mocked(createJob).mockRejectedValueOnce(new Error("orchestrator down"));
-    const ctx = makeCtx([testGoal()]);
-    const env = makeEnv();
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [testGoal()]);
+    const ctx = makeCtx();
+    const env = makeEnv(mockD1);
     const agent = new ScheduledAgent(ctx as never, env as never);
     const tick = await agent.onCron(env as never, { halted: false } as never);
     expect(tick.jobsSkipped).toBe(1);
@@ -410,8 +446,10 @@ describe("ScheduledAgent per-run records (#2964)", () => {
 
   it("triggerGoal records triggeredBy manual and latest resolves", async () => {
     vi.setSystemTime(new Date("2026-11-03T06:00:00Z"));
-    const ctx = makeCtx([testGoal()]);
-    const env = makeEnv();
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [testGoal()]);
+    const ctx = makeCtx();
+    const env = makeEnv(mockD1);
     const agent = new ScheduledAgent(ctx as never, env as never);
     await agent.triggerGoal("test-goal");
     const latest = await agent.getLatestJobRun("test-goal");
@@ -421,8 +459,10 @@ describe("ScheduledAgent per-run records (#2964)", () => {
 
   it("a disabled, not-due goal leaves no record", async () => {
     vi.setSystemTime(new Date("2026-11-03T06:00:00Z"));
-    const ctx = makeCtx([testGoal({ enabled: false })]);
-    const env = makeEnv();
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [testGoal({ enabled: false })]);
+    const ctx = makeCtx();
+    const env = makeEnv(mockD1);
     const agent = new ScheduledAgent(ctx as never, env as never);
     await agent.onCron(env as never, { halted: false } as never);
     expect(await agent.listJobRuns("test-goal")).toHaveLength(0);
@@ -464,13 +504,66 @@ describe("unified jobs inventory (#2964)", () => {
   });
 });
 
+/**
+ * Issue #6503 step 8 (G1) — the trigger route is a control op, so
+ * the fixture calls it as a platform-admin. Alias KV +
+ * membership store stubs, same shape as
+ * tests/bulk_schedules_routes_5878.test.ts.
+ */
+const ADMIN_LOGIN = "venus-admin";
+const ADMIN_USER_ID = "user-admin-1";
+
+function stubKv(entries: Record<string, string>) {
+  const store = new Map<string, string>();
+  for (const [login, userId] of Object.entries(entries)) {
+    store.set(`iaaa-alias:login:${login}`, JSON.stringify({ internalUserId: userId }));
+  }
+  return {
+    get: async (key: string) => store.get(key) ?? null,
+    put: async (key: string, value: string) => {
+      store.set(key, value);
+    },
+    delete: async (key: string) => {
+      store.delete(key);
+    },
+  };
+}
+
+function stubMembershipStore(adminIds: string[]) {
+  return {
+    getMembershipsByUser: async (internalUserId: string) =>
+      adminIds.includes(internalUserId)
+        ? [
+            {
+              membershipId: "m-admin-1",
+              internalUserId,
+              tenantId: "platform",
+              roleBindings: [{ role: "platform-admin", scope: "platform", grantedBy: "test" }],
+              createdBy: "test",
+              createdAtMs: 1,
+            },
+          ]
+        : [],
+    put: async () => {},
+    revokeMembership: async () => false,
+  };
+}
+
 describe("orchestrator runs routes (#2964)", () => {
   function baseCtx(overrides: Partial<SchedulesRouteContext> = {}): SchedulesRouteContext {
     const storage = new SqliteTestStorage();
     return {
-      env: {},
+      // Issue #6503 — the unified store is D1 only (fail-closed):
+      // the trigger route builds it for the gate and the dispatch,
+      // so an unbound AGENT_DB 500s after the gate.
+      env: { AGENT_DB: new MockD1Database() },
       agentCtx: { storage: { sql: storage.sql as never } } as never,
       audit: vi.fn(),
+      // Issue #6503 step 9 (G2) — the trigger route audits
+      // before it writes through this store; without it the
+      // wired fallback (no SESSION_STORE in tests) blocks the
+      // trigger with 503.
+      auditStore: createMemoryAuditStore(),
       listSchedules: vi.fn(async () => []),
       cancelSchedule: vi.fn(async () => true),
       getScheduleById: vi.fn(async () => undefined),
@@ -483,13 +576,21 @@ describe("orchestrator runs routes (#2964)", () => {
       creatableScheduleCallbacks: ["autonomousOptionsAnalysis", "autonomousMarketScreen"],
       accountScopedScheduleCallbacks: new Set(["autonomousOptionsAnalysis", "autonomousMarketScreen"]),
       runScheduleCallback: vi.fn(async () => undefined),
+      flagAliasKv: stubKv({ [ADMIN_LOGIN]: ADMIN_USER_ID }),
+      flagMembershipStore: stubMembershipStore([ADMIN_USER_ID]),
       ...overrides,
     } as unknown as SchedulesRouteContext;
   }
 
   async function call(ctx: SchedulesRouteContext, path: string, method = "GET") {
     return handleSchedulesRoutes(
-      new Request(`https://agent.internal${path}`, { method }),
+      new Request(`https://agent.internal${path}`, {
+        method,
+        // Issue #6503 step 8 (G1) — the trigger route is a control
+        // op: no identity answers 401, so the fixture calls as
+        // the platform-admin (see above).
+        headers: { "x-user-login": ADMIN_LOGIN },
+      }),
       new URL(`https://agent.internal${path}`),
       path,
       "session-1",
@@ -573,7 +674,10 @@ describe("orchestrator runs routes (#2964)", () => {
     const runs = store.listByJob("sched-9");
     expect(runs).toHaveLength(1);
     expect(runs[0].outcome).toBe("success");
-    expect(runs[0].triggeredBy).toBe("manual");
+    // Issue #6503 — a Run-now click is a "triggered" dispatch
+    // (#5028/#3214), not a manual one-off: the trigger route
+    // stamps trigger "triggered" on the firing payload.
+    expect(runs[0].triggeredBy).toBe("triggered");
   });
 
   it("triggering a self-recording internal callback records exactly once (#3788)", async () => {
@@ -606,7 +710,9 @@ describe("orchestrator runs routes (#2964)", () => {
     expect(runs).toHaveLength(1);
     expect(runs[0].outcome).toBe("success");
     expect(runs[0].descriptor).toBe("collect IV history");
-    expect(runs[0].triggeredBy).toBe("manual");
+    // Issue #6503 — Run-now is a "triggered" dispatch, not manual
+    // (see the non-creatable test above).
+    expect(runs[0].triggeredBy).toBe("triggered");
   });
 
   it("3394-P04: triggering each other self-recording internal callback records exactly once", async () => {
@@ -644,7 +750,9 @@ describe("orchestrator runs routes (#2964)", () => {
       expect(runs).toHaveLength(1);
       expect(runs[0].outcome).toBe("success");
       expect(runs[0].descriptor).toBe(descriptor);
-      expect(runs[0].triggeredBy).toBe("manual");
+      // Issue #6503 — Run-now is a "triggered" dispatch, not manual
+      // (see the non-creatable test above).
+      expect(runs[0].triggeredBy).toBe("triggered");
     }
   });
 

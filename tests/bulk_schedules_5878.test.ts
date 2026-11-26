@@ -104,6 +104,29 @@ function goalRecord(overrides: Partial<UnifiedScheduleRecord> = {}): UnifiedSche
   };
 }
 
+/** A stored token-renewal row (#6503): the system duties are stored now, so the bulk verbs act on them. */
+function storedTokenRenewalRecord(): UnifiedScheduleRecord {
+  return {
+    id: "token-renewal",
+    kind: "internal",
+    state: "active",
+    callback: "autoRenewETradeTokens",
+    definition: {
+      type: "interval",
+      intervalSeconds: 2_592_000,
+      callback: "autoRenewETradeTokens",
+    },
+    ownerLogin: null,
+    provenance: { origin: "system", createdBy: "system", reason: "token-renewal", createdAt: EARLIER },
+    // The stored active row holds its live alarm: trigger runs
+    // through the alarm (its callback + payload).
+    alarmId: "alarm-renewal",
+    pausedAt: null,
+    createdAt: EARLIER,
+    updatedAt: EARLIER,
+  };
+}
+
 /** The rows the Schedules home list carries for the seeded records. */
 function rows(): BulkScheduleRow[] {
   return [
@@ -111,7 +134,7 @@ function rows(): BulkScheduleRow[] {
     { id: "sched-options", callback: "autonomousOptionsAnalysis", type: "interval", payload: { symbols: ["AAPL"] }, paused: false },
     { id: "sched-paused", callback: "autonomousMarketScreen", type: "cron", payload: { universe: "SP500" }, paused: true },
     { id: "goal-1", callback: "goalScreen", type: "cron", payload: {}, paused: false },
-    { id: "token-renewal", callback: "autoRenewETradeTokens", type: "cron", paused: false },
+    { id: "token-renewal", callback: "autoRenewETradeTokens", type: "interval", paused: false },
     { id: "ticker-push", callback: "pushTicks", type: "interval", paused: false },
   ];
 }
@@ -121,6 +144,7 @@ function makeAlarms() {
   const live = new Map<string, any>([
     ["alarm-stocks", { id: "alarm-stocks", callback: "autonomousMarketScreen", type: "cron", cron: "30 7 * * 1-5", payload: { universe: "NASDAQ100" } }],
     ["alarm-options", { id: "alarm-options", callback: "autonomousOptionsAnalysis", type: "interval", intervalSeconds: 3600, payload: { symbols: ["AAPL"] } }],
+    ["alarm-renewal", { id: "alarm-renewal", callback: "autoRenewETradeTokens", type: "interval", intervalSeconds: 2_592_000, payload: {} }],
   ]);
   return {
     live,
@@ -141,6 +165,7 @@ async function seeded() {
   await store.save(optionsRecord());
   await store.save(pausedRecord());
   await store.save(goalRecord());
+  await store.save(storedTokenRenewalRecord());
   const alarms = makeAlarms();
   return { store, alarms };
 }
@@ -166,15 +191,15 @@ describe("pauseSchedulesInScope (#5878)", () => {
     expect(summary.verb).toBe("pause");
     expect(summary.scope).toBe("all");
     expect(summary.total).toBe(6);
-    expect(summary.applied).toBe(2);
+    expect(summary.applied).toBe(3);
     expect(summary.already).toBe(1);
-    expect(summary.refused).toBe(3);
+    expect(summary.refused).toBe(2);
     expect(summary.results.map((r) => [r.id, r.outcome])).toEqual([
       ["sched-stocks", "paused"],
       ["sched-options", "paused"],
       ["sched-paused", "already-paused"],
       ["goal-1", "refused"],
-      ["token-renewal", "refused"],
+      ["token-renewal", "paused"],
       ["ticker-push", "refused"],
     ]);
     // The per-row kinds are the filter kinds the home classifies by.
@@ -189,13 +214,14 @@ describe("pauseSchedulesInScope (#5878)", () => {
     // Refusals carry the single-row reason, verbatim.
     const byId = Object.fromEntries(summary.results.map((r) => [r.id, r]));
     expect(byId["goal-1"].reason).toContain("goals surface");
-    expect(byId["token-renewal"].reason).toContain("derived record");
     expect(byId["ticker-push"].reason).toContain("not found");
     // The applied rows really paused (alarms cancelled, records paused).
     expect((await store.get("sched-stocks"))?.state).toBe("paused");
     expect((await store.get("sched-options"))?.state).toBe("paused");
+    expect((await store.get("token-renewal"))?.state).toBe("paused");
     expect(alarms.live.has("alarm-stocks")).toBe(false);
     expect(alarms.live.has("alarm-options")).toBe(false);
+    expect(alarms.live.has("alarm-renewal")).toBe(false);
   });
 
   it("pauses only the named kind for a per-category scope", async () => {
@@ -220,14 +246,19 @@ describe("pauseSchedulesInScope (#5878)", () => {
     expect(summary.results[0].reason).toContain("goals surface");
   });
 
-  it("reports the system scope's derived rows as refused, not as paused", async () => {
+  it("pauses the stored system row and refuses the feed row in the system scope", async () => {
     const { store, alarms } = await seeded();
     const summary = await pauseSchedulesInScope({ store, alarms }, "system", rows(), NOW);
     expect(summary.total).toBe(2);
-    expect(summary.applied).toBe(0);
-    expect(summary.refused).toBe(2);
-    expect(summary.results.map((r) => r.id)).toEqual(["token-renewal", "ticker-push"]);
-    expect(summary.results[0].reason).toContain("derived record");
+    expect(summary.applied).toBe(1);
+    expect(summary.already).toBe(0);
+    expect(summary.refused).toBe(1);
+    expect(summary.results.map((r) => [r.id, r.outcome])).toEqual([
+      ["token-renewal", "paused"],
+      ["ticker-push", "refused"],
+    ]);
+    expect(summary.results.find((r) => r.id === "ticker-push")?.reason).toContain("not found");
+    expect((await store.get("token-renewal"))?.state).toBe("paused");
   });
 
   it("reports an empty scope as zero rows, not an error", async () => {
@@ -258,7 +289,9 @@ describe("pauseSchedulesInScope (#5878)", () => {
     const options = summary.results.find((r) => r.id === "sched-options");
     expect(options?.outcome).toBe("refused");
     expect(options?.reason).toContain("cancel boom");
-    expect(summary.applied).toBe(1);
+    // The stored system row still pauses; only the failing row refuses.
+    expect(summary.results.find((r) => r.id === "token-renewal")?.outcome).toBe("paused");
+    expect(summary.applied).toBe(2);
   });
 
   it("hands the live-feed row to the executor, and maps its already flag", async () => {
@@ -271,67 +304,73 @@ describe("pauseSchedulesInScope (#5878)", () => {
     });
     expect(handled).toEqual(["ticker-push"]);
     expect(summary.results.find((r) => r.id === "ticker-push")?.outcome).toBe("paused");
-    expect(summary.applied).toBe(3);
+    expect(summary.applied).toBe(4);
 
     const already = await pauseSchedulesInScope({ store, alarms }, "system", rows(), NOW, async (row) => {
       if (row.id !== "ticker-push") return undefined;
       return { ok: true, already: true };
     });
     expect(already.results.find((r) => r.id === "ticker-push")?.outcome).toBe("already-paused");
-    expect(already.already).toBe(1);
+    // The stored system row was paused by the first call above, so
+    // it is already-paused too.
+    expect(already.results.find((r) => r.id === "token-renewal")?.outcome).toBe("already-paused");
+    expect(already.already).toBe(2);
   });
 });
 
 describe("resumeSchedulesInScope (#5878)", () => {
-  it("resumes paused rows, reports active rows as already-active, refuses derived and goal rows", async () => {
+  it("resumes paused rows, reports active rows as already-active, refuses goal and feed rows", async () => {
     const { store, alarms } = await seeded();
     // Pause one active row first so the batch has two paused rows.
     await pauseUnifiedSchedule({ store, alarms }, "sched-stocks", NOW);
     const summary = await resumeSchedulesInScope({ store, alarms }, "all", rows(), NOW);
     expect(summary.total).toBe(6);
     expect(summary.applied).toBe(2);
-    expect(summary.already).toBe(1);
-    expect(summary.refused).toBe(3);
+    expect(summary.already).toBe(2);
+    expect(summary.refused).toBe(2);
     expect(summary.results.map((r) => [r.id, r.outcome])).toEqual([
       ["sched-stocks", "resumed"],
       ["sched-options", "already-active"],
       ["sched-paused", "resumed"],
       ["goal-1", "refused"],
-      ["token-renewal", "refused"],
+      ["token-renewal", "already-active"],
       ["ticker-push", "refused"],
     ]);
     expect((await store.get("sched-stocks"))?.state).toBe("active");
     expect((await store.get("sched-paused"))?.state).toBe("active");
     expect(summary.results.find((r) => r.id === "goal-1")?.reason).toContain("goals surface");
-    expect(summary.results.find((r) => r.id === "token-renewal")?.reason).toContain("derived record");
+    // Resume refuses a row with no stored record as "is not
+    // paused" — resume only resumes paused rows.
+    expect(summary.results.find((r) => r.id === "ticker-push")?.reason).toContain("is not paused");
   });
 });
 
 describe("triggerSchedulesInScope (#5878)", () => {
-  it("triggers active rows, refuses paused / derived / goal rows with the single-row reasons", async () => {
+  it("triggers active rows, refuses paused / goal / feed rows with the single-row reasons", async () => {
     const { store, alarms } = await seeded();
     const runs: Array<{ callback: string; payload: unknown }> = [];
     const summary = await triggerSchedulesInScope({ store, alarms }, "all", rows(), async (callback, payload) => {
       runs.push({ callback, payload });
     });
     expect(summary.total).toBe(6);
-    expect(summary.applied).toBe(2);
-    expect(summary.refused).toBe(4);
+    expect(summary.applied).toBe(3);
+    expect(summary.refused).toBe(3);
     expect(summary.results.map((r) => [r.id, r.outcome])).toEqual([
       ["sched-stocks", "triggered"],
       ["sched-options", "triggered"],
       ["sched-paused", "refused"],
       ["goal-1", "refused"],
-      ["token-renewal", "refused"],
+      ["token-renewal", "triggered"],
       ["ticker-push", "refused"],
     ]);
     expect(runs.map((r) => r.callback).sort()).toEqual([
+      "autoRenewETradeTokens",
       "autonomousMarketScreen",
       "autonomousOptionsAnalysis",
     ]);
     expect(summary.results.find((r) => r.id === "sched-paused")?.reason).toContain("paused");
     expect(summary.results.find((r) => r.id === "goal-1")?.reason).toContain("goals surface");
-    expect(summary.results.find((r) => r.id === "token-renewal")?.reason).toContain("derived record");
+    expect(summary.results.find((r) => r.id === "ticker-push")?.reason).toContain("not found");
   });
 
   it("triggers only the named kind for a per-category scope", async () => {

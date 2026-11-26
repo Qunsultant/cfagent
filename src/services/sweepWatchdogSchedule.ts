@@ -3,23 +3,22 @@
  *
  * The three framework maintenance duties (the stale-ledger-task
  * sweep, the stale-async-job sweep, the missed-schedule watchdog)
- * are code-armed SDK alarms (OrchestratorAgent.onStart +
- * scheduleEvery); they have no stored unified-store row. Their
- * record ids live here beside the firing rule they derive from,
- * and each id doubles as the ledger jobId its runs join on — the
- * #4241 convention — EXCEPT the watchdog, whose runs already land
+ * are stored platform-level schedules (#6503): one stored row per
+ * duty (monthly, created paused), fired through their entry
+ * points when the stored schedule fires. Their record ids live
+ * here beside the firing rule they derive from, and each id
+ * doubles as the ledger jobId its runs join on — the #4241
+ * convention — EXCEPT the watchdog, whose runs already land
  * under the pre-existing heartbeat job id
  * (SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID, schedule-watchdog-heartbeat):
  * scheduleIdToLedgerJobId maps the watchdog record id to that job
  * id, the #4239/#4240 mapping precedent.
  *
- * Cadence: each dispatch cron is the cron form of the duty's own
- * interval constant in src/agents/orchestrator.ts, never
- * re-literalized elsewhere — the record and the arming can never
- * disagree about the cadence:
- * - stale-ledger sweep: STALE_SWEEP_INTERVAL_SECONDS (6h)
- * - stale-async-job sweep: STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS (15m)
- * - watchdog: SCHEDULE_WATCHDOG_INTERVAL_SECONDS (15m, the same tick)
+ * Cadence: each dispatch cron below is the retired firing rule's
+ * value (the 6h/15m SDK arms are gone with the derived records);
+ * the stored rows run monthly. The constants are kept, never
+ * re-literalized elsewhere, as the ledger history of the old
+ * cadence.
  *
  * Outcome mapping: the two sweeps return sweep-result objects, not
  * callback outcomes (the #3788 note in scheduleSystems.ts named
@@ -38,11 +37,10 @@ import type { JobRunOutcome } from "../data/jobRunRecordPorts";
 export const STALE_LEDGER_SWEEP_RECORD_ID = "sweep-stale-ledger-tasks";
 
 /**
- * The stale-ledger sweep's cadence as a cron, the cron form of
- * STALE_SWEEP_INTERVAL_SECONDS (6 hours) in
- * src/agents/orchestrator.ts. The unified-store record reads this
- * constant, never re-literalized, so the record and the arming can
- * never disagree about the cadence.
+ * The stale-ledger sweep's cadence as a cron, the retired firing
+ * rule's value (the 6-hour SDK arm is gone with the derived
+ * records); the stored row runs monthly. Kept, never
+ * re-literalized, as the ledger history of the old cadence.
  */
 export const STALE_LEDGER_SWEEP_DISPATCH_CRON = "0 */6 * * *";
 
@@ -54,9 +52,10 @@ export const STALE_LEDGER_SWEEP_DISPATCH_CRON = "0 */6 * * *";
 export const STALE_ASYNC_JOB_SWEEP_RECORD_ID = "sweep-stale-async-jobs";
 
 /**
- * The stale-async-job sweep's cadence as a cron, the cron form of
- * STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS (15 minutes) in
- * src/agents/orchestrator.ts.
+ * The stale-async-job sweep's cadence as a cron, the retired
+ * firing rule's value (the 15-minute SDK arm is gone with the
+ * derived records); the stored row runs monthly. Kept, never
+ * re-literalized, as the ledger history of the old cadence.
  */
 export const STALE_ASYNC_JOB_SWEEP_DISPATCH_CRON = "*/15 * * * *";
 
@@ -68,9 +67,10 @@ export const STALE_ASYNC_JOB_SWEEP_DISPATCH_CRON = "*/15 * * * *";
 export const SCHEDULE_WATCHDOG_RECORD_ID = "schedule-watchdog";
 
 /**
- * The watchdog's cadence as a cron, the cron form of
- * SCHEDULE_WATCHDOG_INTERVAL_SECONDS (15 minutes — the same tick
- * as the stale-async-job sweep) in src/agents/orchestrator.ts.
+ * The watchdog's cadence as a cron, the retired firing rule's
+ * value (the 15-minute SDK arm is gone with the derived records);
+ * the stored row runs monthly. Kept, never re-literalized, as the
+ * ledger history of the old cadence.
  */
 export const SCHEDULE_WATCHDOG_DISPATCH_CRON = "*/15 * * * *";
 

@@ -589,7 +589,11 @@ const PORTED_TABLE_WRITERS: Record<string, { layer: string[]; bypass?: Record<st
     // NOT EXISTS), never a row write. #4282 P2a moved the index
     // statement from unifiedScheduleIndexSchema.ts into the ORM
     // catalogue (src/data/schemaComponent/ormCatalogue.ts).
-    layer: ["src/data/doSqliteUnifiedScheduleAdapter.ts", "src/data/schemaComponent/ormCatalogue.ts", "src/data/schemaComponent/doCatalogue.ts"],
+    // #6503 — migration 0092's `unified_schedules` CREATE TABLE +
+    // seed INSERTs live in the D1 catalogue, so d1Catalogue.ts is a
+    // writer of this table in the same layer-writer kind (DDL + seed
+    // statements reproduced there, applied by the migration runner).
+    layer: ["src/data/doSqliteUnifiedScheduleAdapter.ts", "src/data/schemaComponent/ormCatalogue.ts", "src/data/schemaComponent/doCatalogue.ts", "src/data/schemaComponent/d1Catalogue.ts"],
   },
   mas_enrichment_runs: { layer: ["src/data/schemaComponent/doDmlEntries.ts", "src/data/schemaComponent/doCatalogue.ts"] },
   mas_messages: {
