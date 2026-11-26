@@ -56,6 +56,7 @@ import {
   type CapabilityId,
 } from "../actors/capabilityManifest";
 import type { Env } from "../types";
+import { fileBackedEnvValue } from "../config/environment";
 
 // ---------------------------------------------------------------------------
 // Identity, sources, results
@@ -302,12 +303,19 @@ function identityScopes(identity: AgentConfigIdentity): string[] {
   ].filter((s): s is string => typeof s === "string" && s.length > 0);
 }
 
+// Phase 3 (#6550): a var that moved to environment.config.json
+// resolves from the file when the env no longer carries it. This
+// covers AGENT_CONFIG_PINS plus every modes `envVar` binding
+// (CHAT_NLQ_MODE, SCREENER_ND_MODE, COPILOT_CHANNELS,
+// COPILOT_VOICE_BACKEND) and the capability floor entry.
 function envRawValue(
   env: AgentConfigDeps["env"],
   varName: string,
 ): unknown {
   if (!env || typeof env !== "object") return undefined;
-  return (env as Record<string, unknown>)[varName];
+  const direct = (env as Record<string, unknown>)[varName];
+  if (direct !== undefined) return direct;
+  return fileBackedEnvValue(env as Partial<Env> | undefined, varName);
 }
 
 /** The pin binding one (entry, identity), or null when unpinned. */

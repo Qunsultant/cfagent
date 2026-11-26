@@ -106,6 +106,12 @@ function goalService(opts: {
 }) {
   const mockEnv = {
     ETRADE_ENVIRONMENT: "sandbox",
+    // Phase 3 (#6550): monetization is ON via
+    // environment.config.json; the autonomous goal screen is a paid
+    // family and would fail closed with no stored price. These
+    // tests pin the Yahoo data mode on the engine submission, not
+    // payment, so the paid gate stays off.
+    MONETIZATION_ENABLED: "false",
     // #2051: goal_workflow is default-ON. The chained test pins
     // the DIRECT fallback path (chain mode keeps it until S5
     // #4280); the unchained tests pin the workflow submission.

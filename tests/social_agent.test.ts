@@ -4,7 +4,15 @@ import { MemorySocialLedger } from "../src/agents/social/ledger";
 
 // 2026-10-26 is a Monday; 13:00Z = 09:00 EDT.
 const MON_0900 = Date.parse("2026-10-26T13:00:00Z");
-const ENABLED = { SOCIAL_POSTING_ENABLED: "1" };
+const ENABLED = {
+  SOCIAL_POSTING_ENABLED: "1",
+  // Phase 3 (#6550): SOCIAL_AUTONOMOUS_CHANNELS lives in
+  // environment.config.json ("threads" in production), so a bare env
+  // no longer resolves the code default ["threads", "x"]. These
+  // tests pin the five-default-channel draft set (incl. x), so the
+  // list is set explicitly here.
+  SOCIAL_AUTONOMOUS_CHANNELS: "threads,x",
+};
 
 describe("buildDailyDrafts early returns", () => {
   it("returns postingDisabled and writes nothing when posting is off", async () => {

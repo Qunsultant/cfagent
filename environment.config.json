@@ -247,6 +247,83 @@
           "maxRetries": 2
         }
       }
+    },
+    "aiSearch": {
+      "instance": "screener-search",
+      "cacheTtlMs": 7200000,
+      "cacheMaxEntries": 1000,
+      "knowledgeServingEnabled": true,
+      "reportIndexingEnabled": true,
+      "corpusIndexingEnabled": true
+    },
+    "stockCopilot": {
+      "paperEnabled": true,
+      "aroundTheClock": false
+    },
+    "agent": {
+      "capabilitiesDisabled": "",
+      "configPins": "",
+      "chatNlqMode": "off",
+      "screenerNdMode": "on",
+      "copilotChannels": "stock:voice=on",
+      "copilotVoiceBackend": ""
+    },
+    "app": {
+      "name": "NextGenTP"
+    },
+    "polling": {
+      "quotesRestFallbackMs": 300000,
+      "quotesWsReconnectBaseMs": 5000,
+      "quotesWsReconnectCapMs": 120000,
+      "optionsFlowsPollMs": 3000000000000,
+      "optionsLatestPollMs": 3000000000000,
+      "chatAutoRefreshFloorS": 30,
+      "goalTrackPollMs": 3000000000000,
+      "goalTrackDeadlineMs": 3600000,
+      "tickerPushIntervalS": 3000,
+      "tickerPushStaleAfterIntervals": 2
+    },
+    "ai": {
+      "masMaxSteps": 2,
+      "model": "@cf/zai-org/glm-4.7-flash"
+    },
+    "wallet": {
+      "network": "base-sepolia",
+      "facilitator": "https://x402.org/facilitator"
+    },
+    "iaaa": {
+      "wiringEnabled": true,
+      "wiredFreshnessMs": 3000000000000,
+      "grantDefaultExpiryDays": 90,
+      "enabledProviders": "github,google",
+      "bootstrapAdmins": "platform,tenant:https://github.com:82253453,platform,tenant:https://accounts.google.com:116080816274398642624",
+      "staleCleanupMode": "dry-run",
+      "membershipIndexRepairMode": "execute",
+      "pdpEnabled": true
+    },
+    "commercial": {
+      "storeOperators": "OpenAIMP"
+    },
+    "social": {
+      "postingEnabled": false,
+      "livePublishing": false,
+      "autonomousChannels": "threads"
+    },
+    "service": {
+      "userLogin": "svc-background"
+    },
+    "features": {
+      "screener": true,
+      "goalWorkflow": true,
+      "paymentAssurance": true,
+      "optionsScreener": true,
+      "monetization": true,
+      "sandbox": false,
+      "workspace": true
+    },
+    "_workspaceComment": "Issue #6550: WORKSPACE_ROOT is reserved for a future PortThink agent capability — that is why it is kept here despite zero read sites in src/ today. Do not flag it as unneeded in the next inventory.",
+    "workspace": {
+      "root": "/workspace"
     }
   },
   "environments": {

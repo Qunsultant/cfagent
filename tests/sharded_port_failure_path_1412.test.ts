@@ -30,6 +30,12 @@ describe("autonomousMarketScreen sharded missing-port failure path (#1412, #4280
       ETRADE_SANDBOX_BASE_URL: "https://apisb.etrade.com",
       ETRADE_SANDBOX_CONSUMER_KEY: "mock_consumer_key",
       ETRADE_SANDBOX_CONSUMER_SECRET: "mock_consumer_secret",
+      // Phase 3 (#6550): monetization is ON via
+      // environment.config.json; the paid gate fails the run with the
+      // price-catalogue error before the seam's port check runs, so
+      // the missing-port failure path is never reached. These tests
+      // pin the port/failure paths, not payment, so it stays off.
+      MONETIZATION_ENABLED: "false",
     } as unknown as Env;
     mockOrm = new DatabaseORM(mockSql as any);
   });

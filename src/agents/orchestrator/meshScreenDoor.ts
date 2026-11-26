@@ -115,6 +115,7 @@ import {
   resolveChatAwaitPollMs,
 } from "./chatAwaitBudget";
 import { resolvePollingConfigFromEnv } from "../../client/pollingConfig";
+import { resolveEnvironmentConfig } from "../../config/environment";
 import { CREDITS_TOP_UP_HINT, workflowRunUrl } from "../../services/providerUxLinks";
 import { resolveScreenProviderForRun } from "../../services/tenantProviders";
 import { resolvePresetFilter } from "../../services/screenerPresetResolution";
@@ -708,7 +709,12 @@ async function buildScreenCommand(
     shards,
     filters: req.filters as unknown as Record<string, unknown>,
     maxItems: 10,
-    pollIntervalMs: resolvePollingConfigFromEnv(ctx.env).screenDoorParentPollMs,
+    pollIntervalMs: resolvePollingConfigFromEnv(
+      ctx.env,
+      // Phase 3 (#6550): the moved polling cadences resolve from
+      // environment.config.json; this key itself is env-only.
+      resolveEnvironmentConfig(ctx.env).workerSettings.polling,
+    ).screenDoorParentPollMs,
     ...(req.screenMode
       ? { screenMode: req.screenMode, screenIntent: req.screenIntent }
       : {}),

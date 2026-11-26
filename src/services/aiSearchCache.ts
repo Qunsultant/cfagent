@@ -18,6 +18,9 @@
  * This module is SDK-free so it is unit-testable in Vitest.
  */
 
+import { resolveEnvironmentConfig } from "../config/environment";
+import type { Env } from "../types";
+
 /** Default TTL: 5 minutes. */
 export const AI_SEARCH_CACHE_DEFAULT_TTL_MS = 5 * 60_000;
 /** Default capacity: 200 entries (oldest evicted first). */
@@ -29,19 +32,24 @@ export interface AiSearchCacheConfig {
 }
 
 /**
- * Resolve cache config from env vars, with sane defaults.
- * AI_SEARCH_CACHE_TTL_MS — milliseconds an entry stays fresh.
- * AI_SEARCH_CACHE_MAX_ENTRIES — max entries before oldest-first eviction.
+ * Resolve cache config from the resolved context, with sane defaults.
+ * Phase 3 (#6550): AI_SEARCH_CACHE_TTL_MS / AI_SEARCH_CACHE_MAX_ENTRIES
+ * now live in environment.config.json (defaults.aiSearch); a still-set
+ * env var wins. The file values (7200000 / 1000) are the deployed
+ * values; the code defaults below apply only when the file has no
+ * value (never in production).
  */
 export function resolveAiSearchCacheConfig(env?: unknown): AiSearchCacheConfig {
-  const e = env as Record<string, string | undefined> | undefined;
-  const ttl = Number(e?.AI_SEARCH_CACHE_TTL_MS);
-  const max = Number(e?.AI_SEARCH_CACHE_MAX_ENTRIES);
+  const settings = resolveEnvironmentConfig(env as Partial<Env> | undefined).workerSettings
+    .aiSearch;
   return {
-    ttlMs: Number.isFinite(ttl) && ttl > 0 ? ttl : AI_SEARCH_CACHE_DEFAULT_TTL_MS,
+    ttlMs:
+      Number.isFinite(settings.cacheTtlMs) && settings.cacheTtlMs > 0
+        ? settings.cacheTtlMs
+        : AI_SEARCH_CACHE_DEFAULT_TTL_MS,
     maxEntries:
-      Number.isFinite(max) && max > 0
-        ? Math.floor(max)
+      Number.isFinite(settings.cacheMaxEntries) && settings.cacheMaxEntries > 0
+        ? Math.floor(settings.cacheMaxEntries)
         : AI_SEARCH_CACHE_DEFAULT_MAX_ENTRIES,
   };
 }

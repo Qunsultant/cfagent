@@ -593,7 +593,10 @@ describe("C1 R1: screening routes (goal-screen + backtest)", () => {
       getOrm: vi.fn(() => orm),
       readSettingRaw: vi.fn((key: string) => settings.get(key) ?? null),
       writeSetting: vi.fn((key: string, value: string) => void settings.set(key, value)),
-      env: {},
+      // Phase 3 (#6550): monetization is ON via
+      // environment.config.json; these route tests pin the 202
+      // submission, not the paid gate, so it stays off.
+      env: { MONETIZATION_ENABLED: "false" },
     } as unknown as ScreenerResearchRouteContext;
     return { ctx, orm, sql };
   }

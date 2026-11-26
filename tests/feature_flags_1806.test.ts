@@ -79,14 +79,24 @@ describe("Cloudflare Feature Flags (Issue #1806)", () => {
       expect(result).toBe(false);
     });
 
-    it("defaults to closed (false) for screener when configuration is empty", async () => {
-      const env = {};
+    // Phase 3 (#6550): the screener flag now lives in
+    // environment.config.json (defaults.features.screener, ON in
+    // production), so an empty env no longer means "no
+    // configuration". This test pins the explicit-off behaviour
+    // (an explicitly disabled screener still reads closed).
+    it("defaults to closed (false) for screener when explicitly off", async () => {
+      const env = { FEATURE_SCREENER: "0" };
       const enabled = await isFeatureEnabled(env, "screener");
       expect(enabled).toBe(false);
     });
 
     it("defaults to closed (false) for all flags when feature configuration is set, except payment_assurance (issue #2054), goal_workflow (issue #2051), and schedule_chat (issue #4249)", async () => {
-      const env = { FEATURE_SCREENER: "0" };
+      // Phase 3 (#6550): the file (environment.config.json,
+      // defaults.features) turns monetization and options_screener
+      // ON, and the options sub-products inherit options_screener —
+      // so the "defaults closed" pin holds those two off explicitly,
+      // exactly as it already held screener off.
+      const env = { FEATURE_SCREENER: "0", FEATURE_OPTIONS_SCREENER: "0", FEATURE_MONETIZATION: "0" };
       for (const flag of ALL_FEATURE_FLAGS) {
         const enabled = await isFeatureEnabled(env, flag);
         // #2051 + #2054 + #4249: these three flags are default-ON
@@ -289,6 +299,12 @@ describe("Cloudflare Feature Flags (Issue #1806)", () => {
       const env = {
         FEATURE_SCREENER: "1", // Screener ON
         // other features default to OFF
+        // Phase 3 (#6550): options_screener is ON via
+        // environment.config.json (defaults.features), and
+        // options_flows inherits it — so the flows route would pass
+        // the gate. Pin the options family off to keep "only
+        // screener is enabled" true here.
+        FEATURE_OPTIONS_SCREENER: "0",
       };
 
       // Voice trading route is blocked

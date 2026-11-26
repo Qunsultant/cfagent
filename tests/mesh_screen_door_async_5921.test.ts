@@ -82,7 +82,13 @@ function makeDoorHarness(env: Record<string, unknown>, sql: MockSqlStorage): Doo
     },
   };
   const ctx: MeshScreenDoorContext = {
-    env: env as MeshScreenDoorContext["env"],
+    // Phase 3 (#6550): monetization is ON via
+    // environment.config.json, so the door would fail closed on the
+    // paid gate's missing stored price. These tests pin the FREE
+    // path; a test that needs the paid path overrides via
+    // ctx.monetizationOn (as the paid-async test does) or passes
+    // MONETIZATION_ENABLED explicitly.
+    env: { MONETIZATION_ENABLED: "false", ...env } as MeshScreenDoorContext["env"],
     ensureTables: () => sql as never,
     workflowPort: port,
     readWorkflowJobHistory: async (_tenantId, chainId) => {

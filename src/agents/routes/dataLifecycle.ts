@@ -99,6 +99,7 @@
 
 import { IAAA_AUDIT_KEY_PREFIX } from "../../data/auditLogPorts";
 import { createKvWipeStores } from "./kvWipe";
+import { resolveEnvironmentConfig } from "../../config/environment";
 import { createCommercialAdapter } from "../../data/createCommercialPorts";
 import type { CommercialStore } from "../../data/commercialPorts";
 import { createTenantDirectoryAdapter } from "../../data/createTenantDirectoryPorts";
@@ -1491,9 +1492,7 @@ async function callerIsGenesisEntry(
   internalUserId: string,
 ): Promise<boolean> {
   const parsed = parseBootstrapListWithGenesis(
-    (env as unknown as Record<string, unknown>)["IAAA_BOOTSTRAP_ADMINS"] as
-      | string
-      | undefined,
+    resolveEnvironmentConfig(env).workerSettings.iaaa.bootstrapAdmins,
   );
   const bindingStore = createKvBindingStore(stores.kv);
   for (const item of parsed.entries) {
@@ -1598,9 +1597,7 @@ async function checkPlatformBootstrap(
   // to log in. A legacy global marker, if one exists, is inert —
   // it gates nothing — and is reported as such, not as a closure.
   const genesisAdmins = parseBootstrapListWithGenesis(
-    (ctx.env as unknown as Record<string, unknown>)[
-      "IAAA_BOOTSTRAP_ADMINS"
-    ] as string | undefined,
+    resolveEnvironmentConfig(ctx.env).workerSettings.iaaa.bootstrapAdmins,
   );
   const genesisBindingStore = createKvBindingStore(stores.kv);
   const platformIds: string[] = [];
@@ -1661,9 +1658,7 @@ async function checkPlatformBootstrap(
   // parser, which wraps parseBootstrapAdmins and adds the
   // platform: genesis prefix).
   const admins = parseBootstrapListWithGenesis(
-    (ctx.env as unknown as Record<string, unknown>)[
-      "IAAA_BOOTSTRAP_ADMINS"
-    ] as string | undefined,
+    resolveEnvironmentConfig(ctx.env).workerSettings.iaaa.bootstrapAdmins,
   );
   if (admins.rejected.length > 0) {
     elements.push({
@@ -1704,9 +1699,7 @@ async function checkPlatformBootstrap(
     tenantId: stores.iaaaTenantId,
     nowMs: stores.nowMs(),
     defaultExpiryDays: resolveGrantDefaultExpiryDays(
-      (ctx.env as unknown as Record<string, unknown>)[
-        "IAAA_GRANT_DEFAULT_EXPIRY_DAYS"
-      ] as string | undefined,
+      resolveEnvironmentConfig(ctx.env).workerSettings.iaaa.grantDefaultExpiryDays,
     ),
     dryRun: true,
   });
@@ -1787,9 +1780,7 @@ async function handlePlatformBootstrapInit(
         tenantId: stores.iaaaTenantId,
         nowMs: stores.nowMs(),
         defaultExpiryDays: resolveGrantDefaultExpiryDays(
-          (ctx.env as unknown as Record<string, unknown>)[
-            "IAAA_GRANT_DEFAULT_EXPIRY_DAYS"
-          ] as string | undefined,
+          resolveEnvironmentConfig(ctx.env).workerSettings.iaaa.grantDefaultExpiryDays,
         ),
       });
       if (result.failed.length > 0) {
@@ -2096,9 +2087,7 @@ async function handleTenantBootstrap(
         let operatorFailed: string | null = null;
         if (!alreadyOperator) {
           const expiryDays = resolveGrantDefaultExpiryDays(
-            (ctx.env as unknown as Record<string, unknown>)[
-              "IAAA_GRANT_DEFAULT_EXPIRY_DAYS"
-            ] as string | undefined,
+            resolveEnvironmentConfig(ctx.env).workerSettings.iaaa.grantDefaultExpiryDays,
           );
           const bindings = applyDefaultGrantExpiry(
             [{ role: "store-operator", scope: "tenant", grantedBy: "system:bootstrap" }],
@@ -2283,9 +2272,7 @@ async function handleTenantBootstrap(
       tenantId,
       nowMs,
       defaultExpiryDays: resolveGrantDefaultExpiryDays(
-        (ctx.env as unknown as Record<string, unknown>)[
-          "IAAA_GRANT_DEFAULT_EXPIRY_DAYS"
-        ] as string | undefined,
+        resolveEnvironmentConfig(ctx.env).workerSettings.iaaa.grantDefaultExpiryDays,
       ),
       dryRun: !confirm,
     });

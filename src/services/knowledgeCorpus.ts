@@ -51,6 +51,8 @@ import { r2KeyForStorageKey } from "./reportBlobStore";
 import { createBlobStore } from "./blobStoreR2Adapter";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
+import { resolveEnvironmentConfig } from "../config/environment";
+import type { Env } from "../types";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -214,10 +216,11 @@ export async function putKnowledgeDoc(
 export function isKnowledgeServingEnabled(
   env?: { KNOWLEDGE_SERVING_ENABLED?: string } | null
 ): boolean {
-  const v = env?.KNOWLEDGE_SERVING_ENABLED;
-  if (typeof v !== "string") return false;
-  const norm = v.trim().toLowerCase();
-  return norm === "1" || norm === "true" || norm === "on";
+  // Phase 3 (#6550): resolves from environment.config.json
+  // (defaults.aiSearch.knowledgeServingEnabled, ON in production);
+  // a still-set env var wins, exactly as before the move.
+  return resolveEnvironmentConfig(env as Partial<Env> | undefined).workerSettings.aiSearch
+    .knowledgeServingEnabled;
 }
 
 /**

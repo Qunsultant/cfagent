@@ -436,7 +436,11 @@ describe("Goal Screen ThinkWorkflow & Reports End-to-End (#2625)", () => {
   it("submits a goal screen from the route and answers 202 with the run handle (#4279: the direct submission is retired; the engine path produces the artifacts — see the orchestration test above)", async () => {
     mockedStart.mockResolvedValue(HANDLE as never);
     const blobStorage = new InMemoryBlobStorage();
-    const env = { REPORTS_BUCKET: undefined };
+    // Phase 3 (#6550): monetization is ON via
+    // environment.config.json, and a paid goal screen requires a
+    // checkout-contact email; this test pins the engine-path
+    // submission, not payment, so the paid gate stays off.
+    const env = { REPORTS_BUCKET: undefined, MONETIZATION_ENABLED: "false" };
     const sql = new MockSqlStorage();
     const orm = new DatabaseORM(sql as any);
 

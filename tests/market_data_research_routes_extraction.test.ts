@@ -166,7 +166,10 @@ const src = (rel: string) => readFileSync(`src/${rel}`, "utf8");
 
 const baseCtx = (overrides: Partial<MarketDataResearchRouteContext> = {}): MarketDataResearchRouteContext =>
   ({
-    env: { MARKER: "env" } as any,
+    // Phase 3 (#6550): monetization is ON via
+    // environment.config.json; these screen tests pin the seam, not
+    // the paid gate, so it stays off.
+    env: { MARKER: "env", MONETIZATION_ENABLED: "false" } as any,
     audit: vi.fn(),
     getScreenerAgent: () => ({ runScreen: screenerMocks.fns.runScreen, runSharded: screenerMocks.fns.runSharded }),
     runStockScreenViaEngine: delegateSeamFake(screenerMocks.fns.runScreen),

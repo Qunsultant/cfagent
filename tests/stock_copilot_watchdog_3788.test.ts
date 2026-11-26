@@ -75,7 +75,10 @@ function baseCtx(overrides: Partial<ScheduledTasksCopilotContext> = {}): {
 describe("copilot non-declaration signal (#3788)", () => {
   it("audits flag_off when the flag is off", async () => {
     const { ctx, audits } = baseCtx({
-      env: {} as any,
+      // Phase 3 (#6550): STOCK_COPILOT_PAPER_ENABLED lives in
+      // environment.config.json (ON in production), so a bare env
+      // no longer means the flag is off.
+      env: { STOCK_COPILOT_PAPER_ENABLED: "0" } as any,
       getScreenerExecutionContext: async () => ({ userLogin: "owner", environment: "TEST" as const }),
     });
     expect(await declareStockCopilotTasks(ctx)).toEqual({});
@@ -109,7 +112,10 @@ describe("copilot non-declaration signal (#3788)", () => {
 
   it("dedupes: the same cause does not re-audit on the next declaration", async () => {
     const { ctx, audits } = baseCtx({
-      env: {} as any,
+      // Phase 3 (#6550): STOCK_COPILOT_PAPER_ENABLED lives in
+      // environment.config.json (ON in production), so a bare env
+      // no longer means the flag is off.
+      env: { STOCK_COPILOT_PAPER_ENABLED: "0" } as any,
       getScreenerExecutionContext: async () => ({ userLogin: "owner", environment: "TEST" as const }),
     });
     await declareStockCopilotTasks(ctx);
@@ -119,7 +125,10 @@ describe("copilot non-declaration signal (#3788)", () => {
 
   it("re-audits when the cause class changes", async () => {
     const { ctx, audits } = baseCtx({
-      env: {} as any,
+      // Phase 3 (#6550): STOCK_COPILOT_PAPER_ENABLED lives in
+      // environment.config.json (ON in production), so a bare env
+      // no longer means the flag is off.
+      env: { STOCK_COPILOT_PAPER_ENABLED: "0" } as any,
       getScreenerExecutionContext: async () => ({ userLogin: "owner", environment: "TEST" as const }),
     });
     await declareStockCopilotTasks(ctx);
@@ -189,7 +198,10 @@ describe("copilot handler failure + firing ledger record (#3788)", () => {
       // Flag off inside the cycle: it short-circuits to "disabled"
       // before touching the platform, so the firing is observable
       // without network or broker credentials.
-      env: {} as any,
+      // Phase 3 (#6550): STOCK_COPILOT_PAPER_ENABLED lives in
+      // environment.config.json (ON in production), so a bare env
+      // no longer means the flag is off.
+      env: { STOCK_COPILOT_PAPER_ENABLED: "0" } as any,
       agentCtx: { storage: { sql } } as any,
       getScreenerExecutionContext: async () => ({ userLogin: "owner", environment: "TEST" as const }),
     });

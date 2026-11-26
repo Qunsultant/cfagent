@@ -235,7 +235,11 @@ const urlOf = (path: string) => new URL(`https://agent.internal${path}`);
 
 function envFor(payment: ReturnType<typeof paymentBinding>, monetizationOn: boolean) {
   return {
-    ...(monetizationOn ? { MONETIZATION_ENABLED: "true" } : {}),
+    // Phase 3 (#6550): monetization is ON via
+    // environment.config.json; the flag-OFF arm must pin the flag
+    // explicitly, or the paid seam 402s sync screens and 400s
+    // async ones instead of letting the caller proceed.
+    ...(monetizationOn ? { MONETIZATION_ENABLED: "true" } : { MONETIZATION_ENABLED: "false" }),
     IAAA_TENANT_ID: TENANT,
     PAYMENT_WORKFLOW: payment.binding,
   } as Record<string, unknown>;

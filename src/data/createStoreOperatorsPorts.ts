@@ -17,6 +17,8 @@ import {
   type StoreOperatorsDb,
 } from "./d1StoreOperatorsAdapter";
 import type { StoreOperators } from "./storeOperatorsPorts";
+import { resolveEnvironmentConfig } from "../config/environment";
+import type { Env } from "../types";
 
 /** Build the store operator list adapter from Worker env, or null if unbound. */
 export function createStoreOperatorsAdapter(env: { AGENT_DB?: unknown }): D1StoreOperatorsAdapter | null {
@@ -25,12 +27,17 @@ export function createStoreOperatorsAdapter(env: { AGENT_DB?: unknown }): D1Stor
 }
 
 /**
- * Parse the env operator list. The env var is a comma-separated
- * login list; blank entries are skipped. Kept here (the composition
- * root) so the four former per-site copies have one home.
+ * Parse the env operator list. Phase 3 (#6550): the list now lives in
+ * environment.config.json (defaults.commercial.storeOperators,
+ * "OpenAIMP"); a still-set env var wins. A comma-separated login
+ * list; blank entries are skipped. Kept here (the composition root)
+ * so the former per-site copies have one home.
  */
-export function parseEnvOperators(env: { COMMERCIAL_STORE_OPERATORS?: unknown }): Set<string> {
-  const raw = typeof env.COMMERCIAL_STORE_OPERATORS === "string" ? env.COMMERCIAL_STORE_OPERATORS : "";
+export function parseEnvOperators(
+  env: { COMMERCIAL_STORE_OPERATORS?: unknown } | Partial<Env> | null | undefined,
+): Set<string> {
+  const raw = resolveEnvironmentConfig(env as Partial<Env> | undefined).workerSettings.commercial
+    .storeOperators;
   return new Set(
     raw
       .split(",")

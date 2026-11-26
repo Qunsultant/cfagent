@@ -264,7 +264,11 @@ describe("stalled ScreenerScreenWorkflow run (#3787a)", () => {
     opts: { deadlineMs?: number } = {},
   ): MeshScreenDoorContext {
     return {
-      env: {} as Env,
+      // Phase 3 (#6550): monetization is ON via
+      // environment.config.json; the door would fail closed on the
+      // paid gate's missing stored price before the workflow runs.
+      // These tests pin bridge-row settlement, not payment.
+      env: { MONETIZATION_ENABLED: "false" } as Env,
       ensureTables: () => sql as never,
       asyncJobSessionId: "owner-login-1",
       workflowPort: port,
@@ -457,7 +461,9 @@ describe("completed ScreenerScreenWorkflow run (#3787a)", () => {
       status: (workflowId) => adapter.status(workflowId),
     };
     const ctx: MeshScreenDoorContext = {
-      env: {} as Env,
+      // Phase 3 (#6550): see makeDoorCtx above — same paid-gate
+      // pin for this test's own door context.
+      env: { MONETIZATION_ENABLED: "false" } as Env,
       ensureTables: () => sql as never,
       asyncJobSessionId: "owner-login-1",
       workflowPort: port,

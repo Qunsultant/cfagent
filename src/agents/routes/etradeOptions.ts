@@ -66,7 +66,7 @@ import {
 } from "../../trading";
 import { getEtapiConfig, setRuntimeEtapiConfigOverrides } from "../../config/etapiConfig";
 import { isDemoCalibratedChainsEnabled } from "../../config/demoMode";
-import { DEFAULT_AI_MODEL } from "../model";
+import { resolveAiModelName } from "../model";
 import type { Env, ETradeOptionChain, ETradeOptionExpireDate } from "../../types";
 import type { DatabaseORM, SqlStorage } from "../../orm";
 import type { ScreenerAgent } from "../screener-agent";
@@ -470,7 +470,7 @@ export async function handleEtradeOptionsRoutes(
         return Response.json({
           error,
           mode: "llm_evaluation_of_quant_candidates",
-          llm: { status: "error", model: ctx.env.AI_MODEL || DEFAULT_AI_MODEL, error },
+          llm: { status: "error", model: resolveAiModelName(ctx.env), error },
           llmInput: fallbackLlmInput,
           retrievedData: {
             symbol,

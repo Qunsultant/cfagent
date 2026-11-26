@@ -34,7 +34,12 @@ const SESSION_ID = "0d9a3120-1c2b-4e3f-8a5b-312000000009";
 function makeEnv() {
   const { namespace: sessionStoreNs, seed: seedSession } = makeFakeSessionStore();
   seedSession("sessions", SESSION_ID, { githubLogin: "octocat-brief" });
-  return { SESSION_STORE: sessionStoreNs } as unknown as Env;
+  // Phase 3 (#6550): SOCIAL_POSTING_ENABLED lives in
+  // environment.config.json (OFF in production), so a bare env no
+  // longer means the social routes are enabled — the gate 404s
+  // FEATURE_DISABLED before auth. These route tests pin the brief
+  // CRUD behaviour, so posting stays on here.
+  return { SESSION_STORE: sessionStoreNs, SOCIAL_POSTING_ENABLED: "1" } as unknown as Env;
 }
 
 const todayNY = () => zonedDateParts(Date.now(), "America/New_York").date;

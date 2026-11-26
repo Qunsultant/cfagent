@@ -187,6 +187,12 @@ interface ForwardedCall {
 function workerEnv(fake: FakeSessionStore) {
   const forwarded: ForwardedCall[] = [];
   const env: any = {
+    // Phase 3 (#6550): IAAA_WIRING_ENABLED lives in
+    // environment.config.json (ON in production). Wiring ON + a
+    // legacy session (no authTimeMs) fails mint closed with 403
+    // (step-up); these tests pin key scoping (#180), not step-up,
+    // and their sessions are legacy by design, so wiring stays off.
+    IAAA_WIRING_ENABLED: "0",
     SESSION_STORE: fake.namespace,
     ORCHESTRATOR_AGENT: {
       idFromName: (name: string) => name,

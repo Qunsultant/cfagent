@@ -11,9 +11,15 @@
  * SessionStore (`etrade:token:<ENV>:<serviceId>`) with the same expiry,
  * renewal, and revocation lifecycle as a user token.
  *
- * Fail-closed contract: when the id is unset, blank, or not login-shaped,
- * there is NO unattended identity. Callers must skip (and log) rather
- * than substitute any other identity.
+ * Fail-closed contract (Phase 3, #6550): the id now lives in
+ * `environment.config.json` (`defaults.service.userLogin`,
+ * "svc-background") with a still-set env var winning. An unset or
+ * blank env falls back to the file identity — the file is the
+ * deployment default. A malformed env value still yields `null`
+ * (fail closed), exactly as before: the env value wins when set,
+ * and only a login-shaped resolved value is an identity. When the
+ * id is null there is NO unattended identity, and callers must skip
+ * (and log) rather than substitute any other identity.
  */
 import { resolveEnvironmentConfig } from "../config/environment";
 import type { Env } from "../types";

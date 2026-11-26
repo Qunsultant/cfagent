@@ -74,6 +74,7 @@ import {
   type MarketStreamClientMessage,
 } from "../services/marketStream";
 import type { Env } from "../types";
+import { resolveEnvironmentConfig } from "../config/environment";
 import { PortThink } from "../actors/thinkAdapter";
 import { createUnifiedSchedulePorts } from "../data/createUnifiedSchedulePorts";
 import type {
@@ -123,33 +124,30 @@ export const TICKER_PUSH_STALE_AFTER_INTERVALS = 2;
 export const TICKER_PUSH_CALLBACK = "pushTicks";
 
 /**
- * Resolve the missed-push threshold from env (issue #4237, AOP):
- * the TICKER_PUSH_STALE_AFTER_INTERVALS var wins when it parses
- * to a positive integer; anything else (absent, non-numeric, zero,
- * negative) falls back to the default. The health derivation never
- * carries a literal.
+ * Resolve the missed-push threshold from the resolved context (issue
+ * #4237, AOP): Phase 3 (#6550) — TICKER_PUSH_STALE_AFTER_INTERVALS
+ * now lives in environment.config.json (defaults.polling,
+ * 2 in production); a still-set env var wins when it parses to a
+ * positive integer, and anything else falls back to the file value.
+ * The health derivation never carries a literal.
  */
 export function resolveTickerPushStaleAfterIntervals(env: Env | undefined): number {
-  const raw = env?.TICKER_PUSH_STALE_AFTER_INTERVALS;
-  if (raw !== undefined) {
-    const parsed = Number.parseInt(raw, 10);
-    if (Number.isFinite(parsed) && parsed > 0) return parsed;
-  }
+  const value = resolveEnvironmentConfig(env).workerSettings.polling.tickerPushStaleAfterIntervals;
+  if (Number.isFinite(value) && value > 0) return value;
   return TICKER_PUSH_STALE_AFTER_INTERVALS;
 }
 
 /**
- * Resolve the tick push cadence from env (issue #2443, AOP): the
- * TICKER_PUSH_INTERVAL_S var wins when it parses to a positive
- * integer; anything else (absent, non-numeric, zero, negative) falls
- * back to the default. The arm call sites never carry a literal.
+ * Resolve the tick push cadence from the resolved context (issue
+ * #2443, AOP): Phase 3 (#6550) — TICKER_PUSH_INTERVAL_S now lives in
+ * environment.config.json (defaults.polling, 3000 in production); a
+ * still-set env var wins when it parses to a positive integer, and
+ * anything else falls back to the file value. The arm call sites
+ * never carry a literal.
  */
 export function resolveTickerPushIntervalSeconds(env: Env | undefined): number {
-  const raw = env?.TICKER_PUSH_INTERVAL_S;
-  if (raw !== undefined) {
-    const parsed = Number.parseInt(raw, 10);
-    if (Number.isFinite(parsed) && parsed > 0) return parsed;
-  }
+  const value = resolveEnvironmentConfig(env).workerSettings.polling.tickerPushIntervalS;
+  if (Number.isFinite(value) && value > 0) return value;
   return TICKER_PUSH_INTERVAL_SECONDS;
 }
 

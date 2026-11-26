@@ -182,9 +182,11 @@ function toResolvedScreenerNdGate(resolved: AgentConfigResolution): ResolvedScre
 }
 
 /**
- * Resolves the gate from one env value. Blank/unset → off
- * (the built-in default); "on" → enabled; "off" → off; any
- * other non-blank value → off with invalid=true.
+ * Resolves the gate from one env value. Unset → the file value
+ * (Phase 3, #6550: defaults.screenerNdMode, "on" in production);
+ * blank (null/""/whitespace) → off (the built-in default);
+ * "on" → enabled; "off" → off; any other non-blank value → off
+ * with invalid=true.
  * (#3741: delegated to the one resolver — the `screenerNdMode`
  * entry above, env layer only; this shape is unchanged.)
  */

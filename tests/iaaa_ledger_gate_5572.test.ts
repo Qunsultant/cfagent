@@ -568,7 +568,10 @@ describe("ledger-write handlers — the enforced gate", () => {
     );
     expect(noLogin?.status).toBe(403);
     const unconfigured = await callRoute(
-      fakeCtx(store, audits, orm, {}),
+      // Phase 3 (#6550): a bare env now resolves "svc-background"
+      // from environment.config.json, so the unconfigured-service
+      // case needs the malformed login.
+      fakeCtx(store, audits, orm, { SERVICE_USER_LOGIN: "not a login!" }),
       "/payments/agentic/ledger/record-cfpay",
       cfpayBody,
       SERVICE_LOGIN,

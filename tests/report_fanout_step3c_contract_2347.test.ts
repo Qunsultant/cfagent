@@ -194,7 +194,10 @@ describe("3c contract: recorded outcomes on the successful path", () => {
     const { env, upserts } = makeVectorEnv();
     const stored = await storeReportAtGenerationWithR2(
       sql as unknown as SqlStorage,
-      { REPORTS_BUCKET: bucket, ...env } as never,
+      // Phase 3 (#6550): AI_SEARCH_REPORT_INDEXING_ENABLED lives in
+      // environment.config.json (ON in production); this seam asserts
+      // the no-AI-search outcome, so the flag is off explicitly.
+      { REPORTS_BUCKET: bucket, ...env, AI_SEARCH_REPORT_INDEXING_ENABLED: "0" } as never,
       input(),
     );
     expect(stored?.fanout.outcome).toBe("stored_r2");
@@ -355,7 +358,10 @@ describe("3c contract: per-leg fault injection produces the declared recorded ou
 
   it("flag OFF: zero instance calls AND aiSearch recorded not_attempted (not failed)", async () => {
     const sql = new SqliteTestStorage();
-    const ai = makeAiSearchEnv(); // no flag -> OFF
+    // Phase 3 (#6550): AI_SEARCH_REPORT_INDEXING_ENABLED lives in
+    // environment.config.json (ON in production), so a bare env no
+    // longer means the flag is off.
+    const ai = makeAiSearchEnv({ flag: "0" });
     const stored = storeReportAtGeneration(
       sql as unknown as SqlStorage,
       input(),

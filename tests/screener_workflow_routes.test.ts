@@ -168,11 +168,18 @@ describe("market-data screen async path", () => {
   function marketDataCtx(env: unknown, agent: unknown) {
     const audits: Array<{ type: string }> = [];
     const persisted: unknown[] = [];
+    // Phase 3 (#6550): monetization is ON via
+    // environment.config.json; the market-data screen is a paid
+    // family — the sync path would 402 and the async path would
+    // fail starting the payment workflow (503). These tests pin
+    // the async/sync routing, not payment, so the paid gate stays
+    // off.
+    const envOff = { MONETIZATION_ENABLED: "false", ...(env as Record<string, unknown>) };
     return {
       audits,
       persisted,
       ctx: {
-        env,
+        env: envOff,
         audit: (type: string) => {
           audits.push({ type });
         },

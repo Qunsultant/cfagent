@@ -153,7 +153,11 @@ function makeHarness(): Harness {
       throw new Error("direct ScreenerAgent path must not be used when the workflow port is available");
     },
     getSocialBriefStore: () => null,
-    env: {} as NlqPortsContext["env"],
+    // Phase 3 (#6550): monetization is ON via
+    // environment.config.json; the chat screen would fail closed on
+    // the paid gate. These tests pin trace propagation through the
+    // chat screen path, not payment, so the paid gate stays off.
+    env: { MONETIZATION_ENABLED: "false" } as NlqPortsContext["env"],
     ensureTables: () => sql as never,
     workflowPort: recordingPort,
     readWorkflowJobHistory: (tenantId, chainId) =>

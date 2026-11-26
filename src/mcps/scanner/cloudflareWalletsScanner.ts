@@ -25,6 +25,7 @@ import { withX402, type X402Config } from "agents/x402";
 import { z } from "zod";
 import { optionScreenerFilterFields } from "../../trading";
 import type { Env } from "../../types";
+import { resolveEnvironmentConfig } from "../../config/environment";
 import { getServiceUserLogin } from "../../security/serviceIdentity";
 import { AGENT_DIDS } from "../../agents/did";
 import { actorGateway } from "../../services/cloudflareActorGateway";
@@ -49,11 +50,11 @@ const SCANNER_PRICE_USD = 0.05; // $0.05 USDC per scan
 export class OptionsScannerMCP extends McpAgent<Env> {
   private get x402Config(): X402Config {
     return {
-      network: (this.env?.CF_WALLET_NETWORK ?? "base-sepolia") as string,
+      network: resolveEnvironmentConfig(this.env).workerSettings.wallet.network,
       recipient: (this.env?.CF_WALLET_RECIPIENT ??
         "0x0000000000000000000000000000000000000000") as `0x${string}`,
       facilitator: {
-        url: this.env?.CF_WALLET_FACILITATOR ?? "https://x402.org/facilitator",
+        url: resolveEnvironmentConfig(this.env).workerSettings.wallet.facilitator,
       },
     };
   }
@@ -144,7 +145,7 @@ export class OptionsScannerMCP extends McpAgent<Env> {
                   success: true,
                   pricePaid: `$${SCANNER_PRICE_USD.toFixed(2)} USDC`,
                   paymentProtocol: "x402 / Cloudflare Wallets",
-                  network: this.env?.CF_WALLET_NETWORK ?? "base-sepolia",
+                  network: resolveEnvironmentConfig(this.env).workerSettings.wallet.network,
                   proposerDid: AGENT_DIDS.PAYMENTS,
                   underlying: normalizedUnderlying,
                   jobId: queued.jobId,
@@ -178,7 +179,7 @@ export class OptionsScannerMCP extends McpAgent<Env> {
                 tool: "screen_options",
                 pricePerCall: `$${SCANNER_PRICE_USD.toFixed(2)} USDC`,
                 paymentProtocol: "x402 (Cloudflare Wallets)",
-                network: this.env?.CF_WALLET_NETWORK ?? "base-sepolia",
+                network: resolveEnvironmentConfig(this.env).workerSettings.wallet.network,
                 recipient: this.env?.CF_WALLET_RECIPIENT ?? "(not configured - set CF_WALLET_RECIPIENT)",
                 underlyingDiscovery: "Dynamic current Nasdaq, NYSE, and AMEX stock listings; specify an explicit maximum for broad scans.",
                 supportedContractTypes: ["CALL", "PUT", "BOTH"],
