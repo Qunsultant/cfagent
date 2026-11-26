@@ -47,7 +47,7 @@ const read = (rel: string) => readFileSync(join(repo, rel), "utf8");
 describe("5175 slice 3 — run-id migration", () => {
   it("P01 engine default routes through leaf newRunId", () => {
     const src = read("src/services/jobPipelineEngine.ts");
-    expect(src).toContain('import { newRunId, stepExecutionId } from "./executionTreeIds"');
+    expect(src).toContain('import { newRunId, runIdBody, stageIdBody, stepExecutionId } from "./executionTreeIds"');
     expect(src).toContain("deps.newRunId ?? newRunId");
     // The inline closure it replaced is gone (no ad-hoc time36/counter).
     expect(src).not.toContain("Date.now().toString(36)");
