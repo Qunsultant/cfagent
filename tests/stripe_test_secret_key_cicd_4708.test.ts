@@ -42,8 +42,13 @@ describe("Issue #4708 — STRIPE_TEST_SECRET_KEY CI/CD & wrangler.jsonc wiring",
   });
 
   it("configures keep_vars and documents CI/CD Stripe secret management in wrangler.jsonc without hardcoding keys", () => {
-    expect(wranglerRaw).toContain('"keep_vars": true');
-    expect(wranglerRaw).toContain('"_comment_stripe"');
+    // Phase 3 (#6550): keep_vars is false (the moved vars must actually
+    // leave the deployed env) and the Stripe note is a real `//`
+    // comment now, not a `_comment_stripe` var. The secrets themselves
+    // are still synced by the deploy workflow's sync-secrets job.
+    expect(wranglerRaw).toContain('"keep_vars": false');
+    expect(wranglerRaw).not.toContain('"_comment_stripe"');
+    expect(wranglerRaw).toContain("Set STRIPE_TEST_SECRET_KEY / STRIPE_LIVE_SECRET_KEY / STRIPE_SECRET_KEY via CI/CD");
     expect(wranglerRaw).toContain("STRIPE_TEST_SECRET_KEY");
     expect(wranglerRaw).not.toMatch(/sk_test_[A-Za-z0-9]{10,}/);
     expect(wranglerRaw).not.toMatch(/sk_live_[A-Za-z0-9]{10,}/);

@@ -241,6 +241,12 @@ function makeEnv(extra: Record<string, unknown> = {}) {
   const { namespace: sessionStoreNs, seed: seedSession } = makeFakeSessionStore();
   seedSession("sessions", SESSION_ID, { githubLogin: "octocat-health" });
   return {
+    // Phase 3 (#6550): SOCIAL_POSTING_ENABLED lives in
+    // environment.config.json (OFF in production — wrangler had
+    // "0"), so a bare env fails the social_publishing feature gate
+    // with 404 before auth. These tests pin the token-health
+    // route, not the flag, so the gate stays open here.
+    SOCIAL_POSTING_ENABLED: "1",
     SESSION_STORE: sessionStoreNs,
     ...extra,
   } as unknown as Env;

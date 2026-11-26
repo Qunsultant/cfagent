@@ -64,6 +64,11 @@ describe("sharded submission gate behavior (#1993)", () => {
     const mockEnv = {
       ETRADE_ENVIRONMENT: "sandbox",
       ETRADE_SANDBOX_BASE_URL: "https://apisb.etrade.com",
+      // Phase 3 (#6550): monetization is ON via
+      // environment.config.json; the paid gate refuses the submission
+      // before the lock gate runs. These tests pin the lock gate, not
+      // payment, so it stays off.
+      MONETIZATION_ENABLED: "false",
     } as any;
     const service = new ScheduledTasksService(mockEnv, new DatabaseORM({ exec: () => [] } as any), "test_trader");
     (service as any).publishScreenerEvent = vi.fn(async () => {});

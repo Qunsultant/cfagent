@@ -789,7 +789,12 @@ describe("server route inventory pin (#2902)", () => {
 // --- Dispatch smoke: moved Core branches answer exactly as before ---
 
 const fetchWorker = async (path: string, method = "GET") => {
-  const res = await worker.fetch(new Request(`https://agent.test${path}`, { method }), {} as any);
+  // Phase 3 (#6550): SOCIAL_POSTING_ENABLED lives in
+  // environment.config.json (OFF in production — wrangler had "0"),
+  // so a bare env now fails the social_publishing feature gate with
+  // 404 before auth. These tests pin dispatch (401 = route exists +
+  // auth-gated), not the flag, so the gate stays open here.
+  const res = await worker.fetch(new Request(`https://agent.test${path}`, { method }), { SOCIAL_POSTING_ENABLED: "1" } as any);
   return res;
 };
 

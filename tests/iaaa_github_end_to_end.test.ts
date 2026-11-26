@@ -95,14 +95,17 @@ describe("tenant resolution", () => {
 });
 
 describe("PDP flag gating", () => {
-  it("is on only for 1/true (case-insensitive, trimmed)", () => {
+  // Phase 3 (#6550): IAAA_PDP_ENABLED moved to
+  // environment.config.json (defaults.iaaa.pdpEnabled, "1"), so an
+  // absent or blank env now resolves to the FILE value (ON).
+  it("is on only for 1/true (case-insensitive, trimmed); absent/blank resolve to the file value (ON)", () => {
     expect(isPdpEnabled({ IAAA_PDP_ENABLED: "1" })).toBe(true);
     expect(isPdpEnabled({ IAAA_PDP_ENABLED: "true" })).toBe(true);
     expect(isPdpEnabled({ IAAA_PDP_ENABLED: " TRUE " })).toBe(true);
-    expect(isPdpEnabled({})).toBe(false);
+    expect(isPdpEnabled({})).toBe(true);
     expect(isPdpEnabled({ IAAA_PDP_ENABLED: "0" })).toBe(false);
     expect(isPdpEnabled({ IAAA_PDP_ENABLED: "false" })).toBe(false);
-    expect(isPdpEnabled({ IAAA_PDP_ENABLED: "" })).toBe(false);
+    expect(isPdpEnabled({ IAAA_PDP_ENABLED: "" })).toBe(true);
   });
   it("enforces only for wired sessions when the flag is on", () => {
     const wired = { githubLogin: "octo", internalUserId: UUID_A } as never;
@@ -114,7 +117,7 @@ describe("PDP flag gating", () => {
     expect(shouldEnforcePdp({ IAAA_PDP_ENABLED: "1" }, wired, NOW)).toBe(true);
     expect(shouldEnforcePdp({ IAAA_PDP_ENABLED: "1" }, legacy, NOW)).toBe(true);
     expect(shouldEnforcePdp({ IAAA_PDP_ENABLED: "1" }, null, NOW)).toBe(false);
-    expect(shouldEnforcePdp({}, wired, NOW)).toBe(false);
+    expect(shouldEnforcePdp({ IAAA_PDP_ENABLED: "0" }, wired, NOW)).toBe(false);
   });
 });
 

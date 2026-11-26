@@ -37,6 +37,10 @@ describe("autonomousMarketScreen preflight-blocked failure path (#1369)", () => 
   beforeEach(() => {
     const mockSql = { exec: vi.fn(() => []) };
     mockEnv = {
+      // Phase 3 (#6550): monetization is ON via environment.config.json;
+      // these tests pin the preflight-guard failure path, not the paid
+      // gate, so it stays off.
+      MONETIZATION_ENABLED: "0",
       ETRADE_ENVIRONMENT: "sandbox",
       ETRADE_SANDBOX_BASE_URL: "https://apisb.etrade.com",
       ETRADE_SANDBOX_CONSUMER_KEY: "mock_consumer_key",

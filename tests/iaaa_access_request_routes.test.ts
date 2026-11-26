@@ -88,7 +88,18 @@ async function makeEnv() {
     providerIssuer: "https://github.com",
     createdAt: NOW,
   });
-  const env = { SESSION_STORE: namespace } as unknown as Env;
+  const env = {
+    SESSION_STORE: namespace,
+    // Phase 3 (#6550): IAAA_WIRING_ENABLED lives in
+    // environment.config.json (ON in production), so a bare env no
+    // longer means wiring is off. With wiring on, these seeded
+    // sessions take the wired validation path (freshness/expiry) and
+    // are rejected, so /api/me reports unauthenticated and the
+    // access-request routes 401. These tests pin the wiring-OFF
+    // behaviour (provider display from the session record, legacy
+    // sessions accepted), so the flag is off explicitly here.
+    IAAA_WIRING_ENABLED: "0",
+  } as unknown as Env;
   const membershipStore = createKvMembershipStore(sessionStore(env));
   await createMembership(membershipStore, {
     internalUserId: MEMBER_ID,

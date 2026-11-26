@@ -45,6 +45,12 @@ describe("sharded-chain logging / classification (#2860)", () => {
   beforeEach(() => {
     const mockSql = { exec: vi.fn(() => []) };
     mockEnv = {
+      // Phase 3 (#6550): monetization is ON via
+      // environment.config.json; the sharded screen is a paid
+      // family and would fail closed with no stored price before
+      // the submission join points these tests pin. The paid gate
+      // stays off here.
+      MONETIZATION_ENABLED: "false",
       ETRADE_ENVIRONMENT: "sandbox",
       ETRADE_SANDBOX_BASE_URL: "https://apisb.etrade.com",
       ETRADE_SANDBOX_CONSUMER_KEY: "mock_consumer_key",

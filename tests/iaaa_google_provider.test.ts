@@ -26,11 +26,14 @@ describe("google provider registration", () => {
   });
 
   it("is disabled when wiring is off, even if listed", () => {
+    // Phase 3 (#6550): IAAA_WIRING_ENABLED lives in
+    // environment.config.json (ON in production), so a bare env no
+    // longer means wiring is off.
     expect(
-      isProviderEnabled({ IAAA_ENABLED_PROVIDERS: "github,google" } as never, "google")
+      isProviderEnabled({ IAAA_WIRING_ENABLED: "0", IAAA_ENABLED_PROVIDERS: "github,google" } as never, "google")
     ).toBe(false);
     expect(
-      resolveLoginProvider({ IAAA_ENABLED_PROVIDERS: "github,google" } as never, "google")
+      resolveLoginProvider({ IAAA_WIRING_ENABLED: "0", IAAA_ENABLED_PROVIDERS: "github,google" } as never, "google")
         .disabledReason
     ).toBe("wiring-disabled");
   });

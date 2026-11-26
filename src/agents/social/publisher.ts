@@ -40,6 +40,8 @@
  */
 
 import type { SocialChannel } from "./config";
+import { resolveEnvironmentConfig } from "../../config/environment";
+import type { Env } from "../../types";
 import type { SocialDraft } from "./draft";
 
 export interface SocialTransportResponse {
@@ -319,12 +321,16 @@ export type PublishTarget =
   | { kind: "dry-run"; publisher: DryRunPublisher }
   | { kind: "unavailable"; error: string };
 
+// Phase 3 (#6550): both flags live in environment.config.json
+// (defaults.social); a still-set env var wins.
 function isLiveRequested(env: PublishEnv): boolean {
-  return env.SOCIAL_LIVE_PUBLISHING === "1" || env.SOCIAL_LIVE_PUBLISHING === "true";
+  return resolveEnvironmentConfig(env as Partial<Env> | undefined).workerSettings.social
+    .livePublishing;
 }
 
 function isPostingEnabled(env: PublishEnv): boolean {
-  return env.SOCIAL_POSTING_ENABLED === "1" || env.SOCIAL_POSTING_ENABLED === "true";
+  return resolveEnvironmentConfig(env as Partial<Env> | undefined).workerSettings.social
+    .postingEnabled;
 }
 
 /**

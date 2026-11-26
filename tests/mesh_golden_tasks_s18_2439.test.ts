@@ -523,7 +523,11 @@ function makeScreenHarness() {
       throw new Error("direct ScreenerAgent path must not be used when the workflow port is available");
     },
     getSocialBriefStore: () => null,
-    env: {} as NlqPortsContext["env"],
+    // Phase 3 (#6550): monetization is ON via environment.config.json, and
+    // this harness pins the free workflow-run path, not the paid branch —
+    // so the paid gate stays off (the price stub in makePaidHarness serves
+    // only the paid tasks, never this one).
+    env: { MONETIZATION_ENABLED: "0" } as NlqPortsContext["env"],
     ensureTables: () => sql as never,
     workflowPort: recordingPort,
     readWorkflowJobHistory: (tenantId, chainId) =>

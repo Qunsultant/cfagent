@@ -34,8 +34,12 @@ import type { SocialDraft } from "../src/agents/social/draft";
 
 const DATE = "2026-10-26";
 const MON_0900 = Date.parse("2026-10-26T13:00:00Z");
-const DRY_RUN_ENV = { SOCIAL_POSTING_ENABLED: "1" };
-const LIVE_ENV = { SOCIAL_POSTING_ENABLED: "1", SOCIAL_LIVE_PUBLISHING: "1" };
+// Phase 3 (#6550): SOCIAL_AUTONOMOUS_CHANNELS lives in
+// environment.config.json ("threads" in production), so a bare env no
+// longer resolves the code default ["threads", "x"]. These tests pin
+// dry-run publishing of x drafts, so the list is set explicitly here.
+const DRY_RUN_ENV = { SOCIAL_POSTING_ENABLED: "1", SOCIAL_AUTONOMOUS_CHANNELS: "threads,x" };
+const LIVE_ENV = { SOCIAL_POSTING_ENABLED: "1", SOCIAL_LIVE_PUBLISHING: "1", SOCIAL_AUTONOMOUS_CHANNELS: "threads,x" };
 
 function mkDraft(channel: string, status: SocialDraft["status"]): SocialDraft {
   return {

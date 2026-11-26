@@ -151,23 +151,34 @@ export function resolvePollingConfig(raw?: Record<string, unknown> | null): Poll
   return out;
 }
 
-/** Map wrangler env vars (string values) onto the config keys. */
+/**
+ * Map wrangler env vars (string values) onto the config keys.
+ * Phase 3 (#6550): the 8 moved polling vars now live in
+ * environment.config.json (defaults.polling); the server caller passes
+ * the resolved section as `fileValues`. A usable env value still wins;
+ * the file value fills the gaps the env leaves, and the builtin
+ * defaults fill the rest. The 6 env-only keys (screen-door / chat-screen
+ * parent polls, auto-refresh options/default/min/max) have no file home
+ * and keep reading env only.
+ */
 export function resolvePollingConfigFromEnv(
   env?: PollingEnvVars | null,
+  fileValues?: Partial<PollingConfig> | null,
 ): PollingConfig {
-  if (!env) {
-    return {
-      ...POLLING_CONFIG_DEFAULTS,
-      autoRefreshIntervalOptionsS: [...POLLING_CONFIG_DEFAULTS.autoRefreshIntervalOptionsS],
-    };
-  }
   const raw: Record<string, unknown> = {};
   (
     Object.entries(ENV_KEYS) as [keyof PollingConfig, keyof PollingEnvVars][]
   ).forEach(([key, envKey]) => {
-    raw[key] = env[envKey];
+    raw[key] = env?.[envKey];
   });
-  raw.autoRefreshIntervalOptionsS = env.AUTO_REFRESH_INTERVAL_OPTIONS_S;
+  raw.autoRefreshIntervalOptionsS = env?.AUTO_REFRESH_INTERVAL_OPTIONS_S;
+  if (fileValues) {
+    for (const [key, value] of Object.entries(fileValues)) {
+      if (toPositiveNumber(raw[key]) === null && toPositiveNumber(value) !== null) {
+        raw[key] = value;
+      }
+    }
+  }
   return resolvePollingConfig(raw);
 }
 

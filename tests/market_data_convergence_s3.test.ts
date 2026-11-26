@@ -264,7 +264,11 @@ describe("S3 (b) — market-data route persists a canonical report with provider
     const persist = vi.fn();
     const audit = vi.fn();
     const ctx = {
-      env: {} as any,
+      // Phase 3 (#6550): monetization is ON via
+      // environment.config.json; these tests pin the pipeline +
+      // canonical persistence, not payment, so the paid gate stays
+      // off.
+      env: { MONETIZATION_ENABLED: "false" } as any,
       audit,
       getScreenerAgent: vi.fn(() => ({ runScreen })),
       runStockScreenViaEngine: delegateSeamFake(runScreen),
@@ -348,7 +352,11 @@ describe("S3 (b) — market-data route persists a canonical report with provider
     }));
     const persist = vi.fn();
     const ctx = {
-      env: {} as any,
+      // Phase 3 (#6550): monetization is ON via
+      // environment.config.json; these tests pin the pipeline +
+      // canonical persistence, not payment, so the paid gate stays
+      // off.
+      env: { MONETIZATION_ENABLED: "false" } as any,
       audit: vi.fn(),
       getScreenerAgent: vi.fn(() => ({ runScreen })),
       runStockScreenViaEngine: delegateSeamFake(runScreen),

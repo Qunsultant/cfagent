@@ -70,6 +70,7 @@ import type {
   StockCopilotPositionPort,
 } from "../data/stockCopilotStorePorts";
 import type { Env } from "../types";
+import { resolveEnvironmentConfig } from "../config/environment";
 import {
   resolveAlpacaTradingBase,
   type ITradingPlatform,
@@ -149,17 +150,18 @@ export const DEFAULT_COPILOT_UNIVERSE: readonly string[] = [
 ];
 
 /**
- * Issue #3391: the copilot master switch, read with the exact idiom of
- * isAiSearchReportIndexingEnabled (#2246): "1"/"true"/"on"
- * (case-insensitive, trimmed) means ON; absence means OFF.
+ * Issue #3391: the copilot master switch. Phase 3 (#6550): the setting
+ * lives in environment.config.json (defaults.stockCopilot.paperEnabled,
+ * ON in production); a still-set env var wins.
  */
 export function isStockCopilotPaperEnabled(
   env?: { STOCK_COPILOT_PAPER_ENABLED?: string } | null,
 ): boolean {
-  const v = env?.STOCK_COPILOT_PAPER_ENABLED;
-  if (typeof v !== "string") return false;
-  const norm = v.trim().toLowerCase();
-  return norm === "1" || norm === "true" || norm === "on";
+  // Phase 3 (#6550): resolves from environment.config.json
+  // (defaults.stockCopilot.paperEnabled, ON in production); a
+  // still-set env var wins, exactly as before the move.
+  return resolveEnvironmentConfig(env as Partial<Env> | undefined).workerSettings.stockCopilot
+    .paperEnabled;
 }
 
 export function copilotUniverseFromEnv(

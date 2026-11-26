@@ -68,6 +68,13 @@ async function setup() {
     }),
   };
   const env = {
+    // Phase 3 (#6550): monetization is ON via
+    // environment.config.json; with no resolved account the paid
+    // submit route fails closed with 403 before reaching the
+    // credit-redemption / payment branches. These tests pin the
+    // submit route, not the paid path, so the free path (flag OFF)
+    // stays on here.
+    MONETIZATION_ENABLED: "false",
     AGENT_DB: mock,
     COMMERCIAL_STORE_OPERATORS: "op1",
     PAYMENT_WORKFLOW: binding,

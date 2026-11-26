@@ -101,6 +101,10 @@ const delegateSeamFake = (runScreen: (req: any) => Promise<any>) => async (input
     const env = {
       ALPACA_TRADING_TYPE: "live",
       ETRADE_ENVIRONMENT: "sandbox",
+      // Phase 3 (#6550): monetization is ON via
+      // environment.config.json; these tests pin effective-mode
+      // resolution, not the paid gate, so it stays off.
+      MONETIZATION_ENABLED: "false",
     } as unknown as Env;
     const { service, runScreen } = stockService(env);
     const result = await service.autonomousMarketScreen({ environment: "TEST" });
@@ -115,7 +119,10 @@ const delegateSeamFake = (runScreen: (req: any) => Promise<any>) => async (input
   });
 
   it("without the pin, the same TEST schedule records paper, source selection", async () => {
-    const env = { ETRADE_ENVIRONMENT: "sandbox" } as unknown as Env;
+    // Phase 3 (#6550): monetization is ON via
+    // environment.config.json; this test pins effective-mode
+    // resolution, not the paid gate, so it stays off.
+    const env = { ETRADE_ENVIRONMENT: "sandbox", MONETIZATION_ENABLED: "false" } as unknown as Env;
     const { service, runScreen } = stockService(env);
     const result = await service.autonomousMarketScreen({ environment: "TEST" });
     expect(result.success).toBe(true);

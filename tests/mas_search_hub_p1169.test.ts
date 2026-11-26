@@ -219,7 +219,12 @@ describe("#1169 S4-2 MAS search hub route", () => {
       "/api/search/mas",
       "sess-mas-flagoff",
       {
-        env: bindingEnv([{ title: "Plain doc", snippet: "No provenance." }]) as any,
+        // Phase 3 (#6550): KNOWLEDGE_SERVING_ENABLED lives in
+        // environment.config.json (ON in production), so the hub
+        // now annotates chunks with indexingState. This test pins
+        // the flag-OFF passthrough (chunks verbatim), so the flag
+        // is set off explicitly.
+        env: { ...bindingEnv([{ title: "Plain doc", snippet: "No provenance." }]), KNOWLEDGE_SERVING_ENABLED: "0" } as any,
         userLogin: "tester",
         sql: stubSql([]) as any,
         audit: () => {},

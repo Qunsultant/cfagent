@@ -210,6 +210,11 @@ describe("goal bridge deliver suppression (#1236)", () => {
       APP_ENV: "TEST",
       SESSION_STORE: sessionStoreNs,
       SCREENER_AGENT: { idFromName: (n: string) => n, get: () => ({}) },
+      // Phase 3 (#6550): monetization is ON via
+      // environment.config.json; the workflow submission would fail
+      // the paid gate instead of queuing. These tests pin the
+      // submission shape, not payment, so the paid gate stays off.
+      MONETIZATION_ENABLED: "false",
       // #2051: goal_workflow is default-ON. S5 #4280 removed the
       // direct path for chain mode too: chained and unchained runs
       // both pin the workflow submission now, and the bridge outcome

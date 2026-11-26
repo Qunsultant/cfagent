@@ -58,6 +58,8 @@ import {
 import { createDraft, type SocialDraft } from "./social/draft";
 import { getOrCreateDraft, type SocialLedger } from "./social/ledger";
 import { zonedDateParts } from "../schedule";
+import { resolveEnvironmentConfig } from "../config/environment";
+import type { Env } from "../types";
 import type { PendingApprovalStore } from "./social/approvals";
 import {
   resolvePublishTarget,
@@ -158,9 +160,15 @@ export async function publishDueDrafts(input: {
   if (!config.postingEnabled) {
     return { date: input.date, status: "postingDisabled", results: [] };
   }
+  // Phase 3 (#6550): the two flags resolve from
+  // environment.config.json (defaults.social); a still-set env var
+  // wins. Rendered back as "1"/"0" strings for the publisher gate.
+  const resolvedSocial = resolveEnvironmentConfig(
+    input.env as Partial<Env> | undefined,
+  ).workerSettings.social;
   const publishEnv: PublishEnv = {
-    SOCIAL_POSTING_ENABLED: input.env.SOCIAL_POSTING_ENABLED,
-    SOCIAL_LIVE_PUBLISHING: input.env.SOCIAL_LIVE_PUBLISHING,
+    SOCIAL_POSTING_ENABLED: resolvedSocial.postingEnabled ? "1" : "0",
+    SOCIAL_LIVE_PUBLISHING: resolvedSocial.livePublishing ? "1" : "0",
   };
   const results: ChannelPublishResult[] = [];
   for (const draft of await input.store.listDrafts(input.date)) {

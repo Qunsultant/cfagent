@@ -9,6 +9,7 @@
  * /auth/callback routes that reached it.
  */
 import type { Env, SessionData } from "../types";
+import { resolveEnvironmentConfig } from "../config/environment";
 import { clearSessionCookie, getSessionIdCandidates, getSession, deleteSession } from "./session";
 import { invalidateSessionCache } from "./sessionCache";
 import {
@@ -166,6 +167,10 @@ export function renderLoginPage(
   outcome?: AuthOutcomeCode | null,
   returnTarget?: string | null
 ): string {
+  // Phase 3 (#6550): the app name now resolves from
+  // environment.config.json (defaults.app.name, "NextGenTP"); a
+  // still-set env var wins.
+  const appName = resolveEnvironmentConfig(env).workerSettings.app.name || "NextGenTP";
   const multiProvider = Array.isArray(providers) && providers.length > 0;
   // #3015: a validated return target rides on every provider
   // button, so switching providers mid-flow (GitHub → Google, or
@@ -225,7 +230,7 @@ export function renderLoginPage(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${escapeHtml(env.APP_NAME || "NextGenTP")} — Sign In</title>
+  <title>${escapeHtml(appName)} — Sign In</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -398,7 +403,7 @@ export function renderLoginPage(
           <path d="M12 2L22 8.5V15.5L12 22L2 15.5V8.5Z"></path>
         </svg>
       </span>
-      <span>${escapeHtml(env.APP_NAME || "NextGenTP")}</span>
+      <span>${escapeHtml(appName)}</span>
     </div>
     <span class="shell-scope">Sign In</span>
   </header>
@@ -411,7 +416,7 @@ export function renderLoginPage(
           <polyline points="22 8.5 12 15.5 2 8.5"></polyline>
         </svg>
       </div>
-      <h1>Sign in to <span class="brand-gradient">${escapeHtml(env.APP_NAME || "NextGenTP")}</span></h1>
+      <h1>Sign in to <span class="brand-gradient">${escapeHtml(appName)}</span></h1>
       <p class="subtitle">${intro}</p>
 ${noticeSection}      <div class="btn-stack">
         ${buttons}
@@ -422,7 +427,7 @@ ${noticeSection}      <div class="btn-stack">
           <span class="security-dot" aria-hidden="true"></span>
           <span>Protected by W3C Agent DIDs &amp; deterministic risk gates</span>
         </div>
-        <a href="/" class="back-link">&larr; Back to ${escapeHtml(env.APP_NAME || "NextGenTP")} Home</a>
+        <a href="/" class="back-link">&larr; Back to ${escapeHtml(appName)} Home</a>
       </div>
     </div>
   </main>

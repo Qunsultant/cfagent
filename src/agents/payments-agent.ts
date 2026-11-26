@@ -29,6 +29,7 @@
  */
 
 import { PortThink } from "../actors/thinkAdapter";
+import { resolveEnvironmentConfig } from "../config/environment";
 import type { A2AAttribution } from "../a2a/meshCredentials";
 import {
   dispatchPaymentsA2A,
@@ -256,8 +257,12 @@ export class PaymentsAgent extends PortThink {
 
       // Real facilitator verification (x402 /verify). Any non-approval —
       // HTTP error, transport failure, malformed response — denies.
+      // Phase 3 (#6550): the facilitator URL lives in
+      // environment.config.json (defaults.wallet.facilitator); a
+      // still-set env var wins. The X402_FACILITATOR_URL override
+      // stays as the middle fallback.
       const facilitatorUrl = (
-        this.env.CF_WALLET_FACILITATOR ||
+        resolveEnvironmentConfig(this.env).workerSettings.wallet.facilitator ||
         this.env.X402_FACILITATOR_URL ||
         "https://x402.org/facilitator"
       ).replace(/\/+$/, "");

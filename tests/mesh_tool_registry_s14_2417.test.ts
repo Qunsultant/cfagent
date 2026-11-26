@@ -385,9 +385,17 @@ describe("live status evidence — non-command families (#2417)", () => {
     expect(
       (wrangler["vars"] as Record<string, unknown>)["AI_SEARCH_ENDPOINT"],
     ).toBeUndefined();
+    // Phase 3 (#6550): AI_SEARCH_INSTANCE moved from wrangler vars
+    // into environment.config.json (defaults.aiSearch.instance) —
+    // the instance name stays configured, in the file now. It leaves
+    // its wrangler line as a comment, so it is absent from live vars.
     expect(
       (wrangler["vars"] as Record<string, unknown>)["AI_SEARCH_INSTANCE"],
-    ).toBeDefined();
+    ).toBeUndefined();
+    const fileConfig = JSON.parse(read("environment.config.json")) as {
+      defaults?: { aiSearch?: { instance?: unknown } };
+    };
+    expect(fileConfig.defaults?.aiSearch?.instance).toBe("screener-search");
   });
 
   it("core-mcp-commands: the notes record the platform-knowledge grounding the survey §8 caveat requires", () => {

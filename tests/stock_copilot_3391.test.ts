@@ -237,8 +237,12 @@ describe("sandbox backtest parity after signal extraction", () => {
 // ---------------------------------------------------------------------------
 
 describe("stock copilot cycle", () => {
-  it("flag: absence means OFF, '1' means ON (house idiom)", () => {
-    expect(isStockCopilotPaperEnabled({})).toBe(false);
+  // Phase 3 (#6550): the flag moved to environment.config.json
+  // (defaults.stockCopilot.paperEnabled, "1"), so an absent env now
+  // resolves to the FILE value (ON). Only an explicit off value
+  // turns it off.
+  it("flag: absence resolves to the file value (ON); '0' means OFF, '1' means ON", () => {
+    expect(isStockCopilotPaperEnabled({})).toBe(true);
     expect(isStockCopilotPaperEnabled({ STOCK_COPILOT_PAPER_ENABLED: "0" })).toBe(false);
     expect(isStockCopilotPaperEnabled({ STOCK_COPILOT_PAPER_ENABLED: "1" })).toBe(true);
     expect(isStockCopilotPaperEnabled({ STOCK_COPILOT_PAPER_ENABLED: " on " })).toBe(true);
@@ -247,7 +251,7 @@ describe("stock copilot cycle", () => {
   it("flag OFF: no cycle work, zero platform calls", async () => {
     const fake = createFakePlatform();
     const result = await runStockCopilotCycle(
-      baseDeps({ env: {} as any, platform: fake.platform }),
+      baseDeps({ env: { STOCK_COPILOT_PAPER_ENABLED: "0" } as any, platform: fake.platform }),
     );
     expect(result.status).toBe("disabled");
     expect(fake.calls.placeOrderRemote).toBe(0);
@@ -448,7 +452,7 @@ describe("stock copilot scheduled-task declaration", () => {
   it("declares nothing while the flag is off", async () => {
     const tasks = await declareStockCopilotTasks({
       ...ctxBase,
-      env: {} as any,
+      env: { STOCK_COPILOT_PAPER_ENABLED: "0" } as any,
       getScreenerExecutionContext: async () => ({ userLogin: "owner", environment: "TEST" as const }),
     });
     expect(tasks).toEqual({});

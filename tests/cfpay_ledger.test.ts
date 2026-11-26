@@ -227,7 +227,11 @@ describe("cfpay ledger client (#2019)", () => {
       /not bound/,
     );
     const noIdentity = fakeEnv(new Map());
-    delete (noIdentity as unknown as Record<string, unknown>)["SERVICE_USER_LOGIN"];
+    // Phase 3 (#6550): deleting the login no longer means "no
+    // identity" — SERVICE_USER_LOGIN resolves "svc-background" from
+    // environment.config.json. The malformed login fails the shape
+    // check, which is what this assertion pins.
+    (noIdentity as unknown as Record<string, unknown>).SERVICE_USER_LOGIN = "not a login!";
     await expect(recordCfpayLedgerRow(noIdentity, "charge", chargeInput)).rejects.toThrow(
       /service identity/,
     );

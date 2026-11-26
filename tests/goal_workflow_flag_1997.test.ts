@@ -55,14 +55,20 @@ const HANDLE = {
   statusUrl: "/api/jobs/history?chainId=goal-screen%3Amanual%3Aalice%3Aincome%3A2026-10-27T12%3A00%3A00.000Z",
 };
 
+// Phase 3 (#6550): monetization is ON via
+// environment.config.json, and a paid goal screen requires a
+// checkout-contact email; these tests pin the flag gate / engine
+// submission, not payment, so the paid gate stays off.
 const FLAG_ON_ENV = {
   FEATURE_FLAGS: JSON.stringify({ goal_workflow: true }),
+  MONETIZATION_ENABLED: "false",
 } as unknown as Env;
 
 // Issue #2051: "flag OFF" now means EXPLICIT off (bulk false), not
 // a bare env — a bare env resolves goal_workflow ON by default.
 const FLAG_OFF_ENV = {
   FEATURE_FLAGS: JSON.stringify({ goal_workflow: false }),
+  MONETIZATION_ENABLED: "false",
 } as unknown as Env;
 
 function fakeGoalResult(overrides: Partial<GoalDrivenScreenResult> = {}): GoalDrivenScreenResult {

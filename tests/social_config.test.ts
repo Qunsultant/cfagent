@@ -7,17 +7,22 @@ import {
 } from "../src/agents/social/config";
 
 describe("social config parsing", () => {
-  it("defaults to posting off with the confirmed split when env is empty", () => {
+  // Phase 3 (#6550): the social settings moved to
+  // environment.config.json (defaults.social). The file's autonomous
+  // split is ["threads"] (production override per #1489), not the
+  // code default ["threads", "x"] — an empty env now resolves to the
+  // FILE split. Posting stays off (file "0").
+  it("defaults to posting off with the file split when env is empty", () => {
     const cfg = parseSocialConfig({});
     expect(cfg.postingEnabled).toBe(false);
-    expect(cfg.autonomousChannels).toEqual(["threads", "x"]);
+    expect(cfg.autonomousChannels).toEqual(["threads"]);
     expect(cfg.approvalChannels).toEqual(["facebook", "instagram", "linkedin"]);
   });
 
   it("defaults the same way for undefined env", () => {
     const cfg = parseSocialConfig(undefined);
     expect(cfg.postingEnabled).toBe(false);
-    expect(cfg.autonomousChannels).toEqual(["threads", "x"]);
+    expect(cfg.autonomousChannels).toEqual(["threads"]);
   });
 
   it('treats "1" and "true" as posting enabled', () => {
@@ -41,9 +46,9 @@ describe("social config parsing", () => {
   it("treats an explicitly blank list as empty, not as the default", () => {
     const cfg = parseSocialConfig({ SOCIAL_AUTONOMOUS_CHANNELS: "   " });
     expect(cfg.autonomousChannels).toEqual([]);
-    // But an unset list still yields the default.
+    // But an unset list still yields the file split.
     const cfg2 = parseSocialConfig({});
-    expect(cfg2.autonomousChannels).toEqual(["threads", "x"]);
+    expect(cfg2.autonomousChannels).toEqual(["threads"]);
   });
 
   it("deduplicates enabled channels across both lists", () => {
@@ -58,9 +63,11 @@ describe("social config parsing", () => {
 describe("channel disposition (fail-closed)", () => {
   const cfg = parseSocialConfig({});
 
-  it("resolves default autonomous channels to autonomous", () => {
+  it("resolves the file-split autonomous channels to autonomous", () => {
     expect(resolveChannelDisposition("threads", cfg)).toBe("autonomous");
-    expect(resolveChannelDisposition("x", cfg)).toBe("autonomous");
+    // "x" is not in the file's autonomous split (threads only, #1489),
+    // so it resolves to approval, never autonomous.
+    expect(resolveChannelDisposition("x", cfg)).toBe("approval");
   });
 
   it("resolves default approval channels to approval", () => {

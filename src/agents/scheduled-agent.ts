@@ -248,6 +248,7 @@ import {
   SOCIAL_DAILY_PIPELINE_ID,
 } from "./social/pipeline";
 import { executeSocialGoal, priorDates } from "./social/goalExecutor";
+import { buildSocialEnv } from "./social/config";
 import {
   postSlackText,
   runResourceCapAlert,
@@ -2501,12 +2502,10 @@ export class ScheduledAgent extends PortThink {
             continue;
           }
           const pipelineResult = await runSocialDailyPipeline({
-            env: {
-              SOCIAL_POSTING_ENABLED: rawEnv.SOCIAL_POSTING_ENABLED,
-              SOCIAL_AUTONOMOUS_CHANNELS: rawEnv.SOCIAL_AUTONOMOUS_CHANNELS,
-              SOCIAL_APPROVAL_CHANNELS: rawEnv.SOCIAL_APPROVAL_CHANNELS,
-              SOCIAL_LIVE_PUBLISHING: rawEnv.SOCIAL_LIVE_PUBLISHING,
-            },
+            // Phase 3 (#6550): the forwarded social env is rendered from
+            // environment.config.json via buildSocialEnv; a still-set
+            // env var wins. SOCIAL_APPROVAL_CHANNELS stays env-only.
+            env: buildSocialEnv(rawEnv),
             tokens: {
               X_ACCESS_TOKEN: rawEnv.X_ACCESS_TOKEN,
               THREADS_ACCESS_TOKEN: rawEnv.THREADS_ACCESS_TOKEN,
@@ -2578,12 +2577,10 @@ export class ScheduledAgent extends PortThink {
           const firingDate = zonedDateParts(now.getTime(), goal.timeZone ?? "America/New_York").date;
           const storedBrief = briefStore ? await briefStore.getBrief(firingDate) : null;
           const result = await executeSocialGoal({
-            env: {
-              SOCIAL_POSTING_ENABLED: rawEnv.SOCIAL_POSTING_ENABLED,
-              SOCIAL_AUTONOMOUS_CHANNELS: rawEnv.SOCIAL_AUTONOMOUS_CHANNELS,
-              SOCIAL_APPROVAL_CHANNELS: rawEnv.SOCIAL_APPROVAL_CHANNELS,
-              SOCIAL_LIVE_PUBLISHING: rawEnv.SOCIAL_LIVE_PUBLISHING,
-            },
+            // Phase 3 (#6550): the forwarded social env is rendered from
+            // environment.config.json via buildSocialEnv; a still-set
+            // env var wins. SOCIAL_APPROVAL_CHANNELS stays env-only.
+            env: buildSocialEnv(rawEnv),
             tokens: {
               X_ACCESS_TOKEN: rawEnv.X_ACCESS_TOKEN,
               THREADS_ACCESS_TOKEN: rawEnv.THREADS_ACCESS_TOKEN,

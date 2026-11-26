@@ -70,6 +70,7 @@
  */
 
 import type { Env, SessionData } from "../types";
+import { resolveEnvironmentConfig } from "../config/environment";
 import {
   SESSION_STORE_CONFIG,
   SESSION_STORE_CONFIG_ERRORS,
@@ -169,14 +170,11 @@ export function resolveIaaaTenant(
   return IAAA_DEFAULT_TENANT_ID;
 }
 
-/** True only when IAAA_PDP_ENABLED is "1" or "true" (case-insensitive, trimmed). */
+/** True only when IAAA_PDP_ENABLED is "1" or "true" (case-insensitive, trimmed). Phase 3 (#6550): resolves from environment.config.json (defaults.iaaa.pdpEnabled); a still-set env var wins. */
 export function isPdpEnabled(
   env: Partial<Env> | null | undefined,
 ): boolean {
-  const raw = env?.IAAA_PDP_ENABLED;
-  if (typeof raw !== "string") return false;
-  const value = raw.trim().toLowerCase();
-  return value === "1" || value === "true";
+  return resolveEnvironmentConfig(env ?? undefined).workerSettings.iaaa.pdpEnabled;
 }
 
 /**

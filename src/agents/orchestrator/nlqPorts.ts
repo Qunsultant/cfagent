@@ -33,6 +33,7 @@ import {
   resolveChatAwaitPollMs,
 } from "./chatAwaitBudget";
 import { resolvePollingConfigFromEnv } from "../../client/pollingConfig";
+import { resolveEnvironmentConfig } from "../../config/environment";
 import type { ShardJobRow } from "../../data/shardJobPorts";
 import { meshTraceStoreForEnv } from "../../data/createMeshTracePorts";
 import { resolveScreenProviderForRun } from "../../services/tenantProviders";
@@ -389,7 +390,12 @@ async function buildChatScreenCommand(
     shards,
     filters: req.filters as unknown as Record<string, unknown>,
     maxItems: 10,
-    pollIntervalMs: resolvePollingConfigFromEnv(ctx.env).chatScreenParentPollMs,
+    pollIntervalMs: resolvePollingConfigFromEnv(
+      ctx.env,
+      // Phase 3 (#6550): the moved polling cadences resolve from
+      // environment.config.json; this key itself is env-only.
+      resolveEnvironmentConfig(ctx.env).workerSettings.polling,
+    ).chatScreenParentPollMs,
     ...(provider !== null ? { provider } : {}),
     ...(traceparent ? { traceparent } : {}),
   });

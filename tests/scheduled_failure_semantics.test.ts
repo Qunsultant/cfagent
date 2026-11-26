@@ -170,6 +170,12 @@ describe("Scheduled job failure semantics (#112)", () => {
     const d1Mock = new MockD1Database();
     auditStore = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
     env = {
+      // Phase 3 (#6550): monetization is ON via
+      // environment.config.json; the autonomous screen is a paid
+      // family and would fail closed with no stored price before
+      // reaching the universe failure these tests pin. The paid gate
+      // stays off here.
+      MONETIZATION_ENABLED: "false",
       APP_ENV: "TEST",
       // #6503 — the /api/schedules list route reads the D1 unified
       // store (fail-closed without AGENT_DB: 500).

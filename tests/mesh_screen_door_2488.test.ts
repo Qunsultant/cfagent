@@ -214,11 +214,17 @@ async function makeTurnDrive(opts: {
 }): Promise<TurnDrive> {
   const submitted: AsyncJobSubmission[] = [];
   const audits: TurnDrive["audits"] = [];
+  // Phase 3 (#6550): monetization is ON via
+  // environment.config.json, so the chat screen would fail closed
+  // on the paid gate. These tests pin the FREE path (turn → queue →
+  // executor → door), not payment, so the paid gate stays off
+  // unless a test sets it explicitly.
+  const driveEnv = { MONETIZATION_ENABLED: "false", ...(opts.env ?? {}) } as Env;
   const routeCtx: McpChatNlqRouteContext = {
     getOrm: () => ({}) as never,
     getStorageSql: () => opts.sql,
     getStorage: () => ({ sql: opts.sql }) as never,
-    env: (opts.env ?? {}) as Env,
+    env: driveEnv,
     audit: (type, agent, payload) => {
       audits.push({ type, agent, payload });
     },
@@ -253,7 +259,7 @@ async function makeTurnDrive(opts: {
     throw new Error(`mesh discovery failed in the #2488 drive: ${ensured.error ?? "unknown"}`);
   }
   const ctx: ChatTurnHelpersContext = {
-    env: (opts.env ?? {}) as Env,
+    env: driveEnv,
     ensureTables: () => opts.sql as never,
     getOrm: () => ({}) as never,
     storage: { sql: opts.sql } as never,
@@ -308,7 +314,12 @@ async function driveTurnToolToExecution(
   };
   expect(payload.toolName).toBe(toolName);
   const context = {
-    env: (exec.env ?? {}) as Env,
+    // Phase 3 (#6550): monetization is ON via
+    // environment.config.json, so the chat screen would fail closed
+    // on the paid gate inside the door. These tests pin the FREE
+    // path (turn → queue → executor → door), not payment, so the
+    // paid gate stays off unless a test sets it explicitly.
+    env: { MONETIZATION_ENABLED: "false", ...(exec.env ?? {}) } as Env,
     orm: {} as never,
     sessionId: "session-2488",
     audit: () => {},

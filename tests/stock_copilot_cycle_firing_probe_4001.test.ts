@@ -308,7 +308,10 @@ describe("Issue #4001 follow-up — the firing leaves a dispatch-boundary probe"
     // A flag-off declaration on the same storage records the
     // non-declaration cause under the existing dedup key.
     await declareStockCopilotTasks({
-      env: {} as any,
+      // Phase 3 (#6550): STOCK_COPILOT_PAPER_ENABLED lives in
+      // environment.config.json (ON in production), so a bare env
+      // no longer means the flag is off.
+      env: { STOCK_COPILOT_PAPER_ENABLED: "0" } as any,
       agentCtx: {
         storage: { sql: sql as any, get: kv.get, put: kv.put },
       } as any,
@@ -353,7 +356,10 @@ describe("Issue #4001 follow-up — the firing leaves a dispatch-boundary probe"
     const audits: Array<{ type: string; payload: Record<string, unknown> }> =
       [];
     await declareStockCopilotTasks({
-      env: {} as any,
+      // Phase 3 (#6550): STOCK_COPILOT_PAPER_ENABLED lives in
+      // environment.config.json (ON in production), so a bare env
+      // no longer means the flag is off.
+      env: { STOCK_COPILOT_PAPER_ENABLED: "0" } as any,
       agentCtx: {
         storage: { sql: sql as any, get: kv.get, put: kv.put },
       } as any,

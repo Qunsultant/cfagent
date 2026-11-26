@@ -108,6 +108,10 @@ function fakeGoalResult(overrides: Partial<GoalDrivenScreenResult> = {}): GoalDr
 function goalService(opts: { followupScheduler?: unknown } = {}) {
   const mockEnv = {
     ETRADE_ENVIRONMENT: "sandbox",
+    // Phase 3 (#6550): monetization is ON via
+    // environment.config.json; these tests pin the goal-bridge
+    // submission, not the paid gate, so it stays off.
+    MONETIZATION_ENABLED: "false",
     FEATURE_FLAGS: JSON.stringify({ goal_workflow: true }),
   } as unknown as Env;
   const mockOrm = new DatabaseORM(new MockSqlStorage() as never);
@@ -297,6 +301,10 @@ function workflowGoalService(opts: { withBinding: boolean }) {
   const d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
   const mockEnv = {
     ETRADE_ENVIRONMENT: "sandbox",
+    // Phase 3 (#6550): monetization is ON via
+    // environment.config.json; these tests pin the goal-bridge
+    // submission, not the paid gate, so it stays off.
+    MONETIZATION_ENABLED: "false",
     FEATURE_FLAGS: JSON.stringify({ goal_workflow: true }),
     ...(opts.withBinding ? { SCREENER_WORKFLOW: binding } : {}),
     AGENT_DB: d1Mock,

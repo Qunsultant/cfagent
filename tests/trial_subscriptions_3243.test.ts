@@ -278,7 +278,10 @@ describe("trial checkout route (#3243)", () => {
       AGENT_DB: mock,
       COMMERCIAL_STORE_OPERATORS: "op1",
     };
-    if (opts.monetization) env.MONETIZATION_ENABLED = "true";
+    // Phase 3 (#6550): monetization is ON via environment.config.json, so an
+    // unset MONETIZATION_ENABLED no longer reads as flag OFF; pin it
+    // explicitly both ways.
+    env.MONETIZATION_ENABLED = opts.monetization ? "true" : "0";
     const ctx = {
       env,
       getOrm: () => ({}) as DatabaseORM,

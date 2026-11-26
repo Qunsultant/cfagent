@@ -311,7 +311,10 @@ function agenticDeps(overrides: Partial<StockCopilotDeps> = {}): StockCopilotDep
 
 describe("Issue #3899 RC2 — agentic refusals are recorded as activity", () => {
   it("disabled (flag off) records a refused activity entry", async () => {
-    const deps = agenticDeps({ env: {} as any });
+    // Phase 3 (#6550): STOCK_COPILOT_PAPER_ENABLED lives in
+    // environment.config.json (ON in production), so a bare env no
+    // longer means the flag is off.
+    const deps = agenticDeps({ env: { STOCK_COPILOT_PAPER_ENABLED: "0" } as any });
     const result = await runStockCopilotAgenticCycle(deps);
     expect(result.status).toBe("disabled");
     const activity = deps.activity!.listActivity("owner", 10);

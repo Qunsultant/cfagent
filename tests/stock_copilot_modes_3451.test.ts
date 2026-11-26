@@ -435,7 +435,10 @@ describe("stock copilot cycle — mode matrix (#3451)", () => {
         platform: fake.platform,
         selection: UNRESOLVED,
         activity,
-        env: {} as any,
+        // Phase 3 (#6550): STOCK_COPILOT_PAPER_ENABLED lives in
+        // environment.config.json (ON in production), so a bare env
+        // no longer means the flag is off.
+        env: { STOCK_COPILOT_PAPER_ENABLED: "0" } as any,
       }),
     );
     expect(result.status).toBe("disabled");

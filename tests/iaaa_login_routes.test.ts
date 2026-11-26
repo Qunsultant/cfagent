@@ -44,6 +44,12 @@ function makeEnv(overrides: Record<string, unknown> = {}) {
   const { namespace, store } = makeFakeSessionStore();
   const env: Record<string, unknown> = {
     SESSION_STORE: namespace,
+    // Phase 3 (#6550): IAAA_WIRING_ENABLED lives in
+    // environment.config.json (ON in production), so a bare env no
+    // longer means wiring is off. These wiring-OFF characterization
+    // tests pin the login-page outcome, so the flag is off explicitly
+    // here; wired tests pass "1" via overrides.
+    IAAA_WIRING_ENABLED: "0",
     ORCHESTRATOR_AGENT: {
       idFromName: (name: string) => name,
       get: () => ({ fetch: async () => Response.json({ ok: true }) }),

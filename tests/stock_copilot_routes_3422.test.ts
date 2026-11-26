@@ -291,8 +291,11 @@ describe("stock copilot routes (#3422)", () => {
     expect(body.activeBinding).toBeNull();
   });
 
-  it("status reports off when the global flag is unset", async () => {
-    const { ctx } = await makeCtx({ env: {} as StockCopilotRouteContext["env"] });
+  it("status reports off when the global flag is off", async () => {
+    // Phase 3 (#6550): STOCK_COPILOT_PAPER_ENABLED lives in
+    // environment.config.json (ON in production); "unset" no longer
+    // means off, so the flag is set off explicitly.
+    const { ctx } = await makeCtx({ env: { STOCK_COPILOT_PAPER_ENABLED: "0" } as StockCopilotRouteContext["env"] });
     const res = await call(ctx, req("GET", STATUS_PATH));
     const body = (await res!.json()) as any;
     expect(body.flagEnabled).toBe(false);

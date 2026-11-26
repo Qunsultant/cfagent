@@ -480,9 +480,14 @@ describe("issue #3738 — the status read projects the stock copilot's channel s
     expect(Object.keys(body.channels).sort()).toEqual([...CAPABILITY_CHANNELS].sort());
     expect(body.channels.chat).toMatchObject({ enabled: true, source: "default" });
     expect(body.channels.slack).toMatchObject({ enabled: false, source: "default" });
+    // Phase 3 (#6550): COPILOT_CHANNELS lives in
+    // environment.config.json (defaults.agent.copilotChannels,
+    // "stock:voice=on" in production), so the voice switch now
+    // resolves from the env layer instead of the built-in default;
+    // enabled/effective are unchanged.
     expect(body.channels.voice).toMatchObject({
       enabled: true,
-      source: "default",
+      source: "env",
       manifestState: "enabled",
       effective: true,
     });
@@ -648,43 +653,18 @@ describe("issue #3794 — the Stock Copilot panel carries NO voice section (comp
 /* 6. Production-shaped config: stock voice ON, carried by env         */
 /* ------------------------------------------------------------------ */
 
-function stripJsonc(src: string): string {
-  let out = "";
-  let inStr = false;
-  for (let i = 0; i < src.length; i++) {
-    const c = src[i];
-    if (inStr) {
-      out += c;
-      if (c === "\\") out += src[++i] ?? "";
-      else if (c === '"') inStr = false;
-      continue;
-    }
-    if (c === '"') {
-      inStr = true;
-      out += c;
-      continue;
-    }
-    if (c === "/" && src[i + 1] === "/") {
-      while (i < src.length && src[i] !== "\n") i++;
-      continue;
-    }
-    if (c === "/" && src[i + 1] === "*") {
-      i += 2;
-      while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) i++;
-      i++;
-      continue;
-    }
-    out += c;
-  }
-  return out;
-}
-
-describe("issue #3738 — production-shaped config (wrangler.jsonc vars)", () => {
+describe("issue #3738 — production-shaped config (environment.config.json defaults)", () => {
   it("stock voice resolves ON from the env layer, and composes with the manifest activation", () => {
-    const wrangler = JSON.parse(
-      stripJsonc(readFileSync("wrangler.jsonc", "utf8")),
-    ) as { vars?: Record<string, unknown> };
-    const vars = { ...(wrangler.vars ?? {}) };
+    // Phase 3 (#6550): COPILOT_CHANNELS moved from wrangler.jsonc
+    // vars into environment.config.json
+    // (defaults.agent.copilotChannels); the production-shaped env
+    // is now built from the file, not the wrangler vars block.
+    const config = JSON.parse(readFileSync("environment.config.json", "utf8")) as {
+      defaults?: { agent?: { copilotChannels?: unknown } };
+    };
+    const vars = {
+      [COPILOT_CHANNELS_ENV]: config.defaults?.agent?.copilotChannels,
+    };
     expect(typeof vars[COPILOT_CHANNELS_ENV]).toBe("string");
     const r = resolveCopilotChannel({
       registrationId: "stock",
