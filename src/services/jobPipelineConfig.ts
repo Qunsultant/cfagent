@@ -56,6 +56,9 @@ export type JobPipelineErrorCode =
   | "stage_not_cancellable"
   | "stage_not_retirable"
   | "stage_input_missing"
+  // Issue #6400 — a past-run stage replay whose target owns downstream
+  // stages: a composite is not "one stage"; name a stage, or replay the run.
+  | "replay_stage_composite"
   | "stage_already_scheduled"
   | "stage_not_scheduled"
   | "stage_schedule_host_unconfigured"

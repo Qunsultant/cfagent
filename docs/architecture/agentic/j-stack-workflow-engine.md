@@ -1209,6 +1209,25 @@ lacks is an approval POLICY — who may decide, and how a decision is
 authorized — which stays a door concern; named signals and live queries
 are #5279.
 
+**Past-run replay is two operations on one rule (#4467, #6400).**
+`replayRun(jobId, runId)` reproduces a whole past run; `replayStage(jobId,
+runId, stage)` reproduces ONE stage of it. Both resolve the run through the
+same `pastRunDefinition` — the retained record, then the definition version it
+executed — and both dispatch through the same tail, so neither can replay a
+configuration the other would not. A stage replay executes that stage's own
+work as its own new run (`kind: "replay"`, origin = the past run; the run's
+descriptor names the stage), from the hand-off the past run gave it: the
+predecessor's `stage-output`, read fail-closed (`stage_input_missing`) through
+the same `stageHandoffKey` a re-run uses — sequential children chain, so child
+i>0 consumes child i-1's output, while a first child and every child of a
+parallel parent consume the parent's. The downstream rule is explicit, never
+silent: the stages AFTER the replayed one do not re-execute. And "one stage"
+has one meaning — a node that owns downstream stages is a composite, refused
+by name (`replay_stage_composite`) with the stages that can be replayed
+instead; the whole-run operation is `replayRun`. The surface is the existing
+`POST /api/jobs/:id/runs/:runId/replay?stage=job:2`, so it gains a selector,
+not a second endpoint.
+
 ### 3.10 Pause / resume / cancel / rerun
 
 The control plane, all on `JobPipelineControl`:
@@ -1222,6 +1241,8 @@ The control plane, all on `JobPipelineControl`:
 | Rerun stage | `rerunStage` (`:1318`), `rerunStageByVocabulary` (`:1814`) | Re-executes one stage (by node path or by vocabulary stage). |
 | Resume stage | `resumeStage` (`:1445`), `resumeStageByVocabulary` (`:1828`) | Resumes one paused stage. |
 | Cancel stage | `cancelStage` (`:1488`), `cancelStageByVocabulary` (`:1833`) | Cancels one stage; downstream never proceeds. |
+| Replay past run | `replayRun` (#4467) | Mints a new run of the definition version the past run executed, with that run's trigger; refuses by name for an unknown run, a pre-retention run, or an unresolvable version. |
+| Replay a past stage | `replayStage` (#6400) | Mints a new `kind: "replay"` run that executes ONE stage of a past run, from that stage's recorded hand-off; the stages after it do not re-execute, and a composite refuses by name. |
 
 **Platform control (#5783).** Cancel reaches the run's durable host. When the
 instance carries a workflow-instance stamp and the host exposes a stop

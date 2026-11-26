@@ -37,6 +37,8 @@ export interface JobRunReplayResult {
   /** The new run id the replay minted (never the original's). */
   runId: string;
   state: string;
+  /** Issue #6400 — the stage address a stage replay narrowed to, when it did. */
+  stage?: string;
 }
 
 export interface JobStatusRouteContext {
@@ -56,14 +58,23 @@ export interface JobStatusRouteContext {
    * Issue #4467 — replay a past run as a NEW run of its recorded
    * definition version. Required for the POST route; absent means the
    * surface refuses by name rather than pretending a replay happened.
+   * Issue #6400 — `stage` narrows it to ONE stage of that run (a stage id
+   * or node path), the same op, never a second route.
    */
-  replayJobRun?: (jobId: string, runId: string) => Promise<JobRunReplayResult>;
+  replayJobRun?: (
+    jobId: string,
+    runId: string,
+    stage?: string,
+  ) => Promise<JobRunReplayResult>;
 }
 
 const STATUS_PATH = /(?:^|\/api)\/jobs\/([^/]+)\/status$/;
 const STAGE_PATH = /(?:^|\/api)\/jobs\/([^/]+)\/stages\/([^/]+)$/;
 const CONTROL_PATH = /(?:^|\/api)\/jobs\/([^/]+)\/stages\/([^/]+)\/(run|rerun|stop|resume|cancel)$/;
-/** Issue #4467 — replay one past run as a new run. */
+/**
+ * Issue #4467 — replay one past run as a new run. Issue #6400 — the same
+ * route carries `?stage=<stage id|node path>` for one stage of that run.
+ */
 const REPLAY_PATH = /(?:^|\/api)\/jobs\/([^/]+)\/runs\/([^/]+)\/replay$/;
 
 function decode(value: string): string {
@@ -108,7 +119,9 @@ export async function handleJobStatusRoutes(
       );
     }
     try {
-      return Response.json(await ctx.replayJobRun(jobId, runId));
+      // Issue #6400 — one stage of this run, or the run whole.
+      const stage = url.searchParams.get("stage") ?? undefined;
+      return Response.json(await ctx.replayJobRun(jobId, runId, stage));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       // The refusals are the contract: an unknown run or job is 404; a
@@ -116,7 +129,7 @@ export async function handleJobStatusRoutes(
       // replayed right now, is a 409; anything else is unavailable.
       const status = /job_run_not_found|No job with id|not found/i.test(message)
         ? 404
-        : /replay_pre_retention_run|replay_definition_version_unresolved|already_running|already/i.test(
+        : /replay_pre_retention_run|replay_definition_version_unresolved|replay_stage_composite|not one stage|already_running|already/i.test(
               message,
             )
           ? 409
