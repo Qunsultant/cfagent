@@ -24,22 +24,22 @@
  *     assertion now pins the reports owner scope — the projected
  *     reports are filtered by the caller's x-user-login header,
  *     exactly as the DO read scoped them.
- *  5. Round-trip: a run persisted through the canonical write path
- *     (persistScheduledReportSql), projected at write time, is
- *     returned by /api/runs with the same id — write path and read
- *     surface agree on the row.
+ *  5. Round-trip: a run written straight to D1 agent_reports
+ *     (the D1 writer — no DO row, no projection) is returned by
+ *     /api/runs with the same id — write path and read surface
+ *     agree on the row.
  *  6. An invalid kind is a 400 with the S1 field-named error.
  *  7. The panel reads the Runs surface: ReportsPanel fetches
  *     /api/runs (not the old /api/reports list) and offers the
  *     discovery kind.
  *
- * Seeding (the #4116 parity fixture's shape): DO rows are written
- * through the canonical write path, then each row is projected at
- * write time via postRunLedgerBestEffort using the sweep's own input
- * mapping (runLedgerReconcile.ts). The sweep itself is never run —
- * it copies existing DO rows into D1, which the replacement ruling
- * forbids. The tenant's carrier row is set so storeErrors.runs stays
- * unset.
+ * Seeding (#6101, D1-first): every row is written straight to D1 —
+ * canonical reports via D1AuditReportAdapter.recordReport (the D1
+ * writer), engine rows via D1JobRunRecordStore.record, outcomes
+ * via the fold. There is no DO row, no projection, no carrier row.
+ * A report's twin link (linkedJobRunId) is stamped from the twinned
+ * D1 record's d1 id. storeErrors.runs names the #6101 freeze: new
+ * reports have no D1 row until the step-8 writer lands.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -48,12 +48,6 @@ import { DatabaseSync } from "node:sqlite";
 
 import { handleReportsRoutes, type ReportsRouteContext } from "../src/agents/routes/reports";
 import { MockSqlStorage } from "./mock-sql";
-import {
-  ensureScheduledReportsTable,
-  listScheduledReports,
-  persistScheduledReportSql,
-  storeReportAtGeneration,
-} from "../src/services/scheduledReports";
 import { buildJobRunRecord } from "../src/services/jobRunRecords";
 import { d1JobRunRecordId } from "../src/services/jobRunRecordReads";
 import {
@@ -61,8 +55,11 @@ import {
   D1JobRunRecordStore,
   ensureJobRunRecordsSchema,
 } from "../src/data/d1JobRunRecordAdapter";
-import { createRunLedgerAdapter, ensureRunLedgerTables } from "../src/data/createRunLedgerPorts";
-import { postRunLedgerBestEffort } from "../src/services/runLedgerProjectionPosting";
+import {
+  createD1AuditReportDb,
+  D1AuditReportAdapter,
+  ensureAuditReportSchema,
+} from "../src/data/d1AuditReportAdapter";
 
 /** Minimal D1Database stand-in over node:sqlite (the J1 suite's double). */
 class MockD1Database {
@@ -119,46 +116,55 @@ const TS = {
 const OPTIONS_RUN_ID = `options_scanner:${TS.options}:balanced`;
 const SCREENER_RUN_ID = `screener:${TS.screener}`;
 
-/** Project every canonical DO row in `sql` into `mock` at write time (never the sweep). */
-async function projectReportsInto(mock: MockD1Database, sql: MockSqlStorage) {
-  const adapter = createRunLedgerAdapter({ AGENT_DB: mock as never })!;
-  await ensureRunLedgerTables(adapter);
-  await adapter.setTenantProjectionCarriers(
-    "primary",
-    { queues: true, orm: true, sweep: true },
-    "merged",
-    Date.now(),
-  );
-  const env = { AGENT_DB: mock as never, IAAA_TENANT_ID: "primary" };
-  const nowMs = Date.now();
-  for (const hit of listScheduledReports(sql as never, { limit: 100 })) {
-    const createdAtMs = Date.parse(hit.createdAt);
-    const posted = await postRunLedgerBestEffort(
-      env,
-      "primary",
-      {
-        ledger: "reports",
-        row: {
-          reportId: hit.id,
-          tenantId: "primary",
-          workspaceId: "primary",
-          runId: hit.runId,
-          generationId: hit.generationId,
-          title: hit.title,
-          source: hit.source,
-          summary: hit.summary,
-          body: hit.body,
-          createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : nowMs,
-          updatedAtMs: Number.isFinite(createdAtMs) ? createdAtMs : nowMs,
-          userLogin: hit.userLogin,
-          bodyR2Key: hit.bodyR2Key,
-        },
-      },
-      nowMs,
-    );
-    expect(posted.projected).toBe(true);
-  }
-  return env;
+/** The frozen-reports entry every /api/runs read names (#6101). */
+const FROZEN_RUNS = "frozen at the #6101 cutover";
+
+export interface SeedReportInput {
+  runId: string;
+  generationId?: string | null;
+  title: string;
+  source: string;
+  summary: string;
+  userLogin: string;
+  body: unknown;
+  createdAt: string;
+  linkedJobRunId?: string | null;
+}
+
+/**
+ * Issue #6101 — write one canonical report DIRECTLY into D1
+ * agent_reports (the D1 writer's shape; the id is a fresh UUID,
+ * exactly as the canonical write path mints it). The twin link
+ * is stamped by the caller when the report twins a D1 job run
+ * record — no projector resolves it anymore.
+ */
+async function seedReportD1(mock: MockD1Database, input: SeedReportInput): Promise<string> {
+  const auditDb = createD1AuditReportDb(mock as never);
+  await ensureAuditReportSchema(auditDb);
+  const audit = new D1AuditReportAdapter(auditDb);
+  const reportId = crypto.randomUUID();
+  const createdAtMs = Date.parse(input.createdAt);
+  await audit.recordReport({
+    tenantId: "primary",
+    workspaceId: "primary",
+    reportId,
+    runId: input.runId,
+    generationId: input.generationId ?? null,
+    title: input.title,
+    source: input.source,
+    summary: input.summary,
+    body: typeof input.body === "string" ? input.body : JSON.stringify(input.body),
+    createdAtMs,
+    updatedAtMs: createdAtMs,
+    version: 1,
+    provenanceWriter: "test-d1-seed",
+    provenanceSourceDo: "test",
+    provenanceSourceVersion: "1",
+    linkedJobRunId: input.linkedJobRunId ?? null,
+    userLogin: input.userLogin,
+    bodyR2Key: null,
+  });
+  return reportId;
 }
 
 async function d1Fixture() {
@@ -167,9 +173,9 @@ async function d1Fixture() {
   const jobDb = createD1JobRunRecordDb(mock as never);
   await ensureJobRunRecordsSchema(jobDb);
   const jobStore = new D1JobRunRecordStore(jobDb);
-  // The engine's D1 twin of the options report: same run id, run
-  // window covering the report's creation — the projector stamps the
-  // twin link and the list absorbs this row into the canonical row.
+  // The engine's D1 twin of the options report: same run id — the
+  // report below stamps the twin link from this record's d1 id
+  // and the list absorbs this row into the canonical row.
   const twin = buildJobRunRecord({
     system: "job-pipeline",
     jobId: OPTIONS_RUN_ID,
@@ -192,7 +198,7 @@ async function d1Fixture() {
     descriptor: "run run-abc123: 12 step executions, 3 artifacts",
   });
   await jobStore.record(pipeline);
-  const storedOptions = storeReportAtGeneration(sql as never, {
+  const optionsReportId = await seedReportD1(mock, {
     runId: OPTIONS_RUN_ID,
     generationId: OPTIONS_RUN_ID,
     title: "Options scanner — balanced",
@@ -201,8 +207,9 @@ async function d1Fixture() {
     userLogin: "alice",
     body: { report: { result: { scanRunId: "scan-1", withTrades: 7 } } },
     createdAt: TS.options,
+    linkedJobRunId: d1JobRunRecordId(twin),
   });
-  const storedScreener = storeReportAtGeneration(sql as never, {
+  const screenerReportId = await seedReportD1(mock, {
     runId: SCREENER_RUN_ID,
     generationId: SCREENER_RUN_ID,
     title: "Market screen — NASDAQ100 (scheduled)",
@@ -213,7 +220,7 @@ async function d1Fixture() {
     createdAt: TS.screener,
   });
   // A second owner's report: the owner-scoping pin's other side.
-  const storedBob = storeReportAtGeneration(sql as never, {
+  const bobReportId = await seedReportD1(mock, {
     runId: "screener:2026-10-22T07:00:00.000Z",
     generationId: "screener:2026-10-22T07:00:00.000Z",
     title: "Market screen — NASDAQ100 (scheduled)",
@@ -223,19 +230,16 @@ async function d1Fixture() {
     body: { trigger: "scheduled", success: true, matchedCount: 1, timestamp: "2026-10-22T07:00:00.000Z" },
     createdAt: "2026-10-22T07:00:00.000Z",
   });
-  expect(storedOptions).not.toBeNull();
-  expect(storedScreener).not.toBeNull();
-  expect(storedBob).not.toBeNull();
-  const env = await projectReportsInto(mock, sql);
+  const env = { AGENT_DB: mock as never, IAAA_TENANT_ID: "primary" };
   return {
     mock,
     sql,
     env,
     twinId: d1JobRunRecordId(twin),
     pipelineId: d1JobRunRecordId(pipeline),
-    optionsReportId: storedOptions!.reportId,
-    screenerReportId: storedScreener!.reportId,
-    bobReportId: storedBob!.reportId,
+    optionsReportId,
+    screenerReportId,
+    bobReportId,
   };
 }
 
@@ -298,7 +302,7 @@ describe("GET /api/runs (S5)", () => {
     // + named, never silent.
     expect(data.storeErrors?.reports).toBeUndefined();
     expect(data.storeErrors?.jobRunRecords).toBeUndefined();
-    expect(data.storeErrors?.runs).toBeUndefined();
+    expect(data.storeErrors?.runs).toMatch(FROZEN_RUNS);
     expect(data.storeErrors?.scans).toMatch("not projected");
     expect(data.storeErrors?.discovery).toMatch("not projected");
     expect(data.storeErrors?.screener).toMatch("not projected");
@@ -376,10 +380,10 @@ describe("GET /api/runs (S5)", () => {
     expect(res).toBeNull();
   });
 
-  it("round-trip (#6103): a run persisted via the canonical write path is returned with its id from D1", async () => {
+  it("round-trip (#6101): a run written straight to D1 agent_reports is returned with its id from D1", async () => {
     const mock = new MockSqlStorage() as any;
-    ensureScheduledReportsTable(mock);
-    const persistedId = persistScheduledReportSql(mock, {
+    const d1 = new MockD1Database();
+    const persistedId = await seedReportD1(d1, {
       runId: `screener:${TS.screener}`,
       generationId: `screener:${TS.screener}`,
       userLogin: "alice",
@@ -389,8 +393,7 @@ describe("GET /api/runs (S5)", () => {
       body: { trigger: "scheduled", success: true, matchedCount: 5, timestamp: TS.screener },
       createdAt: TS.screener,
     });
-    const d1 = new MockD1Database();
-    const env = await projectReportsInto(d1, mock);
+    const env = { AGENT_DB: d1 as never, IAAA_TENANT_ID: "primary" };
     const res = await call(
       "/api/runs?kind=all",
       { ensureTables: () => mock, env: env as never } as ReportsRouteContext,

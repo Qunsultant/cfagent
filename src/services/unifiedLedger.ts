@@ -21,13 +21,14 @@
  * orchestrator instance's `POST /schedules/runs/record` route
  * (background-attribution gate, copied from the S5 cron-dispatch
  * record route). The transport never throws and never breaks a
- * tick: a failed post falls back to the legacy KV key, and a
- * failed fetch reads KV only — existing KV rows keep reading
- * through the merged read, so history is never dropped silently.
+ * tick: a failed post returns false — the row did not land, and
+ * the caller reports it — and a failed fetch returns null, which
+ * the caller reads as empty. Issue #6101 (step 9, Q6) retires the
+ * legacy KV `"jobRunRecords"` key: no fallback, no migration of
+ * its contents; pre-cutover KV rows stay in storage, unread.
  * Until the service user is configured, the record route answers
- * 401 (nothing is background without one) and goal rows keep
- * landing in KV; they land in SQLite once it is configured, and
- * the merged read covers both homes either way.
+ * 401 (nothing is background without one) and goal rows do not
+ * land anywhere; they land in the ledger once it is configured.
  *
  * Scoping (recorded, #3123): `mas_async_jobs` stays the async-job
  * execution record (its rows ARE the chain steps' run records by
@@ -96,8 +97,9 @@ export type LedgerPost = (req: Request) => Promise<Response>;
 
 /**
  * Post one ledger row to the shared orchestrator instance. Never
- * throws: false means "not stored — fall back" (401 with no service
- * user configured, a failed fetch, a non-2xx answer).
+ * throws: false means "not stored" (401 with no service user
+ * configured, a failed fetch, a non-2xx answer) — the caller
+ * reports the miss, never a fallback home (#6101 step 9).
  */
 export async function postLedgerRun(
   post: LedgerPost,
@@ -124,7 +126,7 @@ export async function postLedgerRun(
 /**
  * Fetch ledger rows from an orchestrator instance's read route.
  * Returns null on any transport or shape failure — the caller
- * reads its fallback home instead. Never throws.
+ * reads empty instead. Never throws.
  */
 export async function fetchLedgerRuns(
   post: LedgerPost,

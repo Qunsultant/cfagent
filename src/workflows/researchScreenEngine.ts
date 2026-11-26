@@ -16,11 +16,7 @@ import {
 } from "../data/createJobPipelinePorts";
 import { createInMemoryJobPipelineStores } from "../data/inMemoryJobPipelineAdapter";
 import { InMemoryJobRunRecordStore } from "../data/inMemoryJobRunRecordAdapter";
-import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
-import {
-  createD1JobRunRecordDb,
-  D1JobRunRecordStore,
-} from "../data/d1JobRunRecordAdapter";
+import { jobRunRecorderFromEnv } from "../data/createJobRunRecordPorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 import {
@@ -31,7 +27,6 @@ import {
 } from "../services/jobPipelineEngine";
 import { createJobPipelineControl } from "../services/jobPipelineControlFactory";
 import { createBuiltinStepRegistry } from "../services/jobPipelineSteps";
-import { createDoSqliteJobStageEventStore } from "../data/doSqliteJobStageEventAdapter";
 import {
   awaitResearchJobSettlement,
   researchWorkflowResidencyAvailable,
@@ -266,34 +261,26 @@ export function resolveResearchEngineAdapters(input: {
     (input.sql
       ? createJobPipelineStoresFromSql(input.sql)
       : createJobPipelineStoresFromD1(input.d1!));
+  // Issue #6101 — the run record lives in D1, not the DO: the
+  // recorder resolves from the D1 binding (input.d1) with the
+  // attribution from input.env. A host with no D1 binding gets the
+  // fail-closed recorder — a write throws a named error rather
+  // than silently vanishing, reads return empty. The old two-legged
+  // recorder (DO write + best-effort D1 mirror) is gone: the DO
+  // leg died with the projector, and the D1 mirror IS the writer.
+  // The pipeline stores above stay DO (`job_pipeline_*` framework
+  // state); only the run recorder moved.
   const runRecorder =
     input.runRecorder ??
-    (input.sql
-      ? (() => {
-          const sqlRecorder = jobRunRecorderFromStore(new SqlJobRunRecordStore(input.sql));
-          if (!input.d1) return sqlRecorder;
-          const d1Runs = new D1JobRunRecordStore(createD1JobRunRecordDb(input.d1));
-          return {
-            recordRun: async (record: Parameters<JobRunRecorder["recordRun"]>[0]) => {
-              await sqlRecorder.recordRun(record);
-              try {
-                await d1Runs.record(record);
-              } catch {
-                /* D1 mirror is best-effort when only DO SQLite tables exist */
-              }
-            },
-            listRuns: (jobId: string, limit?: number) => sqlRecorder.listRuns(jobId, limit),
-            latestRun: (jobId: string) => sqlRecorder.latestRun(jobId),
-          };
-        })()
-      : (() => {
-          const d1Runs = new D1JobRunRecordStore(createD1JobRunRecordDb(input.d1!));
-          return {
-            recordRun: (record) => d1Runs.record(record),
-            listRuns: (jobId, limit) => d1Runs.listByJob(jobId, limit),
-            latestRun: (jobId) => d1Runs.latestByJob(jobId),
-          };
-        })());
+    jobRunRecorderFromEnv(
+      input.d1
+        ? { ...(input.env ?? {}), AGENT_DB: input.d1 }
+        : ((input.env ?? null) as {
+            AGENT_DB?: unknown;
+            IAAA_TENANT_ID?: unknown;
+            PLATFORM_ID?: unknown;
+          } | null),
+    );
   return {
     storageMode: "durable",
     ephemeralFallback: false,
@@ -562,18 +549,12 @@ export async function dispatchResearchEngineRun(
     // minted above is also the engine's persisted workflow run ID.
     newRunId: () => runId,
     publisher: null,
-    // Issue #6028 — the stage-level terminal rows persist in the run's
-    // own DO SQLite when the caller supplied one (production does), so a
-    // past run's stages survive its checkpoint.
-    ...(input.sql && typeof input.sql.exec === "function"
-      ? { stageEvents: createDoSqliteJobStageEventStore(input.sql) }
-      : {}),
-    // Issue #6388 — the D1 mirror of the stage-event journal. The stage
-    // control (below) and the read path already wire it; the dispatch did
-    // not, so a dispatch-path run was unreadable from D1 once its DO was
-    // gone, and a D1-only reader saw nothing. Same adapter, same
-    // best-effort mirror write; no d1 = no mirror, never a throw.
-    ...(input.d1 ? { stageEventsMirror: createD1JobStageEventStore(input.d1) } : {}),
+    // Issue #6028 — the stage-level terminal rows persist in D1
+    // `job_stage_events`, so a past run's stages survive its
+    // checkpoint. Issue #6101 (step 7): D1 is the writer now — the
+    // DO leg and the #6388 mirror are deleted; the mirror was
+    // already wired and is now the writer, not re-wired.
+    ...(input.d1 ? { stageEvents: createD1JobStageEventStore(input.d1) } : {}),
     steps: registerResearchSteps(createBuiltinStepRegistry(), wiredDeps),
     invocation: "sync",
     // Issue #4782 S3 — the retry policy resolves from the
@@ -784,10 +765,9 @@ export async function readResearchStages(
     publisher: null,
     steps: createBuiltinStepRegistry(),
     invocation: "sync",
-    ...(input.sql && typeof input.sql.exec === "function"
-      ? { stageEvents: createDoSqliteJobStageEventStore(input.sql) }
-      : {}),
-    ...(input.d1 ? { stageEventsMirror: createD1JobStageEventStore(input.d1) } : {}),
+    // Issue #6101 (step 7): D1 `job_stage_events` is the writer;
+    // the DO leg and the mirror are deleted (see the dispatch site).
+    ...(input.d1 ? { stageEvents: createD1JobStageEventStore(input.d1) } : {}),
   });
   // No definition yet = the run never started; the six stages are pending,
   // not missing (the page still shows what can be started).
@@ -796,19 +776,12 @@ export async function readResearchStages(
   // engine wrote one terminal row per stage when the run ended. Read as a
   // fallback only — a live stage always wins, so the checkpoint stays the
   // truth for a running run and the ledger is never a second truth.
-  const persisted = input.sql
-    ? await createDoSqliteJobStageEventStore(input.sql)
-        .listByRun(input.runId)
-        .catch(() => [])
+  // Issue #6101 (step 7): D1-only — the DO read and the #6202
+  // fallback are deleted with the DO leg; a run with no D1 rows
+  // has no persisted stages.
+  const persistedRows = input.d1
+    ? await createD1JobStageEventStore(input.d1).listByRun(input.runId).catch(() => [])
     : [];
-  // Issue #6202 — the D1 mirror answers when the DO has nothing this run:
-  // the read shape is identical, so a D1-only read is not a second contract.
-  const persistedRows =
-    persisted.length > 0
-      ? persisted
-      : input.d1
-        ? await createD1JobStageEventStore(input.d1).listByRun(input.runId).catch(() => [])
-        : [];
   const persistedByStage = new Map(
     persistedRows
       .filter((row) => row.action === "terminal" && row.stageStatus)
@@ -967,10 +940,9 @@ export async function executeResearchStageControl(
     publisher: null,
     steps: registerResearchSteps(createBuiltinStepRegistry(), deps),
     invocation: "sync",
-    ...(input.sql && typeof input.sql.exec === "function"
-      ? { stageEvents: createDoSqliteJobStageEventStore(input.sql) }
-      : {}),
-    ...(input.d1 ? { stageEventsMirror: createD1JobStageEventStore(input.d1) } : {}),
+    // Issue #6101 (step 7): D1 `job_stage_events` is the writer;
+    // the DO leg and the mirror are deleted (see the dispatch site).
+    ...(input.d1 ? { stageEvents: createD1JobStageEventStore(input.d1) } : {}),
     // Issue #4782 S3 — as the dispatch control above: the stage
     // re-run resolves its retry policy from the caller's env.
     ...(input.env ? { env: input.env } : {}),

@@ -41,14 +41,11 @@ import { actorGateway } from "../../services/cloudflareActorGateway";
 import { createRetentionPurgeStore, runRetentionPurgeForTenant } from "../../data/createRetentionPorts";
 import type { ReconcileShardJobsReport } from "../../data/shardJobProjection";
 import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
-import { handleAuditHistoryRoute, handleReportsRoute, handleReconcileRunLedgerRoute, handleReconcileUsageEventsRoute, handleSeedReportsRoute } from "../../data/auditReportRoute";
+import { handleAuditHistoryRoute, handleReportsRoute, handleReconcileUsageEventsRoute, handleSeedReportsRoute } from "../../data/auditReportRoute";
 import { createAuditReportAdapter, readAuditHistory, readReports } from "../../data/createAuditReportPorts";
-import { createRunLedgerAdapter } from "../../data/createRunLedgerPorts";
-import type { ReconcileRunLedgerResult } from "../../agents/orchestrator/runLedgerReconcile";
 import type { ReconcileUsageEventsResult } from "../../agents/orchestrator/usageEventsReconcile";
 import { createUsageEventMirrorAdapter } from "../../data/createUsageEventMirrorPorts";
 import { isLoginShaped } from "../../security/serviceIdentity";
-import type { SeedCanonicalReportsResult } from "../../data/auditReportProjection";
 
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
@@ -709,15 +706,15 @@ export async function handlePrivacyReportsRoutes(request: Request, env: Env, url
     }
 
     // --- Canonical reports seed (issue #1688, slice 3) ---
-    // POST /api/reports/seed-canonical: the deliberate operator
-    // invocation point for the one-time canonical mas_reports
-    // seed. Gating reuses the IAAA admin pattern exactly
-    // (requireAuth → wired session → live platform-admin
-    // membership, fail-closed, no data on 403). Never
-    // auto-run: no boot, deploy, or tick path calls it. Runs
-    // on the shared Orchestrator instance, whose mas_reports
-    // is the canonical copy; it writes projection rows only,
-    // never the DO table, and a second run seeds zero rows.
+    // POST /api/reports/seed-canonical: RETIRED by #6101 step 8
+    // (410 Gone). The seed copied the instance's DO mas_reports
+    // rows into D1 agent_reports, which the replacement ruling
+    // forbids — existing DO data is never copied to D1. The
+    // route stays as a named tombstone: the auth/admin gating
+    // still runs first (an unauthenticated caller still gets
+    // 401, not the existence signal), then the handler answers
+    // 410 with the reason. No stub call, no D1 check — the
+    // handler needs neither.
     if (path === "/api/reports/seed-canonical") {
       const session = await requireAuth(request, env);
       let isPlatformAdmin = false;
@@ -738,97 +735,11 @@ export async function handlePrivacyReportsRoutes(request: Request, env: Env, url
           return Response.json({ error: "Reports seed unavailable." }, { status: 500 });
         }
       }
-      if (!createAuditReportAdapter(env)) {
-        return Response.json(
-          { error: "Reports seed unavailable: AgentDB is not bound." },
-          { status: 503 },
-        );
-      }
-      const stub = actorGateway.stub<{
-        seedCanonicalReports(
-          setBy: string,
-          tenantId: string,
-        ): Promise<SeedCanonicalReportsResult>;
-      }>(env.ORCHESTRATOR_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
       return handleSeedReportsRoute({
         session,
         method: request.method,
         isPlatformAdmin,
         tenantId: resolveIaaaTenant(env),
-        runSeed: ({ tenantId, setBy }) => stub.seedCanonicalReports(setBy, tenantId),
-      });
-    }
-
-    // --- Run-ledger reconcile (issue #4116, sweep carrier) ---
-    // POST /api/ops/run-ledger-reconcile: the deliberate operator
-    // invocation point for the one-off backfill + repair pass.
-    // Gating reuses the IAAA admin pattern exactly (requireAuth →
-    // wired session → live platform-admin membership,
-    // fail-closed, no data on 403). Never auto-run: no boot,
-    // deploy, or tick path calls it. Runs on the named
-    // Orchestrator instance (optional `instance` in the JSON
-    // body — a login for a per-user instance; default the shared
-    // instance, whose mas_reports is the canonical copy). No
-    // instance enumeration exists, so the operator names the
-    // instance; a second call reconciles zero rows when
-    // everything is already current.
-    if (path === "/api/ops/run-ledger-reconcile") {
-      const session = await requireAuth(request, env);
-      let isPlatformAdmin = false;
-      if (session?.internalUserId) {
-        try {
-          const overview = await buildAdminOverview(
-            {
-              membershipStore: wiredMembershipStore(env),
-              auditStore: createWiredAuditStore(env),
-              kv: sessionStore(env),
-              tenantId: resolveIaaaTenant(env),
-              nowMs: Date.now(),
-            },
-            { callerInternalUserId: session.internalUserId },
-          );
-          isPlatformAdmin = overview.allowed;
-        } catch {
-          return Response.json({ error: "Run-ledger reconcile unavailable." }, { status: 500 });
-        }
-      }
-      if (!createRunLedgerAdapter(env)) {
-        return Response.json(
-          { error: "Run-ledger reconcile unavailable: AgentDB is not bound." },
-          { status: 503 },
-        );
-      }
-      let body: { instance?: unknown; limit?: unknown } = {};
-      try {
-        body = (await request.json()) as typeof body;
-      } catch {
-        body = {};
-      }
-      const instance =
-        typeof body.instance === "string" && body.instance.trim() !== ""
-          ? body.instance.trim()
-          : SHARED_ORCHESTRATOR_INSTANCE;
-      if (instance !== SHARED_ORCHESTRATOR_INSTANCE && !isLoginShaped(instance)) {
-        return Response.json(
-          { error: "Run-ledger reconcile refused: instance must be a login or the shared instance." },
-          { status: 400 },
-        );
-      }
-      const limit =
-        typeof body.limit === "number" && Number.isFinite(body.limit)
-          ? body.limit
-          : undefined;
-      const stub = actorGateway.stub<{
-        reconcileRunLedgerProjection(args?: {
-          limit?: number;
-        }): Promise<ReconcileRunLedgerResult>;
-      }>(env.ORCHESTRATOR_AGENT, instance);
-      return handleReconcileRunLedgerRoute({
-        session,
-        method: request.method,
-        isPlatformAdmin,
-        tenantId: resolveIaaaTenant(env),
-        runReconcile: () => stub.reconcileRunLedgerProjection({ limit }),
       });
     }
 

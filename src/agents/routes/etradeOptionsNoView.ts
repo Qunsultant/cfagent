@@ -96,7 +96,7 @@ export async function runNoViewStrategies(
     const screenedOut = built.evaluations
       .filter((e) => e.status !== "accepted")
       .map((e) => ({ id: e.id, reason: e.summary || e.reasons[0]?.reason || "not accepted" }));
-    recordStrategyScreenRun(ctx.getOrm(), {
+    await recordStrategyScreenRun(ctx.getOrm(), {
       ...optionsFeedProviderStamp(await resolveTenantProviders(ctx.env)),
       userLogin,
       symbol: noViewReq.symbol,
@@ -119,7 +119,9 @@ export async function runNoViewStrategies(
       fetchBands: bandedNoView.bands,
       horizonLimited: bandedNoView.horizonLimited.length > 0 ? bandedNoView.horizonLimited : undefined,
       submittedVia: `ui — POST ${path} (options-strategy-panel, no-view)`,
-    });
+    },
+    // Issue #6101 — the strategy outcome folds onto D1.
+    { env: ctx.env, userLogin });
     return Response.json({
       status: candidates.length > 0 ? "ranked_candidates" : "no_candidates",
       strategyMode: "no-view",

@@ -4,12 +4,20 @@
  * (accepted by Venus 2026-10-23). S1 changes NO behavior: writes still
  * store the body inline, every existing row reads back with a null
  * pointer, and the readers surface the pointer so S2 can resolve it.
+ *
+ * Issue #6101 (step 8): the seam reads/writes D1 agent_reports now —
+ * the DO mas_reports table is frozen and receives no new writes. The
+ * DO ensure pin below is kept as-is (ensureScheduledReportsTable is
+ * the frozen DO ensure); the seam tests go through the D1 seam over
+ * the shared MockD1Database.
  */
 import { describe, it, expect } from "vitest";
 import type { SqlStorage } from "../src/orm";
+import { MockD1Database } from "./mock-d1";
 import {
   ensureScheduledReportsTable,
   storeReportAtGeneration,
+  storeReportAtGenerationWithR2,
   getCanonicalReport,
   getScheduledReportById,
   listScheduledReports,
@@ -17,6 +25,18 @@ import {
   reportBodyR2Key,
   SCHEDULED_REPORTS_TABLE,
 } from "../src/services/scheduledReports";
+
+type D1Database = any;
+
+function d1Env(extra: Record<string, unknown> = {}) {
+  const mock = new MockD1Database();
+  const env = {
+    AGENT_DB: mock as unknown as D1Database,
+    IAAA_TENANT_ID: "tenant-338-s1",
+    ...extra,
+  };
+  return { mock, env };
+}
 
 /**
  * Purpose-built fake with real PRAGMA/ALTER bookkeeping so the additive
@@ -129,36 +149,45 @@ describe("#338 S1 body_r2_key plumbing", () => {
     expect(reportBodyR2Key("rep-123")).toBe("reports/rep-123.json");
   });
 
-  it("a fresh inline write reads back with a null pointer and intact body", () => {
-    const fake = createFakeSql();
-    const sql = fake as unknown as SqlStorage;
-    const stored = storeReportAtGeneration(sql, input);
+  it("a fresh inline write reads back with a null pointer and intact body", async () => {
+    const { env } = d1Env();
+    const stored = await storeReportAtGeneration(input, env as never);
     expect(stored?.created).toBe(true);
-    const hit = getCanonicalReport(sql, stored!.reportId);
+    const hit = await getCanonicalReport(env as never, stored!.reportId);
     expect(hit).not.toBeNull();
     expect(hit!.bodyR2Key).toBeNull();
     expect(JSON.parse(hit!.body)).toEqual({ ideas: [{ symbol: "ACME" }] });
   });
 
-  it("readers surface a stored pointer (the S2 row shape) unchanged", () => {
-    const fake = createFakeSql();
-    const sql = fake as unknown as SqlStorage;
-    const stored = storeReportAtGeneration(sql, input);
-    // Simulate the S2 write shape directly: pointer set, body still the
-    // stored copy until S2 flips the write path.
-    const row = fake.rows.find((r) => r.id === stored!.reportId)!;
-    row.body_r2_key = reportBodyR2Key(stored!.reportId);
+  it("readers surface a stored pointer (the S2 row shape) unchanged", async () => {
+    const objects = new Map<string, string>();
+    const bucket = {
+      put: async (key: string, value: unknown) => {
+        objects.set(key, String(value));
+      },
+      get: async (key: string) => {
+        const v = objects.get(key);
+        return v === undefined ? null : { text: async () => v };
+      },
+      delete: async (key: string) => {
+        objects.delete(key);
+      },
+    };
+    const { env } = d1Env({ REPORTS_BUCKET: bucket as never });
+    // Store through the R2 seam: the D1 row keeps only the pointer.
+    const stored = await storeReportAtGenerationWithR2(env as never, input);
+    expect(stored?.created).toBe(true);
 
-    expect(getCanonicalReport(sql, stored!.reportId)?.bodyR2Key).toBe(
+    expect((await getCanonicalReport(env as never, stored!.reportId))?.bodyR2Key).toBe(
       "reports/" + stored!.reportId + ".json"
     );
-    expect(getScheduledReportById(sql, stored!.reportId)?.bodyR2Key).toBe(
+    expect((await getScheduledReportById(env as never, stored!.reportId))?.bodyR2Key).toBe(
       "reports/" + stored!.reportId + ".json"
     );
-    expect(listScheduledReports(sql)[0]?.bodyR2Key).toBe(
+    expect((await listScheduledReports(env as never))[0]?.bodyR2Key).toBe(
       "reports/" + stored!.reportId + ".json"
     );
-    expect(searchScheduledReports(sql, "storage")[0]?.bodyR2Key).toBe(
+    expect((await searchScheduledReports(env as never, "storage"))[0]?.bodyR2Key).toBe(
       "reports/" + stored!.reportId + ".json"
     );
   });

@@ -47,6 +47,7 @@ import {
 } from "../src/agents/routes/premium";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 // #5609 (G-7): the premium routes resolve their price from the
 // catalogue (getApprovedPremiumPrice). This suite binds no D1, so
 // the catalogue resolves from the approved in-memory fixture —
@@ -317,13 +318,15 @@ describe("S3 (b) — market-data route persists a canonical report with provider
     // the assertions read the stored rows back instead of spying on the
     // old synchronous ORM call.
     const sql = new MockSqlStorage();
+    const mock = new MockD1Database();
+    const env = { AGENT_DB: mock as unknown as never };
     const ctx = {
-      env: {},
+      env,
       ensureTables: () => sql,
     } as any;
     await persistScreenerReportCanonical(ctx, marketDataResult() as any);
     const { listScheduledReports } = await import("../src/services/scheduledReports");
-    let hits = listScheduledReports(sql as any, {});
+    let hits = await listScheduledReports(env, {});
     expect(hits).toHaveLength(1);
     expect(hits[0].source).toBe("screener");
     expect(hits[0].runId).toBe("screener:2026-10-22T12:00:00.000Z");
@@ -336,7 +339,7 @@ describe("S3 (b) — market-data route persists a canonical report with provider
       timestamp: "2026-10-22T12:05:00.000Z",
     }) as any;
     await persistScreenerReportCanonical(ctx, etradeResult);
-    hits = listScheduledReports(sql as any, {});
+    hits = await listScheduledReports(env, {});
     expect(hits).toHaveLength(2);
     const etradeHit = hits.find((h) => h.runId === "screener:2026-10-22T12:05:00.000Z");
     expect(JSON.parse(etradeHit!.body).provider).toBe("alpaca");

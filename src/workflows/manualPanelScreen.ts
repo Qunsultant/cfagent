@@ -18,6 +18,7 @@
  */
 import { createSqlStageClaimStore } from "../data/stageClaimsStore";
 import type { SqlStorage } from "../orm";
+import type { Env } from "../types";
 import { optionsArtifactKey, type OptionsStageStorage } from "./optionsScreenPorts";
 import {
   memoryStageClaims,
@@ -52,6 +53,10 @@ export interface ManualPanelScreenInput {
   dataAgent: OptionsDataAgent;
   storage?: OptionsStageStorage | null;
   getSql?: (() => SqlStorage) | null;
+  /** Issue #6101 — the Worker env, so the engine run record lands
+   *  in D1 (AGENT_DB + the ledger attribution) rather than the DO.
+   *  Without it the recorder is fail-closed. */
+  env?: Env;
   queue?: StageQueueSend | null;
 }
 
@@ -108,7 +113,11 @@ export async function runManualPanelViaPipeline(
       // Issue #4068: the engine run record is durable in the route's
       // SQLite when it passes getSql; in-memory otherwise (the leg's
       // own stage storage is in-memory in that case too).
-      engineStores: input.getSql ? optionsEngineStoresFromSql(input.getSql()) : null,
+      // Issue #6101 — the run record itself lives in D1 (env
+      // carries AGENT_DB); the pipeline stores stay DO.
+      engineStores: input.getSql
+        ? optionsEngineStoresFromSql(input.getSql(), input.env ?? null)
+        : null,
     },
   );
   if (outcome.outcome !== "completed") {

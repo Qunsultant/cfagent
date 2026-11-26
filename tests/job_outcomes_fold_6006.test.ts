@@ -21,11 +21,15 @@
  *  4. Read seam: runSummaryFromJobRunRecord surfaces codedError,
  *     origin, resultCount (= matched) and the artifact keys on a
  *     folded row; pre-fold rows carry null, never invented facts.
- *  5. Projector: projectJobOutcome lands the fold and replays as
- *     already-current with the folded row's id.
- *  6. Hook: projectJobOutcomeBestEffort never throws — missing row,
- *     unbound D1, and unconfigured carriers all return null; with
- *     the ORM carrier configured it folds the stored row end to end.
+ *  5. Projector: DELETED with #6101 — projectJobOutcome died
+ *     with the projector; the direct fold (pin 6) is its
+ *     replacement, with the same end state (one folded row, a
+ *     re-fold is a no-op).
+ *  6. Direct fold (#6101): foldJobOutcome folds the outcome end
+ *     to end with no DO row, no carrier, and no projection — the
+ *     hook's never-throws contract is replaced by the port's
+ *     null-when-unbound contract (tested in
+ *     job_run_records_d1_first_6101).
  */
 import { describe, it, expect } from "vitest";
 import { DatabaseSync } from "node:sqlite";
@@ -37,16 +41,9 @@ import {
   jobOutcomeFoldRecord,
   sameOutcomeFacts,
 } from "../src/data/d1JobRunRecordAdapter";
-import {
-  createD1RunLedgerDb,
-  D1RunLedgerAdapter,
-  ensureRunLedgerSchema,
-} from "../src/data/d1RunLedgerAdapter";
-import { createRunLedgerProjector } from "../src/data/runLedgerProjection";
 import { buildJobRunRecord, type JobRunRecord } from "../src/services/jobRunRecords";
-import { recordJobOutcome, type JobOutcomeRow } from "../src/services/jobOutcomes";
+import type { JobOutcomeRow } from "../src/services/jobOutcomes";
 import { runSummaryFromJobRunRecord } from "../src/services/runSummaries";
-import { projectJobOutcomeBestEffort } from "../src/services/runLedgerProjectionHooks";
 import { resolveIaaaTenant } from "../src/security/iaaaGithubEndToEnd";
 
 /** Minimal D1Database stand-in over node:sqlite (the J1 suite's double). */
@@ -293,82 +290,17 @@ describe("read seam (runSummaryFromJobRunRecord, #6006)", () => {
   });
 });
 
-describe("projector (projectJobOutcome, #6006)", () => {
-  async function projector() {
+describe("direct fold (D1JobRunRecordStore.foldJobOutcome, #6101)", () => {
+  it("folds the outcome end to end with no DO row and no carrier", async () => {
+    // Issue #6101 — the hook is deleted; the same end state is
+    // reached by folding the outcome input directly onto D1.
     const mock = new MockD1Database();
-    const runDb = createD1RunLedgerDb(mock as never);
-    await ensureRunLedgerSchema(runDb);
-    const asyncJobStore = new D1RunLedgerAdapter(runDb);
     const jobDb = createD1JobRunRecordDb(mock as never);
     await ensureJobRunRecordsSchema(jobDb);
-    const jobRecordStore = new D1JobRunRecordStore(jobDb);
-    const p = createRunLedgerProjector({
-      reportStore: asyncJobStore as never,
-      asyncJobStore,
-      jobRecordStore,
-      projectedJobRecordStore: jobRecordStore,
-    });
-    return { p, jobRecordStore };
-  }
-
-  it("lands the fold and replays as already-current with the folded id", async () => {
-    const { p, jobRecordStore } = await projector();
-    const first = await p.projectJobOutcome({ outcome: outcome(), tenantId: "primary" }, Date.now());
-    expect(first.projected).toBe(true);
-    expect(first.linkedJobRunId).toBeTruthy();
-    const rows = await jobRecordStore.listByJob(outcome().id);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].origin).toBe("discovery");
-    const replay = await p.projectJobOutcome({ outcome: outcome(), tenantId: "primary" }, Date.now());
-    expect(replay.projected).toBe(false);
-    expect(replay.skipped).toBe("already-current");
-    expect(replay.linkedJobRunId).toBe(first.linkedJobRunId);
-  });
-});
-
-describe("hook (projectJobOutcomeBestEffort, #6006)", () => {
-  it("missing row returns null and never throws", async () => {
-    const sql = new MockSqlStorage();
-    await expect(
-      projectJobOutcomeBestEffort({ env: {}, sql, outcomeId: "nope", userLogin: null }),
-    ).resolves.toBeNull();
-  });
-
-  it("unbound D1 returns null and never throws", async () => {
-    const sql = new MockSqlStorage();
-    recordJobOutcome(sql, outcome());
-    await expect(
-      projectJobOutcomeBestEffort({ env: {}, sql, outcomeId: outcome().id, userLogin: null }),
-    ).resolves.toBeNull();
-  });
-
-  it("with the ORM carrier configured it folds the stored row end to end", async () => {
-    const mock = new MockD1Database();
-    const runDb = createD1RunLedgerDb(mock as never);
-    await ensureRunLedgerSchema(runDb);
-    const adapter = new D1RunLedgerAdapter(runDb);
-    const jobDb = createD1JobRunRecordDb(mock as never);
-    await ensureJobRunRecordsSchema(jobDb);
-    const env = { AGENT_DB: mock as never };
-    const tenantId = resolveIaaaTenant(env);
-    await adapter.setTenantProjectionCarriers(
-      tenantId,
-      { queues: false, orm: true, sweep: true },
-      "merged",
-      Date.now(),
-    );
-    const sql = new MockSqlStorage();
-    recordJobOutcome(sql, outcome());
-    const post = await projectJobOutcomeBestEffort({
-      env,
-      sql,
-      outcomeId: outcome().id,
-      userLogin: null,
-      skipQueue: true,
-    });
-    expect(post).not.toBeNull();
-    expect(post?.projected).toBe(true);
     const store = new D1JobRunRecordStore(jobDb);
+    const result = await store.foldJobOutcome(outcome(), resolveIaaaTenant({}), Date.now());
+    expect(result.landed).toBe(true);
+    expect(result.created).toBe(true);
     const rows = await store.listByJob(outcome().id);
     expect(rows).toHaveLength(1);
     expect(rows[0].origin).toBe("discovery");

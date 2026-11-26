@@ -2,8 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   toScheduledReportRecord,
   storeReportAtGeneration,
+  getScheduledReportById,
   readReportServingProvider,
 } from "../src/services/scheduledReports";
+import { MockD1Database } from "./mock-d1";
 
 describe("Canonical report serving provider provenance (#4616)", () => {
   it("stamps explicit servingProviderId or extracts it from report body without confusing it with producer source", () => {
@@ -31,50 +33,50 @@ describe("Canonical report serving provider provenance (#4616)", () => {
     expect(fromBody.servingProviderId).toBe("polygon");
   });
 
-  it("stamps servingProviderId on the canonical mas_reports row fanout_outcome JSON and leaves legacy rows null", () => {
-    const executed: Array<{ query: string; params: unknown[] }> = [];
-    const mockSql = {
-      exec(query: string, ...params: unknown[]) {
-        executed.push({ query, params });
-        if (query.startsWith("PRAGMA table_info")) {
-          return [
-            { name: "id" },
-            { name: "run_id" },
-            { name: "title" },
-            { name: "source" },
-            { name: "summary" },
-            { name: "body" },
-            { name: "created_at" },
-            { name: "generation_id" },
-            { name: "user_login" },
-            { name: "body_r2_key" },
-            { name: "fanout_outcome" },
-          ];
-        }
-        if (query.startsWith("PRAGMA index_info")) {
-          return [{ name: "user_login" }, { name: "generation_id" }];
-        }
-        return [];
-      },
-    };
+  // #6101 step 8: the DO mas_reports row (and its fanout_outcome
+  // JSON column) is frozen — the serving provider now rides the D1
+  // agent_reports body, stamped there by toScheduledReportRecord,
+  // and reads back through the D1 read path. The fan-out column
+  // itself is a named loss (fanoutOutcome is always null on D1).
+  it("stamps servingProviderId on the canonical D1 row body and leaves rows without one null", async () => {
+    const mock = new MockD1Database();
+    const env = { AGENT_DB: mock as unknown as never };
 
-    const res = storeReportAtGeneration(mockSql as never, {
-      runId: "run-4616",
-      generationId: "gen-4616",
-      userLogin: "alice",
-      title: "Provider Stamped Report",
-      source: "screener",
-      servingProviderId: "alpaca",
-      summary: "Stamped",
-      body: { ok: true },
-    });
+    const res = await storeReportAtGeneration(
+      {
+        runId: "run-4616",
+        generationId: "gen-4616",
+        userLogin: "alice",
+        title: "Provider Stamped Report",
+        source: "screener",
+        servingProviderId: "alpaca",
+        summary: "Stamped",
+        body: { ok: true },
+      },
+      env,
+    );
 
     expect(res?.created).toBe(true);
-    const insert = executed.find((e) => e.query.includes("INSERT INTO mas_reports"));
-    expect(insert).toBeDefined();
-    // body is param index 5 in INSERT INTO mas_reports (id, run_id, title, source, summary, body, ...)
-    const bodyJson = insert!.params[5] as string;
-    expect(readReportServingProvider(bodyJson)).toBe("alpaca");
+    const hit = await getScheduledReportById(env, res!.reportId);
+    expect(hit).not.toBeNull();
+    expect(readReportServingProvider(hit!.body)).toBe("alpaca");
+
+    // A row stored with no serving provider carries none in its
+    // body (the legacy shape), so the reader returns null.
+    const legacy = await storeReportAtGeneration(
+      {
+        runId: "run-4616-legacy",
+        generationId: "gen-4616-legacy",
+        userLogin: "alice",
+        title: "Legacy Report",
+        source: "screener",
+        summary: "No provider",
+        body: { ok: true },
+      },
+      env,
+    );
+    const legacyHit = await getScheduledReportById(env, legacy!.reportId);
+    expect(readReportServingProvider(legacyHit!.body)).toBeNull();
     expect(readReportServingProvider("{}")).toBeNull();
     expect(readReportServingProvider(null)).toBeNull();
   });

@@ -12,7 +12,7 @@
  *    function — a 6th fails);
  *  - a new definition whose NAME already exists in the baseline at another
  *    file fails as a same-question duplicate;
- *  - the resolver definition total above its baselined 623 fails;
+ *  - the resolver definition total above its baselined 624 fails;
  *  - decreases and vanished rows pass — that is the shrink the programme
  *    wants, and retiring a duplicate means lowering or removing its
  *    baseline entry in the same PR.
@@ -111,7 +111,19 @@
  * instance-scope question, the one the engine resolves against.
  *
  * Issue #6503 (2026-11-26) raises the baseline 597 → 622 with 29 new
- * rows and removes 4 rows (net +25). The 29 are the no-derived
+ * rows and removes 4 rows (net +25). Issue #6101 (2026-11-26) moves the
+ * baseline 622 → 621: the 2 projector resolvers retire with the deleted
+ * projector, and 1 ledger-attribution resolver is added (the single home
+ * for the run-ledger attribution question). Issue #6101 step 8
+ * (2026-11-26) raises the baseline 621 → 623 with TWO rows:
+ * `resolveLinkedJobRunId` and `resolveReportLink`
+ * (`src/services/scheduledReports.ts`, standalone, CANONICAL) — the
+ * same two questions the deleted #6099 projector answered, moved home
+ * to the report writer module (verbatim re-creation, not new
+ * questions): which job run a generation links to, and which report
+ * a run links to. No other row changes: the old rows died with the
+ * projector, so the names exist nowhere else in the baseline.
+ * The 29 are the no-derived
  * consolidation's externalized scheduling resolvers, each the single
  * home for a NEW question no existing resolver answers (a managed
  * setting's managed > env > default cascade, or the G1 level-rule
@@ -457,12 +469,11 @@ const BASELINE: Array<[string, string, Kind, number, Disposition]> = [
   ["src/data/productCatalogue.ts", "resolveProductPrice", "standalone", 1, "CANONICAL"],
   ["src/data/productPorts.ts", "resolveEffectiveVersion", "standalone", 1, "CANONICAL"],
   ["src/data/providerCapturePorts.ts", "resolveCaptureUserLogin", "standalone", 1, "CANONICAL"],
+  ["src/data/createJobRunRecordPorts.ts", "resolveLedgerAttribution", "standalone", 1, "CANONICAL"],
   ["src/data/providerCapturePorts.ts", "resolveRunContext", "standalone", 1, "CANONICAL"],
   ["src/data/refundPorts.ts", "RefundPaymentSourceResolver", "resolver-type", 1, "CANONICAL"],
   ["src/data/retention1766.ts", "resolveOrphanSweepDelete", "standalone", 1, "CANONICAL"],
   ["src/data/retention1766.ts", "resolveSnapshotEnabled", "standalone", 1, "CANONICAL"],
-  ["src/data/runLedgerProjection.ts", "resolveLinkedJobRunId", "standalone", 1, "CANONICAL"],
-  ["src/data/runLedgerProjection.ts", "resolveReportLink", "standalone", 1, "CANONICAL"],
   ["src/data/runRegistryPorts.ts", "resolveId", "interface-method", 1, "DUPLICATE-NAME"],
   ["src/data/scanRunPorts.ts", "resolveScanBackfillLinkage", "standalone", 1, "CANONICAL"],
   ["src/data/schemaComponent/executor.ts", "resolveStatementText", "standalone", 1, "CANONICAL"],
@@ -699,6 +710,8 @@ const BASELINE: Array<[string, string, Kind, number, Disposition]> = [
   ["src/services/scheduledEffectiveMode.ts", "resolveScheduledEffectiveMode", "standalone", 1, "CANONICAL"],
   ["src/services/scheduledReports.ts", "resolveCanonicalReportBody", "standalone", 1, "CANONICAL"],
   ["src/services/scheduledReports.ts", "resolveCanonicalReportBodyWithBackfill", "standalone", 1, "CANONICAL"],
+  ["src/services/scheduledReports.ts", "resolveLinkedJobRunId", "standalone", 1, "CANONICAL"],
+  ["src/services/scheduledReports.ts", "resolveReportLink", "standalone", 1, "CANONICAL"],
   ["src/services/scheduledTasks.ts", "resolveDeliveryTenant", "class-method", 1, "CANONICAL"],
   ["src/services/scheduledTasks.ts", "resolveDiscoveryRunMode", "standalone", 1, "CANONICAL"],
   ["src/services/scheduledTasks.ts", "resolveScheduledFirerHostDispatch", "standalone", 1, "CANONICAL"],
@@ -1241,11 +1254,13 @@ describe("universal resolver census (#6528 Phase 1)", () => {
   it("the distinct-question count is a range, never an exact number", () => {
     expect(QUESTION_RANGE_LOW).toBeLessThan(QUESTION_CENTRAL_ESTIMATE);
     expect(QUESTION_CENTRAL_ESTIMATE).toBeLessThan(QUESTION_RANGE_HIGH);
-    // Implied copies at the seeded total: 623 − 320 = 303 … 623 − 285 = 338
+    // Implied copies at the seeded total: 624 − 320 = 304 … 624 − 285 = 339
     // (the seed moved 597 → 622 with #6503's 29 CANONICAL rows − 4 retired rows;
-    //  #6659 adds one CANONICAL row, the report-body store's policy resolver).
-    expect(baselineTotal - QUESTION_RANGE_HIGH).toBe(303);
-    expect(baselineTotal - QUESTION_RANGE_LOW).toBe(338);
+    //  #6101 moves 622 → 621: 2 retired projector resolvers + 1 added ledger-attribution resolver;
+    //  #6101 step 8 moves 621 → 623: the 2 link resolvers move home to scheduledReports.ts;
+    //  #6659 adds one CANONICAL row, the report-body store's policy resolver: 623 + 1 = 624.)
+    expect(baselineTotal - QUESTION_RANGE_HIGH).toBe(304);
+    expect(baselineTotal - QUESTION_RANGE_LOW).toBe(339);
   });
 
   it("no test-only or scripts-only resolver is counted as production", () => {
@@ -1304,12 +1319,12 @@ describe("universal resolver census (#6528 Phase 1)", () => {
       expect(count, `${kind} count`).toBeGreaterThan(0);
       expect(DISPOSITIONS.has(disposition), `unknown disposition ${disposition}`).toBe(true);
     }
-    expect(baselineTotal).toBe(623);
+    expect(baselineTotal).toBe(624);
     const byKind = new Map<Kind, number>();
     for (const [, , kind, count] of BASELINE) {
       byKind.set(kind, (byKind.get(kind) ?? 0) + count);
     }
-    expect(byKind.get("standalone")).toBe(592);
+    expect(byKind.get("standalone")).toBe(593);
     expect(byKind.get("class-method")).toBe(18);
     expect(byKind.get("resolver-type")).toBe(9);
     expect(byKind.get("interface-method")).toBe(4);

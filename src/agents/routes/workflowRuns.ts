@@ -780,30 +780,6 @@ export async function handleWorkflowRunsRoutes(
     await import("../../services/runLedgerReads");
   const tenantId =
     ctx.env !== undefined ? resolveIaaaTenant(ctx.env as never) : DEPLOYMENT_DEFAULT_TENANT_ID;
-  // Issue #6103 (Q4) — the D1 rows arrive via the grandfathered
-  // #6099 projector, which runs only when a carrier is configured
-  // for this tenant. When none is, the runs are incomplete and the
-  // gap is named here, never silent. A carrier row that cannot be
-  // read is NOT named: the D1 reads below already fail loudly
-  // there, so naming it too would double-report the same failure.
-  // The carrier state itself cannot be verified from the repo —
-  // it is live D1 state — so this names the configuration gap, not
-  // a verified live state.
-  if (ctx.env !== undefined) {
-    try {
-      const { readTenantProjectionCarriers } = await import("../../services/projectionCarriers");
-      const carriers = await readTenantProjectionCarriers(ctx.env as never);
-      if (carriers.status === "unconfigured") {
-        storeErrors.runs =
-          "runs incomplete: no projection carrier configured for this tenant — projected rows are missing; engine D1 records still show";
-      } else if (carriers.status === "ok" && !carriers.carriers?.orm && !carriers.carriers?.queues) {
-        storeErrors.runs =
-          "runs incomplete: no projection carrier enabled for this tenant — projected rows are missing; engine D1 records still show";
-      }
-    } catch {
-      // Unreadable carrier store — the D1 reads below report it.
-    }
-  }
   let linkedJobRunIds = new Set<string>();
 
   let jobs: WorkflowRunJobRow[] = [];
@@ -818,6 +794,16 @@ export async function handleWorkflowRunsRoutes(
     jobs = await listProjectedWorkflowRunJobs(ctx.env as never, { tenantId, sessionId, limit: jobLimit });
   } catch (err) {
     storeErrors.jobs = err instanceof Error ? err.message : String(err);
+  }
+  // Issue #6101 — the #6099 projector is deleted, so the D1
+  // agent_async_jobs table freezes at cutover: the jobs list
+  // shows pre-cutover projected rows only, named here, never
+  // silent. New async-job executions get no row until F5
+  // restores the list via the engine run record. Engine D1 run
+  // records still show (the runs list above is live).
+  if (!storeErrors.jobs) {
+    storeErrors.jobs =
+      "frozen at the #6101 cutover: new async-job executions have no D1 agent_async_jobs row until F5 restores the list via the engine run record — pre-cutover projected rows still show";
   }
   try {
     if (ctx.env === undefined) {

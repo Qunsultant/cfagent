@@ -387,7 +387,7 @@ export async function executeGoalScreenRun(input: {
     // UI lists label a mode run the same way the record
     // and the PDF do (mirrors the workflow store door).
     (result.yahooDataMode ? ` ${yahooDataModeLabel(result.yahooDataMode)}.` : "");
-  const canonical = input.orm.storeCanonicalReport({
+  const canonical = await input.orm.storeCanonicalReport({
     runId: `goal-screen:${run.task.id}`,
     generationId: `goal-screen:${run.task.id}`,
     title: `Goal screen — ${result.goalKind} (${result.outlook})`,

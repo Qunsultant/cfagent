@@ -43,6 +43,7 @@ import { handleScreenerResearchRoutes } from "../src/agents/routes/screenerResea
 import { getScheduledReportById } from "../src/services/scheduledReports";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 import type { GoalDrivenScreenResult } from "../src/services/goalDrivenScreen";
 import { STOCK_SCREENING_PROVIDER_ID } from "../src/trading/screeningProvider";
 
@@ -155,7 +156,11 @@ describe("Goal Screen ThinkWorkflow & Reports End-to-End (#2625)", () => {
 
   it("orchestrates goal screen through the engine and produces all reports", async () => {
     const blobStorage = new InMemoryBlobStorage();
-    const env = { REPORTS_BUCKET: undefined };
+    // #6101 step 8: the goal canonical store writes D1
+    // agent_reports through ctx.env — without AGENT_DB the store
+    // returns null, the shard records stored:false, and the
+    // collation degrades from ReportGenerated to Completed.
+    const env = { REPORTS_BUCKET: undefined, AGENT_DB: new MockD1Database() as never };
     const sql = new MockSqlStorage();
     const orm = new DatabaseORM(sql as any);
 
@@ -292,8 +297,8 @@ describe("Goal Screen ThinkWorkflow & Reports End-to-End (#2625)", () => {
     expect(blobStorage.has(shard.xlsxKey!)).toBe(true);
     expect(blobStorage.has(shard.csvKey!)).toBe(true);
 
-    // 3. Verify canonical report in ORM via getScheduledReportById
-    const storedReport = getScheduledReportById(sql as any, storedReportId);
+    // 3. Verify canonical report in D1 via getScheduledReportById
+    const storedReport = await getScheduledReportById(env, storedReportId, { userLogin: "alice" });
     expect(storedReport).not.toBeNull();
     const body = typeof storedReport!.body === "string" ? JSON.parse(storedReport!.body) : storedReport!.body;
     expect(body.pdfKey).toBe(shard.pdfKey);

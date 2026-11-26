@@ -78,9 +78,9 @@ function expiry90DaysOut() {
 }
 
 describe("storeOptionsCanonicalReport", () => {
-  it("writes the run owner onto the canonical row", () => {
-    const orm = { storeCanonicalReport: vi.fn(() => ({ reportId: "r1", created: true })) };
-    storeOptionsCanonicalReport(orm, { ...canonicalInput, userLogin: OWNER });
+  it("writes the run owner onto the canonical row", async () => {
+    const orm = { storeCanonicalReport: vi.fn(async () => ({ reportId: "r1", created: true })) };
+    await storeOptionsCanonicalReport(orm, { ...canonicalInput, userLogin: OWNER });
     expect(orm.storeCanonicalReport).toHaveBeenCalledTimes(1);
     expect(orm.storeCanonicalReport.mock.calls[0][0]).toMatchObject({
       generationId: canonicalInput.generationId,
@@ -88,13 +88,13 @@ describe("storeOptionsCanonicalReport", () => {
     });
   });
 
-  it("never throws when the report store fails", () => {
+  it("never throws when the report store fails", async () => {
     const orm = {
-      storeCanonicalReport: vi.fn(() => {
+      storeCanonicalReport: vi.fn(async () => {
         throw new Error("report store unavailable");
       }),
     };
-    expect(storeOptionsCanonicalReport(orm, { ...canonicalInput, userLogin: OWNER })).toBeNull();
+    await expect(storeOptionsCanonicalReport(orm, { ...canonicalInput, userLogin: OWNER })).resolves.toBeNull();
   });
 });
 
