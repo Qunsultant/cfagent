@@ -45,7 +45,7 @@ export interface RunResearchJobInput {
 export class RunResearchJobCommand implements IMcpToolCommand<RunResearchJobInput> {
   readonly name = "run_research_job";
   readonly description =
-    "Run the nightly OODA options-research engine job (`research:<runId>`) or control one stage (`feed`, `enrich`, `analyze`, `generate`, `deliver`, `evaluate`) by `(runId, stageId)`. A dispatch returns the run it started (`runId`, the `research:<runId>` job id, and the six stage rows) — name that run id in the answer. Requires the chat turn's acting identity.";
+    "Run the nightly OODA options-research engine job (`research:<runId>`) or control one stage (`feed`, `enrich`, `analyze`, `generate`, `deliver`, `evaluate`) by `(runId, stageId)`. A dispatch returns the run it started — `runId`, its job id, and the six stage rows — so name that run id in the answer. Requires the chat turn's acting identity.";
 
   readonly jsonSchema = {
     type: "object" as const,
