@@ -7,9 +7,11 @@
  * source (per source kind, plus the Cron timing slice), per-agent and
  * per-workflow views that appear only when rows name them, and the
  * same source in the row detail dialog. The Cron view is a timing
- * slice over the one list — it overlaps Derived by design (caveat
- * (b) of the issue); each row still carries exactly one source, so
- * nothing is double-counted.
+ * slice over the one list — the system rows are cron-timed, so the
+ * slice largely overlaps them; each row still carries exactly one
+ * source, so nothing is double-counted. There is no Derived view
+ * any more (#6503 step 14): the token-renewal row below is a stored
+ * system row, so its source is System.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
@@ -19,7 +21,7 @@ import { ToastProvider } from "../src/client/components/ui/Toast";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
-const derivedItem = {
+const systemItem = {
   id: "token-renewal",
   type: "cron",
   callback: "autoRenewETradeTokens",
@@ -32,7 +34,7 @@ const derivedItem = {
       createdAt: "2026-11-21T10:00:00.000Z",
     },
   },
-  source: { kind: "derived", job: "token-renewal", origin: "system · token-renewal" },
+  source: { kind: "system", job: "token-renewal", origin: "system · token-renewal" },
 };
 
 const declaredItem = {
@@ -187,10 +189,10 @@ afterEach(async () => {
 
 describe("5889 Source column", () => {
   it("every row shows its source label, job identity and arming origin", async () => {
-    await renderPanel([derivedItem, declaredItem, workflowItem, userItem]);
+    await renderPanel([systemItem, declaredItem, workflowItem, userItem]);
     const text = document.body.textContent ?? "";
     expect(text).toContain("Source");
-    expect(text).toContain("Derived");
+    expect(text).toContain("System");
     expect(text).toContain("token-renewal");
     expect(text).toContain("Declared task");
     expect(text).toContain("options-strategy-scan-observe");
@@ -215,19 +217,19 @@ describe("5889 Source column", () => {
 
 describe("5889 source view buttons", () => {
   it("the Source buttons filter the list to one source at a time", async () => {
-    await renderPanel([derivedItem, declaredItem, workflowItem, userItem]);
-    expect(buttonOrNull(document, "Derived (1)")).toBeTruthy();
+    await renderPanel([systemItem, declaredItem, workflowItem, userItem]);
+    expect(buttonOrNull(document, "System (1)")).toBeTruthy();
     expect(buttonOrNull(document, "Declared task (1)")).toBeTruthy();
     expect(buttonOrNull(document, "Workflow (1)")).toBeTruthy();
     expect(buttonOrNull(document, "User-created (1)")).toBeTruthy();
-    await click(buttonIn(document, "Derived (1)"));
+    await click(buttonIn(document, "System (1)"));
     expect(visibleRowIds()).toEqual(["token-renewal"]);
     await click(buttonIn(document, "Declared task (1)"));
     expect(visibleRowIds()).toEqual(["alarm-declared-1"]);
   });
 
   it("the Cron button is a timing slice: every cron-timed row, whatever its source", async () => {
-    await renderPanel([derivedItem, declaredItem, workflowItem, userItem]);
+    await renderPanel([systemItem, declaredItem, workflowItem, userItem]);
     // Three of the four rows are cron-timed; the declared task is a
     // one-off scheduled alarm, so it drops out of the Cron view.
     await click(buttonIn(document, "Cron (3)"));
@@ -235,23 +237,23 @@ describe("5889 source view buttons", () => {
   });
 
   it("an empty source view states it instead of showing a bare table", async () => {
-    await renderPanel([derivedItem, userItem]);
+    await renderPanel([systemItem, userItem]);
     await click(buttonIn(document, "Declared task (0)"));
     expect(visibleRowIds()).toEqual([]);
     expect(document.body.textContent).toContain("No Declared task schedules");
   });
 
   it("the source filter composes with the kind filter", async () => {
-    await renderPanel([derivedItem, declaredItem, workflowItem, userItem]);
+    await renderPanel([systemItem, declaredItem, workflowItem, userItem]);
     await click(buttonIn(document, "System (2)"));
-    await click(buttonIn(document, "Derived (1)"));
+    await click(buttonIn(document, "System (1)"));
     expect(visibleRowIds()).toEqual(["token-renewal"]);
   });
 });
 
 describe("5889 per-agent and per-workflow views", () => {
   it("the Agent buttons appear only for agents the rows name, and filter to them", async () => {
-    await renderPanel([derivedItem, declaredItem, workflowItem, userItem]);
+    await renderPanel([systemItem, declaredItem, workflowItem, userItem]);
     expect(buttonOrNull(document, "OrchestratorAgent (1)")).toBeTruthy();
     expect(buttonOrNull(document, "schedules-api (1)")).toBeTruthy();
     // No TickerAgent row is loaded, so no TickerAgent button is invented.
@@ -261,32 +263,32 @@ describe("5889 per-agent and per-workflow views", () => {
   });
 
   it("no Agent group renders when no row names an agent", async () => {
-    await renderPanel([derivedItem, userItem]);
+    await renderPanel([systemItem, userItem]);
     expect(document.body.textContent).not.toContain("Filter schedules by agent");
   });
 
   it("the Workflow buttons appear only for workflows the rows name, and filter to them", async () => {
-    await renderPanel([derivedItem, declaredItem, workflowItem, userItem]);
+    await renderPanel([systemItem, declaredItem, workflowItem, userItem]);
     expect(buttonOrNull(document, "two-child (1)")).toBeTruthy();
     await click(buttonIn(document, "two-child (1)"));
     expect(visibleRowIds()).toEqual(["alarm-1"]);
   });
 
   it("no Workflow group renders when no row names a workflow", async () => {
-    await renderPanel([derivedItem, userItem]);
+    await renderPanel([systemItem, userItem]);
     expect(document.body.textContent).not.toContain("Filter schedules by workflow");
   });
 });
 
 describe("5889 detail dialog", () => {
   it("the Details dialog shows the row's Source section, same as the column", async () => {
-    await renderPanel([derivedItem]);
+    await renderPanel([systemItem]);
     await click(buttonIn(document, "Details"));
     await waitForText("Source");
     const dialog = document.querySelector(".sched-detail-modal") as HTMLElement;
     expect(dialog).toBeTruthy();
     expect(dialog.textContent).toContain("Source");
-    expect(dialog.textContent).toContain("Derived");
+    expect(dialog.textContent).toContain("System");
     expect(dialog.textContent).toContain("token-renewal");
     expect(dialog.textContent).toContain("system · token-renewal");
     expect(dialog.textContent).toContain("system");

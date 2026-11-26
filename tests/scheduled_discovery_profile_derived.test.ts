@@ -72,6 +72,7 @@ import {
   createD1AuditEventDb,
   D1AuditEventStore,
 } from "../src/data/d1AuditEventAdapter";
+import { createD1CommercialDb, ensureCommercialSchema } from "../src/data/d1CommercialAdapter";
 import type { Env, ETradeOptionChain } from "../src/types";
 import type { StrategyRequest } from "../src/trading/options/strategyEngine";
 
@@ -1185,7 +1186,7 @@ describe("POST /api/schedules/create with a profile-derived discovery payload (#
   });
   let scheduleEveryCalls: any[];
 
-  function makeAgent() {
+  async function makeAgent() {
     const sql = new MockSqlStorage();
     const ctx = {
       storage: { sql },
@@ -1217,7 +1218,23 @@ describe("POST /api/schedules/create with a profile-derived discovery payload (#
     agent.env = {
       APP_ENV: "TEST",
       SESSION_STORE: sessionStoreNs,
+      // Issue #6503 — the unified store is D1 only (fail-closed):
+      // without a bound AGENT_DB the create route answers 503
+      // "Scheduling unavailable". Same seeding as
+      // tests/schedules_create_route.test.ts: binding AGENT_DB
+      // switches the commercial read to the D1 adapter, so seed
+      // the tenant's broker selection as etrade (tenant
+      // "primary", the IAAA default) or creation refuses 409
+      // for want of an Alpaca credential.
+      AGENT_DB: new MockD1Database(),
     } as any;
+    const d1 = agent.env.AGENT_DB as MockD1Database;
+    await ensureCommercialSchema(createD1CommercialDb(d1 as never));
+    d1.sqlite
+      .prepare(
+        "INSERT OR REPLACE INTO agent_tenant_settings (tenant_id, ads_enabled, updated_at_ms, broker_id) VALUES ('primary', 0, ?, 'etrade')",
+      )
+      .run(Date.now());
     agent.schedule = async (when: any, callback: string, payload: any) => {
       return { id: "real-schedule-1", callback, payload };
     };
@@ -1244,7 +1261,7 @@ describe("POST /api/schedules/create with a profile-derived discovery payload (#
   });
 
   it("accepts a profile-derived payload with explicit symbols", async () => {
-    const agent = makeAgent();
+    const agent = await makeAgent();
     const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
       // Issue #6482 — a monthly cadence (2,592,000s): creation
@@ -1268,7 +1285,7 @@ describe("POST /api/schedules/create with a profile-derived discovery payload (#
   });
 
   it("accepts a profile-derived payload with a watchlist name", async () => {
-    const agent = makeAgent();
+    const agent = await makeAgent();
     const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
       // Issue #6482 — a monthly cadence (2,592,000s): creation
@@ -1285,7 +1302,7 @@ describe("POST /api/schedules/create with a profile-derived discovery payload (#
   });
 
   it("still accepts an explicit saved-request payload", async () => {
-    const agent = makeAgent();
+    const agent = await makeAgent();
     const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
       // Issue #6482 — a monthly cadence (2,592,000s): creation
@@ -1324,7 +1341,7 @@ describe("POST /api/schedules/create with a profile-derived discovery payload (#
     ["an empty watchlist name", { inputModel: "profile-derived", watchlistName: " ", profileId: "prof-1" }],
     ["an unknown inputModel", { inputModel: "derived-please", symbols: ["NVDA"], profileId: "prof-1" }],
   ])("rejects %s (400, no schedule created)", async (_label, payload) => {
-    const agent = makeAgent();
+    const agent = await makeAgent();
     const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
       // Issue #6482 — a monthly cadence: the 400 under test comes

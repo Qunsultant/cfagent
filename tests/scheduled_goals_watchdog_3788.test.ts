@@ -35,6 +35,23 @@ vi.mock("../src/orchestrate", () => ({
 
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
 import { SCHEDULE_WATCHDOG_FIRST_SEEN_KEY } from "../src/services/scheduleWatchdog";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { goalToRecord } from "../src/services/unifiedScheduleManagement";
+
+/**
+ * Issue #6503 — the fixture goal is planted in the D1 schedule
+ * store, not the DO KV "goals" key (which the agent no longer
+ * reads). Planting exactly one goal keeps each tick isolated: an
+ * empty store would re-seed all nine built-in goals. (Same pattern
+ * as tests/index_list_goals_scheduled_1980.test.ts.)
+ */
+async function plantGoals(mockD1: MockD1Database, goals: Array<Record<string, unknown>>) {
+  const store = createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules;
+  for (const goal of goals) {
+    await store.save(goalToRecord(goal as never));
+  }
+}
 
 function makeStore() {
   const store = new Map<string, unknown>();
@@ -49,7 +66,7 @@ function makeStore() {
   };
 }
 
-function makeEnv() {
+function makeEnv(mockD1?: MockD1Database) {
   return {
     PAYMENTS_AGENT: {
       idFromName: () => "payments-default",
@@ -57,6 +74,7 @@ function makeEnv() {
     },
     SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/T/test",
     MISSED_SCHEDULE_GRACE_MINUTES: "0.01",
+    ...(mockD1 ? { AGENT_DB: mockD1 } : {}),
   } as any;
 }
 
@@ -81,8 +99,9 @@ function missedGoal(overrides: Record<string, unknown> = {}) {
 describe("ScheduledAgent schedule watchdog (#3788)", () => {
   it("flags a goal that never fired: ledger record + Slack alert + heartbeat", async () => {
     const { store, ctx } = makeStore();
-    const agent = new (ScheduledAgent as any)(ctx, makeEnv());
-    store.set("goals", [missedGoal()]);
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [missedGoal()]);
+    const agent = new (ScheduledAgent as any)(ctx, makeEnv(mockD1));
     store.set(SCHEDULE_WATCHDOG_FIRST_SEEN_KEY, {
       "daily-qa-sweep": new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
     });
@@ -108,14 +127,23 @@ describe("ScheduledAgent schedule watchdog (#3788)", () => {
     const heartbeat = await agent.listJobRuns("schedule-watchdog-heartbeat");
     expect(heartbeat).toHaveLength(1);
     expect(heartbeat[0].outcome).toBe("success");
-    expect(heartbeat[0].detail).toContain("examined=1");
+    // Issue #6503 — the D1 store seeds all nine built-in goals on
+    // first use (migration 92, `seed.d1.unified_schedules.insert_builtin_goals`
+    // in d1Catalogue), so the watchdog examines 7 enabled goals, not
+    // just the planted one: daily-qa-sweep + the six other enabled
+    // built-ins (daily-social-post and index-refresh-holdings are
+    // disabled). The pre-D1 `examined=1` pinned a DO store holding
+    // only the fixture goal. Only daily-qa-sweep misses: the other
+    // six are first seen on this tick, so no past tick is ever
+    // attributed to them. `missed=1` is unchanged.
+    expect(heartbeat[0].detail).toContain("examined=7");
     expect(heartbeat[0].detail).toContain("missed=1");
   });
 
   it("flags a #1819 resource goal the same way (resource-daily-rollup)", async () => {
     const { store, ctx } = makeStore();
-    const agent = new (ScheduledAgent as any)(ctx, makeEnv());
-    store.set("goals", [
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [
       missedGoal({
         id: "resource-daily-rollup",
         name: "SessionStore daily resource rollup",
@@ -125,6 +153,7 @@ describe("ScheduledAgent schedule watchdog (#3788)", () => {
         budgetCents: 1,
       }),
     ]);
+    const agent = new (ScheduledAgent as any)(ctx, makeEnv(mockD1));
     store.set(SCHEDULE_WATCHDOG_FIRST_SEEN_KEY, {
       "resource-daily-rollup": new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
     });
@@ -140,9 +169,10 @@ describe("ScheduledAgent schedule watchdog (#3788)", () => {
 
   it("does not flag a goal that ran at/after its expected tick", async () => {
     const { store, ctx } = makeStore();
-    const agent = new (ScheduledAgent as any)(ctx, makeEnv());
+    const mockD1 = new MockD1Database();
     const goal = missedGoal();
-    store.set("goals", [goal]);
+    await plantGoals(mockD1, [goal]);
+    const agent = new (ScheduledAgent as any)(ctx, makeEnv(mockD1));
     store.set(SCHEDULE_WATCHDOG_FIRST_SEEN_KEY, {
       "daily-qa-sweep": new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
     });
@@ -174,8 +204,9 @@ describe("ScheduledAgent schedule watchdog (#3788)", () => {
 
   it("never flags a disabled goal", async () => {
     const { store, ctx } = makeStore();
-    const agent = new (ScheduledAgent as any)(ctx, makeEnv());
-    store.set("goals", [missedGoal({ enabled: false })]);
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [missedGoal({ enabled: false })]);
+    const agent = new (ScheduledAgent as any)(ctx, makeEnv(mockD1));
     store.set(SCHEDULE_WATCHDOG_FIRST_SEEN_KEY, {
       "daily-qa-sweep": new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
     });
@@ -187,8 +218,9 @@ describe("ScheduledAgent schedule watchdog (#3788)", () => {
 
   it("does not flag on first sight: the first tick stamps first-seen only", async () => {
     const { store, ctx } = makeStore();
-    const agent = new (ScheduledAgent as any)(ctx, makeEnv());
-    store.set("goals", [missedGoal()]);
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [missedGoal()]);
+    const agent = new (ScheduledAgent as any)(ctx, makeEnv(mockD1));
     // No first-seen entry seeded: the goal is observed for the first
     // time on this tick, so a tick before that cannot be attributed.
     const capturingPost = vi.fn(async () => ({ status: 200 }));
@@ -201,8 +233,9 @@ describe("ScheduledAgent schedule watchdog (#3788)", () => {
 
   it("alerts exactly once per (goal, expected tick) across ticks", async () => {
     const { store, ctx } = makeStore();
-    const agent = new (ScheduledAgent as any)(ctx, makeEnv());
-    store.set("goals", [missedGoal()]);
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [missedGoal()]);
+    const agent = new (ScheduledAgent as any)(ctx, makeEnv(mockD1));
     store.set(SCHEDULE_WATCHDOG_FIRST_SEEN_KEY, {
       "daily-qa-sweep": new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
     });
@@ -219,8 +252,9 @@ describe("ScheduledAgent schedule watchdog (#3788)", () => {
 
   it("never stamps lastRun: the alert branch stays unstamped", async () => {
     const { store, ctx } = makeStore();
-    const agent = new (ScheduledAgent as any)(ctx, makeEnv());
-    store.set("goals", [missedGoal()]);
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [missedGoal()]);
+    const agent = new (ScheduledAgent as any)(ctx, makeEnv(mockD1));
     store.set(SCHEDULE_WATCHDOG_FIRST_SEEN_KEY, {
       "daily-qa-sweep": new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
     });

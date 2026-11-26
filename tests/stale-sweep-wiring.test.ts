@@ -2,8 +2,9 @@
  * Issue #618 (phase-2 P2-3.3) — the stale-task sweep from #615 is wired
  * into the orchestrator's existing maintenance path: a scheduled
  * callback sweeps both ledgers for the instance's user, onStart runs
- * one sweep immediately and ensures a persistent 6-hourly interval
- * schedule exists (idempotently).
+ * one sweep immediately, and the recurring sweep is a stored monthly
+ * schedule seeded by the onStart reconcile (#6503 — the 6-hourly
+ * interval arm and its ensureStaleSweepSchedule are retired).
  *
  * Source-evidence tests, the repo idiom for Durable Object wiring that
  * vitest cannot instantiate. Ledger sweep semantics themselves are
@@ -19,12 +20,35 @@ const orchestrator = fs.readFileSync(
   "utf8"
 );
 
+const management = fs.readFileSync(
+  path.join(process.cwd(), "src/services/unifiedScheduleManagement.ts"),
+  "utf8"
+);
+
+const catalogue = JSON.parse(
+  fs.readFileSync(path.join(process.cwd(), "config/job-catalogue.json"), "utf8"),
+) as { jobs: Array<Record<string, unknown>> };
+
+function catalogueEntry(id: string) {
+  const entry = catalogue.jobs.find((j) => j.id === id);
+  expect(entry, `expected a catalogue entry for ${id}`).toBeDefined();
+  return entry!;
+}
+
 /** Slice from a marker to the next top-level method definition. */
 function region(from: string, to = "\n  async "): string {
   const start = orchestrator.indexOf(from);
   expect(start, `expected to find: ${from}`).toBeGreaterThanOrEqual(0);
   const end = orchestrator.indexOf(to, start + from.length);
   return orchestrator.slice(start, end === -1 ? undefined : end);
+}
+
+/** Slice from a marker to the next top-level function definition in the management module. */
+function managementRegion(from: string, to = "\nexport "): string {
+  const start = management.indexOf(from);
+  expect(start, `expected to find: ${from}`).toBeGreaterThanOrEqual(0);
+  const end = management.indexOf(to, start + from.length);
+  return management.slice(start, end === -1 ? undefined : end);
 }
 
 describe("stale sweep wiring (#618)", () => {
@@ -46,23 +70,38 @@ describe("stale sweep wiring (#618)", () => {
     expect(catches.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("uses a 6-hour interval between automatic sweeps", () => {
-    expect(orchestrator).toContain("STALE_SWEEP_INTERVAL_SECONDS = 6 * 60 * 60");
+  it("runs monthly as a stored schedule, not a 6-hour interval arm", () => {
+    // #6503 — the 6-hour STALE_SWEEP_INTERVAL_SECONDS arm is retired:
+    // the sweep is a stored platform-level schedule, monthly per
+    // #6489. The catalogue entry is the source of truth for the
+    // default cadence.
+    const entry = catalogueEntry("sweep-stale-ledger-tasks");
+    expect(entry.callback).toBe("sweepStaleLedgerTasks");
+    expect(entry.defaultIntervalSeconds).toBe(2592000);
+    expect(orchestrator).not.toContain("STALE_SWEEP_INTERVAL_SECONDS");
+    expect(orchestrator).not.toContain("ensureStaleSweepSchedule");
   });
 
-  it("ensures the interval schedule idempotently (checks before creating)", () => {
-    const ensure = region("async ensureStaleSweepSchedule(");
-    expect(ensure).toContain("listSchedules");
-    expect(ensure).toContain("sweepStaleLedgerTasks");
-    expect(ensure).toContain("scheduleEvery(STALE_SWEEP_INTERVAL_SECONDS");
-    // The existence check must precede creation.
-    expect(ensure.indexOf("listSchedules")).toBeLessThan(ensure.indexOf("scheduleEvery("));
+  it("the onStart reconcile seeds the stored schedule idempotently (get-first)", () => {
+    const start = region("async onStart(");
+    expect(start).toContain("reconcileSystemScheduleRecords");
+    const specs = managementRegion("export function systemScheduleSeedSpecs(");
+    expect(specs).toContain("STALE_LEDGER_SWEEP_RECORD_ID");
+    expect(specs).toContain('callback: "sweepStaleLedgerTasks"');
+    const reconcile = managementRegion("export async function reconcileSystemScheduleRecords(");
+    expect(reconcile).toContain("deps.store.get(spec.id)");
+    expect(reconcile).toContain("if (!existing)");
+    expect(reconcile).toContain("await deps.store.save(record)");
+    // The existence check must precede the seed save.
+    expect(reconcile.indexOf("deps.store.get(spec.id)")).toBeLessThan(
+      reconcile.indexOf("await deps.store.save(record)"),
+    );
   });
 
-  it("onStart runs an initial sweep and ensures the schedule", () => {
+  it("onStart runs an initial sweep and reconciles the stored schedule", () => {
     const start = region("async onStart(");
     expect(start).toContain("sweepStaleLedgerTasks");
-    expect(start).toContain("ensureStaleSweepSchedule");
+    expect(start).toContain("reconcileSystemScheduleRecords");
   });
 });
 
@@ -81,22 +120,37 @@ describe("stale async-job sweep wiring (#3784)", () => {
     expect(cb).toContain("sweepStaleAsyncJobs(this.asyncJobsContext())");
   });
 
-  it("uses a 15-minute interval between automatic async-job sweeps", () => {
-    expect(orchestrator).toContain("STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS = 15 * 60");
+  it("runs monthly as a stored schedule, not a 15-minute interval arm", () => {
+    // #6503 — the 15-minute STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS
+    // arm is retired: the sweep is a stored platform-level schedule,
+    // monthly per #6489. The catalogue entry is the source of truth
+    // for the default cadence.
+    const entry = catalogueEntry("sweep-stale-async-jobs");
+    expect(entry.callback).toBe("sweepStaleAsyncJobs");
+    expect(entry.defaultIntervalSeconds).toBe(2592000);
+    expect(orchestrator).not.toContain("STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS");
+    expect(orchestrator).not.toContain("ensureStaleAsyncJobSweepSchedule");
   });
 
-  it("ensures the async-job sweep schedule idempotently (checks before creating)", () => {
-    const ensure = region("async ensureStaleAsyncJobSweepSchedule(");
-    expect(ensure).toContain("listSchedules");
-    expect(ensure).toContain("sweepStaleAsyncJobs");
-    expect(ensure).toContain("scheduleEvery(STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS");
-    // The existence check must precede creation.
-    expect(ensure.indexOf("listSchedules")).toBeLessThan(ensure.indexOf("scheduleEvery("));
+  it("the onStart reconcile seeds the stored schedule idempotently (get-first)", () => {
+    const start = region("async onStart(");
+    expect(start).toContain("reconcileSystemScheduleRecords");
+    const specs = managementRegion("export function systemScheduleSeedSpecs(");
+    expect(specs).toContain("STALE_ASYNC_JOB_SWEEP_RECORD_ID");
+    expect(specs).toContain('callback: "sweepStaleAsyncJobs"');
+    const reconcile = managementRegion("export async function reconcileSystemScheduleRecords(");
+    expect(reconcile).toContain("deps.store.get(spec.id)");
+    expect(reconcile).toContain("if (!existing)");
+    expect(reconcile).toContain("await deps.store.save(record)");
+    // The existence check must precede the seed save.
+    expect(reconcile.indexOf("deps.store.get(spec.id)")).toBeLessThan(
+      reconcile.indexOf("await deps.store.save(record)"),
+    );
   });
 
-  it("onStart runs an initial async-job sweep and ensures the schedule", () => {
+  it("onStart runs an initial async-job sweep and reconciles the stored schedule", () => {
     const start = region("async onStart(");
     expect(start).toContain("sweepStaleAsyncJobs");
-    expect(start).toContain("ensureStaleAsyncJobSweepSchedule");
+    expect(start).toContain("reconcileSystemScheduleRecords");
   });
 });

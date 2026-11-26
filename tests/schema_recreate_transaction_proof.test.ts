@@ -172,7 +172,13 @@ function createFrameworkStubs(d1: MockD1Database): void {
   d1.sqlite.exec(
     `CREATE TABLE cf_agents_jobs (time TEXT, exclusive TEXT, singleflight TEXT, running TEXT, execution_started_at TEXT, hung_timeout_seconds TEXT)`,
   );
-  d1.sqlite.exec(`CREATE TABLE unified_schedules (id TEXT, created_at TEXT)`);
+  // #6503 — migration 0092 owns the full unified_schedules table
+  // in the D1 leg (CREATE TABLE IF NOT EXISTS + seed INSERTs), so
+  // the stub must carry the full 12-column shape: the old 2-column
+  // stub let the CREATE no-op, then the seed INSERTs failed with
+  // "no such column: kind" and the whole batch rolled back. Same
+  // full shape as tests/data_lifecycle_recreate_4383.test.ts.
+  d1.sqlite.exec(`CREATE TABLE unified_schedules (id TEXT PRIMARY KEY, kind TEXT NOT NULL, state TEXT NOT NULL, callback TEXT, operation TEXT, definition_json TEXT NOT NULL, owner_login TEXT, provenance_json TEXT, alarm_id TEXT, paused_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 }
 
 function tableExists(d1: MockD1Database, table: string): boolean {

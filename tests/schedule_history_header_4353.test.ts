@@ -61,7 +61,11 @@ describe("4353-P02 one heading row on the audit trail", () => {
 describe("4353-P03 one heading row on the schedules list", () => {
   it("keeps the count and the description on the heading, and drops the caption", () => {
     // The heading is a CardHeader now (issue 4913); slice the element.
-    const start = panel.indexOf("<CardHeader");
+    // Issue #6503 step 14 — the feed card's CardHeader comes first
+    // in the file now, so slice the heading that carries the table's
+    // description, not the first CardHeader in the file.
+    const textAt = panel.indexOf("Every durable schedule, one row each");
+    const start = panel.lastIndexOf("<CardHeader", textAt);
     const heading = panel.slice(start, panel.indexOf("/>", start));
     expect(heading).toContain("Every durable schedule, one row each");
     // Issue #5077: the count pill is a Badge now, not a bespoke span.

@@ -65,6 +65,9 @@ vi.mock("../src/orchestrate", async (importOriginal) => {
 
 import { compileGoal } from "../src/orchestrate";
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 import { AGENTIC_SPEND_AGENT_ID } from "../src/payments/ledger";
 import {
   buildLedgerLinkage,
@@ -83,9 +86,8 @@ function source(rel: string): string {
   return readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
 }
 
-function makeCtx(initialGoals?: any[]) {
+function makeCtx() {
   const store = new Map<string, unknown>();
-  if (initialGoals) store.set("goals", initialGoals);
   return {
     store,
     storage: {
@@ -141,15 +143,55 @@ function makeEnv(
           opts.budgetAllowed ?? true ? undefined : "over budget",
       })),
   );
+  // Issue #6503 — the goals tick/mutations read goal records from
+  // the D1 unified store, never the ctx "goals" KV key, so every
+  // env binds a fresh MockD1 as AGENT_DB (fail-closed without it).
+  const mockD1 = new MockD1Database();
   const env: any = {
     PAYMENTS_AGENT: {
       idFromName: () => "default",
       get: () => ({ budgetCheck }),
     },
     SESSION_STORE: null,
+    AGENT_DB: mockD1,
   };
   if (opts.audit) env.ORCHESTRATOR_AGENT = opts.audit.namespace;
-  return { env, budgetCheck };
+  return { env, budgetCheck, mockD1 };
+}
+
+/**
+ * Issue #6503 — D1-only goals: fixture goals are planted into the
+ * mock D1 via goalToRecord (the definition spread round-trips
+ * lastRun / timeZone / subDailyOptIn, and enabled maps to the
+ * stored state). The old `makeCtx([goals])` planting is dead — the
+ * "goals" KV key is never read.
+ */
+async function plantGoals(mockD1: MockD1Database, goals: any[]) {
+  const store = createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules;
+  for (const goal of goals) await store.save(goalToRecord(goal));
+  // The first store op lazily ensures the schema, and migration
+  // 0092's goals seed lands the 9 built-in goals — sweep them, so
+  // the tick sees ONLY the fixture goals (same pattern as the
+  // #6503 G3 goals-tick file).
+  const keep = new Set(goals.map((goal) => String(goal.id)));
+  for (const row of await store.listByKind("goal")) {
+    if (!keep.has(row.id)) await store.remove(row.id);
+  }
+}
+
+/** One agent over a fresh D1 with `goals` planted. */
+async function plantedAgent(
+  goals: any[],
+  envOpts: {
+    budgetAllowed?: boolean;
+    budgetImpl?: (req: any) => Promise<{ allowed: boolean; reason?: string }>;
+    audit?: AuditCapture | null;
+  } = {},
+) {
+  const { env, budgetCheck, mockD1 } = makeEnv(envOpts);
+  await plantGoals(mockD1, goals);
+  const agent = new ScheduledAgent(makeCtx() as never, env as never);
+  return { agent, env, budgetCheck, mockD1 };
 }
 
 function testGoal(overrides: Record<string, unknown> = {}) {
@@ -225,13 +267,9 @@ describe("S3-P01 tick semantics through the S1 re-exports (#3121)", () => {
   });
 
   it("a step-hour cron fires on its step hours through the consolidated tick (#4235)", async () => {
-    const { env, budgetCheck } = makeEnv();
-    const agent = new ScheduledAgent(
-      makeCtx([
-        testGoal({ id: "opportunity-hunt", cron: "0 */6 * * *", operation: "search.query", budgetCents: 1000 }),
-      ]) as never,
-      env as never,
-    );
+    const { agent, env, budgetCheck } = await plantedAgent([
+      testGoal({ id: "opportunity-hunt", cron: "0 */6 * * *", operation: "search.query", budgetCents: 1000 }),
+    ]);
     // 06:00 UTC is a */6 hour. The old never-due quirk (the hour
     // mapped through Number() to NaN) is gone since #4235, so the
     // goal fires exactly like any due daily goal — once, with one
@@ -246,13 +284,9 @@ describe("S3-P01 tick semantics through the S1 re-exports (#3121)", () => {
   });
 
   it("the 23h anti-double-fire guard survives: a goal run 1h ago is not due", async () => {
-    const { env, budgetCheck } = makeEnv();
-    const agent = new ScheduledAgent(
-      makeCtx([
-        testGoal({ lastRun: "2026-11-03T05:00:00.000Z" }),
-      ]) as never,
-      env as never,
-    );
+    const { agent, env, budgetCheck } = await plantedAgent([
+      testGoal({ lastRun: "2026-11-03T05:00:00.000Z" }),
+    ]);
     const tick = await agent.onCron(env as never, { halted: false } as never);
     expect(tick.goalsEvaluated).toBe(1);
     expect(tick.jobsCreated).toBe(0);
@@ -261,11 +295,7 @@ describe("S3-P01 tick semantics through the S1 re-exports (#3121)", () => {
   });
 
   it("a due goal still fires exactly once through the consolidated tick", async () => {
-    const { env, budgetCheck } = makeEnv();
-    const agent = new ScheduledAgent(
-      makeCtx([testGoal()]) as never,
-      env as never,
-    );
+    const { agent, env, budgetCheck } = await plantedAgent([testGoal()]);
     const tick = await agent.onCron(env as never, { halted: false } as never);
     expect(tick.goalsEvaluated).toBe(1);
     expect(tick.jobsCreated).toBe(1);
@@ -279,11 +309,7 @@ describe("S3-P01 tick semantics through the S1 re-exports (#3121)", () => {
 
 describe("S3-P02 O3 — per-tick budget accounting matches onCron exactly (#3121, #2457)", () => {
   it("one tick over three due goals issues exactly three budget checks, one per goal", async () => {
-    const { env, budgetCheck } = makeEnv();
-    const agent = new ScheduledAgent(
-      makeCtx(threeDueGoals()) as never,
-      env as never,
-    );
+    const { agent, env, budgetCheck } = await plantedAgent(threeDueGoals());
     const tick = await agent.onCron(env as never, { halted: false } as never);
     expect(tick.jobsCreated).toBe(3);
     expect(budgetCheck).toHaveBeenCalledTimes(3);
@@ -298,16 +324,12 @@ describe("S3-P02 O3 — per-tick budget accounting matches onCron exactly (#3121
   });
 
   it("a budget rejection skips only its own goal; the others still fire", async () => {
-    const { env, budgetCheck } = makeEnv({
+    const { agent, env, budgetCheck } = await plantedAgent(threeDueGoals(), {
       budgetImpl: async (req: any) =>
         req.operation === "search.query"
           ? { allowed: false, reason: "over budget" }
           : { allowed: true },
     });
-    const agent = new ScheduledAgent(
-      makeCtx(threeDueGoals()) as never,
-      env as never,
-    );
     const tick = await agent.onCron(env as never, { halted: false } as never);
     expect(tick.jobsCreated).toBe(1);
     expect(tick.jobsSkipped).toBe(2);
@@ -320,18 +342,12 @@ describe("S3-P02 O3 — per-tick budget accounting matches onCron exactly (#3121
   });
 
   it("tenant scopes the halt read, never the budget: two tenants' ticks check identically", async () => {
-    const a = makeEnv();
-    const b = makeEnv();
+    const a = await plantedAgent(threeDueGoals());
+    const b = await plantedAgent(threeDueGoals());
     const haltA = makeHaltReader();
     const haltB = makeHaltReader();
-    const agentA = new ScheduledAgent(
-      makeCtx(threeDueGoals()) as never,
-      a.env as never,
-    );
-    const agentB = new ScheduledAgent(
-      makeCtx(threeDueGoals()) as never,
-      b.env as never,
-    );
+    const agentA = a.agent;
+    const agentB = b.agent;
     await agentA.onCron(a.env as never, {
       tenantId: "tenant-a",
       haltReader: haltA.reader,
@@ -352,13 +368,9 @@ describe("S3-P02 O3 — per-tick budget accounting matches onCron exactly (#3121
   });
 
   it("a pipeline goal runs under exactly one budget check for the whole firing", async () => {
-    const { env, budgetCheck } = makeEnv();
-    const agent = new ScheduledAgent(
-      makeCtx([
-        testGoal({ id: "pipe-1", operation: "pipeline:social-daily", budgetCents: 500 }),
-      ]) as never,
-      env as never,
-    );
+    const { agent, env, budgetCheck } = await plantedAgent([
+      testGoal({ id: "pipe-1", operation: "pipeline:social-daily", budgetCents: 500 }),
+    ]);
     // SESSION_STORE is unbound in this env, so the pipeline branch
     // records skipped — but the budget check above it ran exactly
     // once for the goal, never once per stage.
@@ -376,14 +388,10 @@ describe("S3-P02 O3 — per-tick budget accounting matches onCron exactly (#3121
   });
 
   it("disabled and not-due goals cost zero budget checks", async () => {
-    const { env, budgetCheck } = makeEnv();
-    const agent = new ScheduledAgent(
-      makeCtx([
-        testGoal({ id: "off", enabled: false }),
-        testGoal({ id: "later", cron: "0 7 * * *" }),
-      ]) as never,
-      env as never,
-    );
+    const { agent, env, budgetCheck } = await plantedAgent([
+      testGoal({ id: "off", enabled: false }),
+      testGoal({ id: "later", cron: "0 7 * * *" }),
+    ]);
     const tick = await agent.onCron(env as never, { halted: false } as never);
     // The disabled goal is skipped before evaluation; the not-due
     // goal IS evaluated (goalsEvaluated counts it) but never
@@ -396,11 +404,7 @@ describe("S3-P02 O3 — per-tick budget accounting matches onCron exactly (#3121
 
 describe("S3-P03 ledger linkage resolved through buildLedgerLinkage (#3121)", () => {
   it("a fired goal's stored linkage equals the resolver's output", async () => {
-    const { env } = makeEnv();
-    const agent = new ScheduledAgent(
-      makeCtx([testGoal()]) as never,
-      env as never,
-    );
+    const { agent, env } = await plantedAgent([testGoal()]);
     await agent.onCron(env as never, { halted: false } as never);
     const [run] = await agent.listJobRuns("test-goal");
     expect({
@@ -417,11 +421,7 @@ describe("S3-P03 ledger linkage resolved through buildLedgerLinkage (#3121)", ()
   });
 
   it("a manual trigger's stored linkage equals the resolver's manual output", async () => {
-    const { env } = makeEnv();
-    const agent = new ScheduledAgent(
-      makeCtx([testGoal()]) as never,
-      env as never,
-    );
+    const { agent, env } = await plantedAgent([testGoal()]);
     await agent.triggerGoal("test-goal");
     const [run] = await agent.listJobRuns("test-goal");
     expect(run.triggeredBy).toBe("manual");
@@ -439,11 +439,7 @@ describe("S3-P03 ledger linkage resolved through buildLedgerLinkage (#3121)", ()
   });
 
   it("a skipped goal records explicit nulls for the job and workflow it never had", async () => {
-    const { env } = makeEnv({ budgetAllowed: false });
-    const agent = new ScheduledAgent(
-      makeCtx([testGoal()]) as never,
-      env as never,
-    );
+    const { agent, env } = await plantedAgent([testGoal()], { budgetAllowed: false });
     await agent.onCron(env as never, { halted: false } as never);
     const [run] = await agent.listJobRuns("test-goal");
     expect(run.outcome).toBe("skipped");
@@ -456,9 +452,8 @@ describe("S3-P03 ledger linkage resolved through buildLedgerLinkage (#3121)", ()
 
 describe("S3-P04 materialized goals carry system provenance (#3121)", () => {
   async function materializedAgent(id = "synth-s3-mat") {
-    const ctx = makeCtx();
-    const { env } = makeEnv();
-    const agent = new ScheduledAgent(ctx as never, env as never);
+    const { env, mockD1 } = makeEnv();
+    const agent = new ScheduledAgent(makeCtx() as never, env as never);
     const chain = compileGoal("Create a NASDAQ100 screen and send it to Slack", {
       budgetCents: 5000,
       budgetCapCents: 10000,
@@ -467,7 +462,18 @@ describe("S3-P04 materialized goals carry system provenance (#3121)", () => {
     await agent.synthesizeSchedule(chain, { id, cron: "0 6 * * *" });
     await agent.approveSynthesizedSchedule(id);
     const goal = await agent.materializeSynthesizedSchedule(id);
-    return { agent, store: ctx.store, goal };
+    // Issue #6503 — D1-only: materialize loads through
+    // loadGoalRecords, which seeds the built-in goals into the empty
+    // D1 store (including daily-qa-sweep, due at 06:00 like this
+    // test's tick). The old `store.set("goals", [goal])` isolation
+    // is dead — the "goals" KV key is never read — so prune the
+    // seeded built-ins from D1 here: the tick below sees only the
+    // materialized goal, exactly as the old ctx-store overwrite did.
+    const store = createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules;
+    for (const row of await store.listByKind("goal")) {
+      if (row.id !== id) await store.remove(row.id);
+    }
+    return { agent, goal };
   }
 
   it("materialization stamps origin system / synthesized-materialization", async () => {
@@ -492,8 +498,7 @@ describe("S3-P04 materialized goals carry system provenance (#3121)", () => {
   });
 
   it("a halted tick blocks the materialized chain goal; an unhalted tick fires it", async () => {
-    const { agent, store, goal } = await materializedAgent("synth-s3-halt");
-    store.set("goals", [goal]);
+    const { agent } = await materializedAgent("synth-s3-halt");
     const blocked = await agent.onCron({ halted: true } as never);
     expect(blocked.jobsCreated).toBe(0);
     expect(blocked.jobsSkipped).toBe(1);
@@ -502,9 +507,7 @@ describe("S3-P04 materialized goals carry system provenance (#3121)", () => {
     expect(blockedRun.outcome).toBe("skipped");
     expect(blockedRun.detail).toContain("blocked");
 
-    const { agent: agent2, store: store2, goal: goal2 } =
-      await materializedAgent("synth-s3-fire");
-    store2.set("goals", [goal2]);
+    const { agent: agent2 } = await materializedAgent("synth-s3-fire");
     const fired = await agent2.onCron({ halted: false } as never);
     expect(fired.jobsCreated).toBe(1);
     expect(fired.jobsSkipped).toBe(0);
@@ -514,11 +517,7 @@ describe("S3-P04 materialized goals carry system provenance (#3121)", () => {
 describe("S3-P05 #3312 — the DO-side audit sink covers every entry path (#3121)", () => {
   it("DO-direct mutations emit the four events with the threaded actor", async () => {
     const audit = makeAuditCapture();
-    const { env } = makeEnv({ audit });
-    const agent = new ScheduledAgent(
-      makeCtx([testGoal()]) as never,
-      env as never,
-    );
+    const { agent, env } = await plantedAgent([testGoal()], { audit });
     await agent.addGoal({
       id: "g-new",
       name: "New goal",
@@ -557,11 +556,7 @@ describe("S3-P05 #3312 — the DO-side audit sink covers every entry path (#3121
 
   it("misses are state answers, not events: no audit for an unknown goal", async () => {
     const audit = makeAuditCapture();
-    const { env } = makeEnv({ audit });
-    const agent = new ScheduledAgent(
-      makeCtx([testGoal()]) as never,
-      env as never,
-    );
+    const { agent, env } = await plantedAgent([testGoal()], { audit });
     expect(await agent.removeGoal("nope", "octocat-schedule")).toBe(false);
     expect(await agent.setGoalEnabled("nope", true, "octocat-schedule")).toBe(false);
     const tick = await agent.triggerGoal("nope", undefined, "octocat-schedule");
@@ -571,11 +566,7 @@ describe("S3-P05 #3312 — the DO-side audit sink covers every entry path (#3121
 
   it("A2A mutations emit with the edge-authenticated caller as actor; reads emit nothing", async () => {
     const audit = makeAuditCapture();
-    const { env } = makeEnv({ audit });
-    const agent = new ScheduledAgent(
-      makeCtx([testGoal()]) as never,
-      env as never,
-    );
+    const { agent } = await plantedAgent([testGoal()], { audit });
     const attribution = { caller: "a2a-credential:scheduled" };
     await agent.handleA2A(
       { operation: "scheduled.list_goals" },
@@ -635,11 +626,7 @@ describe("S3-P05 #3312 — the DO-side audit sink covers every entry path (#3121
 
   it("A2A misses emit nothing", async () => {
     const audit = makeAuditCapture();
-    const { env } = makeEnv({ audit });
-    const agent = new ScheduledAgent(
-      makeCtx([testGoal()]) as never,
-      env as never,
-    );
+    const { agent } = await plantedAgent([testGoal()], { audit });
     const attribution = { caller: "a2a-credential:scheduled" };
     await agent.handleA2A(
       { operation: "scheduled.remove_goal", id: "nope" },

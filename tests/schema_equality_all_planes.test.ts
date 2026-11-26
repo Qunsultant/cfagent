@@ -117,9 +117,12 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // #6151 S4 adds migration 0087 (nav admin config: 3 tables + 1 index): d1 tables 108 → 111, d1 indexes 69 → 70.
     // #5160 adds migration 0088 (IDP attributes profile: lookup-index table + 1 unique index): d1 tables 108 → 109, d1 indexes 69 → 70.
     // #6102 adds migration 0089 (mas_events D1 table + 6 indexes): d1 tables 112 → 113, d1 indexes 71 → 77.
-    // Union: d1 [113, 77].
+    // #6503 adds migration 0092 (unified_schedules table + 3 indexes):
+    // d1 tables 113 → 114, d1 indexes 77 → 80. (The table already
+    // lived on the DO plane, so the union counts below do not move.)
+    // Union: d1 [114, 80].
     const counts: Record<string, [number, number]> = {
-      d1: [113, 77],
+      d1: [114, 80],
       do: [70, 41],
       orm: [13, 14],
       remainder: [19, 15],
@@ -137,17 +140,21 @@ describe("schema equality — all planes (#4282 P4)", () => {
     const { union, disagreements, overlapTables, overlapIndexes } =
       computeCombinedUnion();
     expect(disagreements).toEqual([]);
-    // 21 tables and 25 indexes appear in more than one plane; every
+    // 22 tables and 27 indexes appear in more than one plane; every
     // overlap agrees (the union absorbs column-set differences from
     // ALTER reconciliation — e.g. job_run_records gains broker_id /
     // data_provider_id / mode / mode_source from DO ALTERs).
     // #6102: mas_events now lives on both the d1 and orm planes, so
     // the table overlap grows by one: 20 → 21.
-    expect(overlapTables).toBe(21);
     // #6102: migration 0089's six mas_events indexes carry the same
     // names on the d1 plane as on the orm plane, so the index overlap
     // grows by six: 19 → 25.
-    expect(overlapIndexes).toBe(25);
+    // #6503: unified_schedules + its kind/state indexes now overlap
+    // d1 ∩ DO (the table + those indexes already lived on the DO
+    // plane; migration 0092 adds them to d1) — overlaps 21 → 22
+    // tables, 25 → 27 indexes. The created-ordering index is D1-only.
+    expect(overlapTables).toBe(22);
+    expect(overlapIndexes).toBe(27);
     expect(union).toEqual(combinedExpectedModel());
   });
 
@@ -159,9 +166,7 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(new Set(executedCodes).size).toBe(
       COMBINED_CATALOGUE_ENTRIES.length,
     );
-    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(525);    // Issue #6557 adds 6 entries (migration 0090's instance
-    // provenance ALTER, migration 0091's four record provenance ALTERs,
-    // and the DO remainder twin of the instance ALTER): 519 → 525.
+    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(535);    // #6503 adds migration 0092 (unified_schedules table + 3 indexes + 6 seeds): 525 → 535 entries.
     // Issue #6167 adds 1 entry (the host_version remainder ALTER
     // on mas_async_jobs): 452 → 453. Issue #5100 (F3 of #5094) adds 13:
     // 453 → 466 entries. Issue #5102 (F5 of #5094) adds 5 entries
@@ -226,7 +231,9 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // #6102 adds migration 0089 (mas_events D1 table + 6 indexes), each one statement:
     // 523 → 530 statements.
     // Issue #6557 adds 6 entries, each one statement: 530 → 536 statements.
-    expect(executedStatements).toBe(536);
+    // #6503 adds migration 0092 (unified_schedules table + 3 indexes + 6 seeds), each one statement:
+    // 536 → 546 statements.
+    expect(executedStatements).toBe(546);
     const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);

@@ -71,6 +71,9 @@ import { ScheduledTasksService } from "../src/services/scheduledTasks";
 import { runStorageRetention } from "../src/security/storageRetention";
 import { getStoredTokens } from "../src/security/etradeOAuth";
 import { resolveValidatedExecutionAccountContext } from "../src/services/accountBindings";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import type { UnifiedScheduleRecord } from "../src/data/unifiedSchedulePorts";
+import { createMemoryAuditStore } from "../src/security/iaaaAudit";
 import {
   handleSchedulesRoutes,
   type SchedulesRouteContext,
@@ -99,11 +102,19 @@ class SqliteTestStorage {
 
 const baseCtx = (
   overrides: Partial<SchedulesRouteContext> = {}
-): SchedulesRouteContext =>
-  ({
-    env: {},
+): SchedulesRouteContext => {
+  // Issue #6503 — the unified store is D1 only (fail-closed): the
+  // context carries a MockD1 AGENT_DB, stashed as __d1 so a test
+  // can seed stored rows into the same store the route reads.
+  const d1 = new MockD1Database();
+  const ctx = {
+    env: { AGENT_DB: d1 },
     agentCtx: { storage: { sql: new SqliteTestStorage() } },
     audit: vi.fn(),
+    // Issue #6503 step 9 (G2) — control ops audit-before-write
+    // through this store; without it the wired fallback (no
+    // SESSION_STORE in tests) blocks every mutation with 503.
+    auditStore: createMemoryAuditStore(),
     listSchedules: vi.fn(async () => []),
     cancelSchedule: vi.fn(async () => true),
     getScheduleById: vi.fn(async () => undefined),
@@ -116,7 +127,116 @@ const baseCtx = (
     creatableScheduleCallbacks: ["autonomousOptionsAnalysis", "autonomousMarketScreen"],
     accountScopedScheduleCallbacks: new Set(["autonomousOptionsAnalysis", "autonomousMarketScreen"]),
     ...overrides,
-  }) as unknown as SchedulesRouteContext;
+  } as unknown as SchedulesRouteContext;
+  (ctx as any).__d1 = d1;
+  return ctx;
+};
+
+/** The D1 store a baseCtx carries, for seeding stored rows in a test. */
+const d1Of = (ctx: SchedulesRouteContext): MockD1Database => (ctx as any).__d1;
+
+/** Minimal D1Database stand-in over node:sqlite (same as the #6503 repro). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: {
+                changes: info.changes,
+                last_row_id: info.lastInsertRowid,
+              },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+  async batch(statements: any[]) {
+    const results: any[] = [];
+    this.sqlite.exec("BEGIN");
+    try {
+      for (const stmt of statements) {
+        results.push(await stmt.run());
+      }
+      this.sqlite.exec("COMMIT");
+    } catch (err) {
+      this.sqlite.exec("ROLLBACK");
+      throw err;
+    }
+    return results;
+  }
+}
+
+const NOW = "2026-11-21T10:00:00.000Z";
+
+/** The six stored system rows (#6503), seeded PAUSED like the seed creates them. */
+const STORED_SYSTEM_IDS = [
+  "token-renewal",
+  "retention",
+  "nightly-research",
+  "sweep-stale-ledger-tasks",
+  "sweep-stale-async-jobs",
+  "schedule-watchdog",
+] as const;
+
+const SYSTEM_CALLBACKS: Record<string, string> = {
+  "token-renewal": "autoRenewETradeTokens",
+  retention: "retention",
+  "nightly-research": "runResearchSchedule",
+  "sweep-stale-ledger-tasks": "sweepStaleLedgerTasks",
+  "sweep-stale-async-jobs": "sweepStaleAsyncJobs",
+  "schedule-watchdog": "watchdogMissedSchedules",
+};
+
+function storedSystemRecord(id: (typeof STORED_SYSTEM_IDS)[number]): UnifiedScheduleRecord {
+  return {
+    id,
+    kind: "internal",
+    state: "paused",
+    callback: SYSTEM_CALLBACKS[id],
+    definition: {
+      type: "interval",
+      intervalSeconds: 2_592_000,
+      callback: SYSTEM_CALLBACKS[id],
+    } as unknown as UnifiedScheduleRecord["definition"],
+    ownerLogin: null,
+    provenance: { origin: "system", createdBy: "system", reason: id, createdAt: NOW },
+    alarmId: null,
+    pausedAt: NOW,
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
+}
+
+/** Seed the six stored rows and clear the migration-seeded goal rows (else exact counts break). */
+async function seedStoredSystemRows(d1: MockD1Database) {
+  const store = createD1UnifiedSchedulePorts({ d1: d1 as never }).unifiedSchedules;
+  for (const id of STORED_SYSTEM_IDS) {
+    await store.save(storedSystemRecord(id));
+  }
+  for (const goal of await store.listByKind("goal")) {
+    await store.remove(goal.id);
+  }
+}
 
 const req = (method: string, path: string, body?: unknown, headers?: Record<string, string>) =>
   new Request(`https://agent.internal${path}`, {
@@ -246,6 +366,7 @@ describe("schedules behavior (extraction #379)", () => {
     ];
     const listSchedules = vi.fn(async () => rows);
     const ctx = baseCtx({ listSchedules: listSchedules as any });
+    await seedStoredSystemRows(d1Of(ctx));
     const res = await handleSchedulesRoutes(req("GET", "/schedules?type=cron"), urlOf("/schedules?type=cron"), "/schedules", "s1", ctx);
     expect((res as Response).status).toBe(200);
     // The alarms port lists all; the type filter is applied by the
@@ -253,19 +374,25 @@ describe("schedules behavior (extraction #379)", () => {
     // cannot see) — so the port is called with no arguments.
     expect(listSchedules).toHaveBeenCalledWith();
     const body = await (res as Response).json();
-    // Issue #3121 #4239 — the derived token-renewal record is appended
-    // to the list (type "cron", so it survives the ?type=cron filter);
-    // the SDK-port rows stay first, the renewal row last.
-    // Issue #3121 #4240 — the derived retention record is appended
-    // after the renewal row (type "cron", same filter).
-    expect(body.count).toBe(8);
-    // Issue #3121 #4241 — the derived nightly research record is appended
-    // after the retention row.
-    // Issue #3121 #4242 — the three derived sweep/watchdog records are appended
-    // after the nightly research row, in duty order (ledger sweep, async-job
-    // sweep, watchdog).
-    expect(body.schedules.map((s: any) => s.id)).toEqual(["a", "b", "token-renewal", "retention", "nightly-research", "sweep-stale-ledger-tasks", "sweep-stale-async-jobs", "schedule-watchdog"]);
+    // Issue #6503 — the six system duties are stored rows now, type
+    // "interval", so they do NOT survive the ?type=cron filter;
+    // only the SDK-port cron rows do.
+    expect(body.count).toBe(2);
+    expect(body.schedules.map((s: any) => s.id)).toEqual(["a", "b"]);
     expect(body.schedules.every((s: any) => s.type === "cron")).toBe(true);
+    // Unfiltered, the stored six list after the SDK rows, in id order.
+    const all = await (await handleSchedulesRoutes(req("GET", "/schedules"), urlOf("/schedules"), "/schedules", "s1", ctx)).json();
+    expect(all.count).toBe(8);
+    expect(all.schedules.map((s: any) => s.id)).toEqual([
+      "a",
+      "b",
+      "nightly-research",
+      "retention",
+      "schedule-watchdog",
+      "sweep-stale-async-jobs",
+      "sweep-stale-ledger-tasks",
+      "token-renewal",
+    ]);
   });
 
   it("GET /schedules surfaces a listing failure as a 500, never an empty 200 (#108)", async () => {
@@ -281,17 +408,25 @@ describe("schedules behavior (extraction #379)", () => {
     const cancelSchedule = vi.fn(async () => true);
     const audit = vi.fn();
     const ctx = baseCtx({ cancelSchedule: cancelSchedule as any, audit: audit as any });
-    const res = await handleSchedulesRoutes(req("POST", "/schedules/cancel", { scheduleId: "sch-9" }), urlOf("/schedules/cancel"), "/schedules/cancel", "s1", ctx);
+    // Issue #6503 step 8 (G1) — cancel is a control op, so the
+    // fixture supplies a caller (no stored row exists for sch-9,
+    // so the gate abstains and the route answers its own 200).
+    const res = await handleSchedulesRoutes(req("POST", "/schedules/cancel", { scheduleId: "sch-9" }, { "x-user-login": "trader1" }), urlOf("/schedules/cancel"), "/schedules/cancel", "s1", ctx);
     expect((res as Response).status).toBe(200);
     expect(cancelSchedule).toHaveBeenCalledWith("sch-9");
-    expect(audit).toHaveBeenCalledWith("schedule.cancelled", "orchestrator", { scheduleId: "sch-9", success: true });
+    // Issue #6503 step 9 (G2) — the funnel event names the caller
+    // (trader1 resolves as a plain user: no alias KV in this ctx).
+    expect(audit).toHaveBeenCalledWith("schedule.cancelled", "orchestrator", { scheduleId: "sch-9", success: true, changedBy: "trader1", callerLevel: "user" });
     expect(await (res as Response).json()).toEqual({ scheduleId: "sch-9", cancelled: true });
   });
 
   it("DELETE /schedules/:id takes the id from the path", async () => {
     const cancelSchedule = vi.fn(async () => false);
     const ctx = baseCtx({ cancelSchedule: cancelSchedule as any });
-    const res = await handleSchedulesRoutes(req("DELETE", "/schedules/sch-7"), urlOf("/schedules/sch-7"), "/schedules/sch-7", "s1", ctx);
+    // Issue #6503 step 8 (G1) — cancel is a control op, so the
+    // fixture supplies a caller (no stored row exists for sch-7,
+    // so the gate abstains and the route answers its own 404).
+    const res = await handleSchedulesRoutes(req("DELETE", "/schedules/sch-7", undefined, { "x-user-login": "trader1" }), urlOf("/schedules/sch-7"), "/schedules/sch-7", "s1", ctx);
     // Issue #5891 — nothing is there to delete (no record, alarm
     // cancel false), so the route answers 404 naming the id, never
     // the silent 200 + cancelled:false.
@@ -304,7 +439,7 @@ describe("schedules behavior (extraction #379)", () => {
     // of the original code, pinned as-is). The fallback id names
     // nothing, so #5891 answers 404 for it too.
     cancelSchedule.mockClear();
-    const noId = await handleSchedulesRoutes(req("POST", "/schedules/cancel", {}), urlOf("/schedules/cancel"), "/schedules/cancel", "s1", ctx);
+    const noId = await handleSchedulesRoutes(req("POST", "/schedules/cancel", {}, { "x-user-login": "trader1" }), urlOf("/schedules/cancel"), "/schedules/cancel", "s1", ctx);
     expect((noId as Response).status).toBe(404);
     expect(cancelSchedule).toHaveBeenCalledWith("cancel");
   });

@@ -13,8 +13,8 @@
  * daily-defaults directive applied in the config; P08 pins that
  * every config cron is daily or less.
  *
- * Pinned behaviors (SQL-backed store — the branch where an empty
- * list re-seeds — plus the no-SQL KV fallback):
+ * Pinned behaviors (D1-backed store — the branch where an empty
+ * list re-seeds — plus the no-D1 fail-closed path, #6503):
  * - 4253-P01 fresh store seeds all nine goals from config, in
  *   config order, with config values.
  * - 4253-P02 a removed built-in goal is NOT re-seeded when the
@@ -26,15 +26,15 @@
  * - 4253-P05 the removal record is visible via
  *   listRemovedBuiltinGoalIds, and an explicit re-add clears it
  *   (so a later empty-store seed includes the goal again).
- * - 4253-P06 the no-SQL fallback seeds from config minus removed
- *   goals too.
+ * - 4253-P06 the no-D1 path fails closed (no KV fallback — #6503
+ *   step 6(f) deleted the "goals" KV fallback; the key is never
+ *   read or written).
  * - 4253-P07 the config port fails closed on an invalid goal
  *   definition (bad cron, non-positive budget, missing operation).
  * - 4253-P08 every config cron is daily or less (single minute +
  *   single hour fields — at most one firing per day).
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { DatabaseSync } from "node:sqlite";
 
 vi.mock("agents", () => ({
   routeAgentRequest: async () => null,
@@ -64,8 +64,8 @@ vi.mock("../src/security/etradeOAuth", () => ({
   isTokenExpiredEt: vi.fn(() => false),
 }));
 
-import type { SqlStorage } from "../src/orm";
-import { SqlUnifiedScheduleStore } from "../src/data/doSqliteUnifiedScheduleAdapter";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
 import {
@@ -73,22 +73,6 @@ import {
   setBuiltinScheduledGoals,
   isBuiltinScheduledGoalId,
 } from "../src/config/builtinScheduledGoals";
-
-/** node:sqlite double for the SqlStorage seam (same shape as #2964). */
-class SqliteTestStorage {
-  readonly sqlite = new DatabaseSync(":memory:");
-  get sql(): SqliteTestStorage {
-    return this;
-  }
-  exec(query: string, ...params: unknown[]): unknown[] {
-    const stmt = this.sqlite.prepare(query);
-    if (/^\s*(SELECT|PRAGMA)/i.test(query)) {
-      return stmt.all(...(params as never[])) as unknown[];
-    }
-    stmt.run(...(params as never[]));
-    return [];
-  }
-}
 
 function makeEnv() {
   return {
@@ -100,24 +84,32 @@ function makeEnv() {
   } as any;
 }
 
-/** A SQL-backed agent (ctx.storage.sql present → unified store). */
-function makeSqlAgent() {
-  const storage = new SqliteTestStorage();
+/** A D1-backed agent (AGENT_DB bound → the D1 unified store). */
+async function makeSqlAgent() {
+  const mockD1 = new MockD1Database();
   const kv = new Map<string, unknown>();
   const ctx = {
     storage: {
       get: async (k: string) => (kv.has(k) ? kv.get(k) : undefined),
       put: async (k: string, v: unknown) => void kv.set(k, v),
       delete: async (k: string) => void kv.delete(k),
-      sql: storage as never,
     },
   };
-  const agent = new (ScheduledAgent as any)(ctx, makeEnv());
-  const store = new SqlUnifiedScheduleStore(storage as never as SqlStorage);
+  const agent = new (ScheduledAgent as any)(ctx, { ...makeEnv(), AGENT_DB: mockD1 });
+  const store = createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules;
+  // #6503 — the first store op lazily ensures the schema and
+  // migration 0092's goals seed lands the 9 built-ins with frozen
+  // file values (one shared createdAt, so list order is id order).
+  // Clearing restores the empty store these tests mean by "fresh":
+  // the load rule then seeds from the LIVE config, in config order,
+  // and a config override takes effect (P04). The migration seed
+  // itself is pinned by tests/schedule_seed_catalogue_6503.test.ts.
+  await store.clear();
   return { agent, kv, store };
 }
 
-/** A no-SQL agent (no ctx.storage.sql → legacy "goals" KV key). */
+/** A no-D1 agent (no AGENT_DB bound → fail-closed; #6503 step 6(f)
+ * deleted the legacy "goals" KV fallback — the key is never read). */
 function makeKvAgent() {
   const kv = new Map<string, unknown>();
   const ctx = {
@@ -152,7 +144,7 @@ describe("built-in goals from config (#4253)", () => {
   it("4253-P01 fresh SQL store seeds all nine goals from config, in config order", async () => {
     const config = getBuiltinScheduledGoals();
     expect(config.map((g) => g.id)).toEqual([...BUILTIN_IDS]);
-    const { agent } = makeSqlAgent();
+    const { agent } = await makeSqlAgent();
     const seeded = await agent.listGoals();
     expect(seeded.map((g: any) => g.id)).toEqual(config.map((g) => g.id));
     const byId = new Map(seeded.map((g: any) => [g.id, g]));
@@ -173,7 +165,7 @@ describe("built-in goals from config (#4253)", () => {
   });
 
   it("4253-P02 a removed built-in is not re-seeded when the list empties", async () => {
-    const { agent, store } = makeSqlAgent();
+    const { agent, store } = await makeSqlAgent();
     const seeded = await agent.listGoals();
     expect(seeded).toHaveLength(9);
     expect(await agent.removeGoal("autopilot-monthly-evaluation")).toBe(true);
@@ -183,7 +175,7 @@ describe("built-in goals from config (#4253)", () => {
     // must stay gone.
     for (const goal of seeded) {
       if (goal.id === "autopilot-monthly-evaluation") continue;
-      store.remove(goal.id);
+      await store.remove(goal.id);
     }
     const after = await agent.listGoals();
     expect(after.map((g: any) => g.id)).not.toContain("autopilot-monthly-evaluation");
@@ -201,7 +193,7 @@ describe("built-in goals from config (#4253)", () => {
   });
 
   it("4253-P03 removing all nine leaves the list empty on re-read (no resurrection)", async () => {
-    const { agent } = makeSqlAgent();
+    const { agent } = await makeSqlAgent();
     const seeded = await agent.listGoals();
     expect(seeded).toHaveLength(9);
     for (const goal of seeded) {
@@ -220,7 +212,7 @@ describe("built-in goals from config (#4253)", () => {
         : goal,
     );
     setBuiltinScheduledGoals(changed);
-    const { agent } = makeSqlAgent();
+    const { agent } = await makeSqlAgent();
     const seeded = await agent.listGoals();
     expect(seeded.find((g: any) => g.id === "daily-qa-sweep")).toMatchObject({
       cron: "0 7 * * *",
@@ -229,7 +221,7 @@ describe("built-in goals from config (#4253)", () => {
     // The override is a seam for the config file: resetting it
     // restores the file values on a fresh store.
     setBuiltinScheduledGoals(null);
-    const { agent: fresh } = makeSqlAgent();
+    const { agent: fresh } = await makeSqlAgent();
     expect((await fresh.listGoals()).find((g: any) => g.id === "daily-qa-sweep")).toMatchObject({
       cron: "0 6 * * *",
       budgetCents: 500,
@@ -237,7 +229,7 @@ describe("built-in goals from config (#4253)", () => {
   });
 
   it("4253-P05 the removal record is visible, and an explicit re-add clears it", async () => {
-    const { agent, store } = makeSqlAgent();
+    const { agent, store } = await makeSqlAgent();
     const seeded = await agent.listGoals();
     expect(await agent.removeGoal("autopilot-monthly-evaluation")).toBe(true);
     expect(await agent.listRemovedBuiltinGoalIds()).toEqual(["autopilot-monthly-evaluation"]);
@@ -250,28 +242,23 @@ describe("built-in goals from config (#4253)", () => {
     expect(await agent.listRemovedBuiltinGoalIds()).toEqual([]);
     for (const goal of seeded) {
       if (goal.id === "autopilot-monthly-evaluation") continue;
-      store.remove(goal.id);
+      await store.remove(goal.id);
     }
-    store.remove("autopilot-monthly-evaluation");
+    await store.remove("autopilot-monthly-evaluation");
     const after = await agent.listGoals();
     expect(after.map((g: any) => g.id)).toContain("autopilot-monthly-evaluation");
     expect(after).toHaveLength(9);
   });
 
-  it("4253-P06 the no-SQL fallback seeds from config minus removed goals", async () => {
+  it("4253-P06 the no-D1 path fails closed (no KV fallback)", async () => {
+    // #6503 — step 6(f) deleted the KV fallback: without AGENT_DB
+    // the goals load throws instead of seeding from config, and the
+    // "goals" KV key is never read or written — even when planted.
     const { agent, kv } = makeKvAgent();
-    const seeded = await agent.listGoals();
-    expect(seeded.map((g: any) => g.id)).toEqual(
-      getBuiltinScheduledGoals().map((g) => g.id),
-    );
-    expect(await agent.removeGoal("autopilot-monthly-evaluation")).toBe(true);
-    expect(await agent.listGoals()).toHaveLength(8);
-    // Virgin-store shape: the "goals" key is gone entirely, so
-    // the next load seeds — from config, minus the removed goal.
-    kv.delete("goals");
-    const reseeded = await agent.listGoals();
-    expect(reseeded.map((g: any) => g.id)).not.toContain("autopilot-monthly-evaluation");
-    expect(reseeded).toHaveLength(8);
+    await expect(agent.listGoals()).rejects.toThrow(/AGENT_DB is not bound/);
+    expect(kv.has("goals")).toBe(false);
+    kv.set("goals", getBuiltinScheduledGoals());
+    await expect(agent.listGoals()).rejects.toThrow(/AGENT_DB is not bound/);
   });
 
   it("4253-P07 the config port fails closed on an invalid goal definition", () => {
@@ -335,16 +322,16 @@ describe("stale opportunity-hunt cron is reconciled once to the config value (#6
   });
 
   it("6293-C01 SQL store: a stored stale cron is reset to daily 07:00 and the row is corrected in place", async () => {
-    const { agent, store } = makeSqlAgent();
+    const { agent, store } = await makeSqlAgent();
     const seeded = goalToRecord(staleHunt() as never);
     seeded.createdAt = "2026-11-01T00:00:00.000Z";
     seeded.updatedAt = seeded.createdAt;
-    store.save(seeded);
+    await store.save(seeded);
     const goals = await agent.listGoals();
     expect(goals.find((g: any) => g.id === "opportunity-hunt")?.cron).toBe("0 7 * * *");
     // The correction is durable: the stored row carries the config
     // cron, with its createdAt preserved.
-    const row = store.get("opportunity-hunt");
+    const row = await store.get("opportunity-hunt");
     expect((row?.definition as any).cron).toBe("0 7 * * *");
     expect(row?.createdAt).toBe("2026-11-01T00:00:00.000Z");
     // A second read is a no-op: the value already equals config.
@@ -353,28 +340,32 @@ describe("stale opportunity-hunt cron is reconciled once to the config value (#6
     ).toBe("0 7 * * *");
   });
 
-  it("6293-C02 KV fallback: a stored stale cron is reset and the key re-written", async () => {
+  it("6293-C02 no D1 bound: a stale KV goal is never read (no KV fallback)", async () => {
+    // #6503 — the KV fallback is retired: without AGENT_DB the load
+    // fails closed and the "goals" key is never read, so a stale
+    // cron planted in KV is never reconciled.
     const { agent, kv } = makeKvAgent();
     kv.set("goals", [staleHunt()]);
-    const goals = await agent.listGoals();
-    expect(goals.find((g: any) => g.id === "opportunity-hunt")?.cron).toBe("0 7 * * *");
-    const persisted = kv.get("goals") as any[];
-    expect(persisted.find((g) => g.id === "opportunity-hunt")?.cron).toBe("0 7 * * *");
+    await expect(agent.listGoals()).rejects.toThrow(/AGENT_DB is not bound/);
+    expect((kv.get("goals") as any[]).find((g) => g.id === "opportunity-hunt")?.cron).toBe(
+      "0 */6 * * *",
+    );
   });
 
   it("6293-C03 an owner-edited cron is left untouched (SQL store)", async () => {
-    const { agent, store } = makeSqlAgent();
-    store.save(goalToRecord({ ...staleHunt(), cron: "0 8 * * *" } as never));
+    const { agent, store } = await makeSqlAgent();
+    await store.save(goalToRecord({ ...staleHunt(), cron: "0 8 * * *" } as never));
     const goals = await agent.listGoals();
     expect(goals.find((g: any) => g.id === "opportunity-hunt")?.cron).toBe("0 8 * * *");
-    expect((store.get("opportunity-hunt")?.definition as any).cron).toBe("0 8 * * *");
+    expect(((await store.get("opportunity-hunt"))?.definition as any).cron).toBe("0 8 * * *");
   });
 
-  it("6293-C04 an owner-edited cron is left untouched (KV fallback)", async () => {
+  it("6293-C04 no D1 bound: an owner-edited KV goal is never read (no KV fallback)", async () => {
+    // #6503 — same retired fallback as C02: without AGENT_DB the
+    // load fails closed; the KV-planted goal is never read.
     const { agent, kv } = makeKvAgent();
     kv.set("goals", [{ ...staleHunt(), cron: "0 8 * * *" }]);
-    const goals = await agent.listGoals();
-    expect(goals.find((g: any) => g.id === "opportunity-hunt")?.cron).toBe("0 8 * * *");
+    await expect(agent.listGoals()).rejects.toThrow(/AGENT_DB is not bound/);
     expect((kv.get("goals") as any[]).find((g) => g.id === "opportunity-hunt")?.cron).toBe(
       "0 8 * * *",
     );
@@ -384,17 +375,16 @@ describe("stale opportunity-hunt cron is reconciled once to the config value (#6
     // The id alone does not identify the shipped opportunity-hunt
     // goal: a stored goal that reuses the id with another operation
     // (a fixture running "search.query") keeps its step-hour cron.
-    const { agent: sqlAgent, store } = makeSqlAgent();
-    store.save(goalToRecord({ ...staleHunt(), operation: "search.query" } as never));
+    const { agent: sqlAgent, store } = await makeSqlAgent();
+    await store.save(goalToRecord({ ...staleHunt(), operation: "search.query" } as never));
     const sqlGoals = await sqlAgent.listGoals();
     expect(sqlGoals.find((g: any) => g.id === "opportunity-hunt")?.cron).toBe("0 */6 * * *");
-    expect((store.get("opportunity-hunt")?.definition as any).cron).toBe("0 */6 * * *");
+    expect(((await store.get("opportunity-hunt"))?.definition as any).cron).toBe("0 */6 * * *");
+    // #6503 — the KV half is retired with the fallback: without
+    // AGENT_DB the load fails closed and the KV-planted goal is
+    // never read.
     const { agent: kvAgent, kv } = makeKvAgent();
     kv.set("goals", [{ ...staleHunt(), operation: "search.query" }]);
-    const kvGoals = await kvAgent.listGoals();
-    expect(kvGoals.find((g: any) => g.id === "opportunity-hunt")?.cron).toBe("0 */6 * * *");
-    expect((kv.get("goals") as any[]).find((g) => g.id === "opportunity-hunt")?.cron).toBe(
-      "0 */6 * * *",
-    );
+    await expect(kvAgent.listGoals()).rejects.toThrow(/AGENT_DB is not bound/);
   });
 });

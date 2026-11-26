@@ -9,6 +9,62 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { handleSchedulesRoutes } from "../src/agents/routes/schedules";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import type { UnifiedScheduleRecord } from "../src/data/unifiedSchedulePorts";
+import { createMemoryAuditStore } from "../src/security/iaaaAudit";
+
+const NOW = "2026-11-12T00:00:00.000Z";
+
+/**
+ * Issue #6503 — the D1 seed mirroring the SDK-map seed below: the
+ * control routes resolve the stored record through the D1 store
+ * (and the step-8 gate authorizes the owner from it), so the
+ * fixture stores both jobs as active screen records owned by
+ * venus — the caller the execution context names.
+ */
+async function seedD1(mockD1: MockD1Database) {
+  const store = createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules;
+  const records: UnifiedScheduleRecord[] = [
+    {
+      id: "job-interval",
+      kind: "screen",
+      state: "active",
+      callback: "autonomousOptionsAnalysis",
+      definition: {
+        type: "interval",
+        intervalSeconds: 2_592_000,
+        callback: "autonomousOptionsAnalysis",
+        payload: { symbols: ["AAPL"], userLogin: "venus" },
+      },
+      ownerLogin: "venus",
+      provenance: { origin: "user", createdBy: "venus", reason: "job-interval", createdAt: NOW },
+      alarmId: "job-interval",
+      pausedAt: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    },
+    {
+      id: "job-cron",
+      kind: "screen",
+      state: "active",
+      callback: "autonomousMarketScreen",
+      definition: {
+        type: "cron",
+        cron: "5 * * * *",
+        callback: "autonomousMarketScreen",
+        payload: { universe: "SP500", userLogin: "venus" },
+      },
+      ownerLogin: "venus",
+      provenance: { origin: "user", createdBy: "venus", reason: "job-cron", createdAt: NOW },
+      alarmId: "job-cron",
+      pausedAt: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    },
+  ];
+  for (const record of records) await store.save(record);
+}
 
 interface FakeSchedule {
   id: string;
@@ -48,16 +104,26 @@ function seed() {
   });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   schedules = new Map();
   seq = 0;
   callbackRuns = [];
   sql = new MockSqlStorage();
   seed();
+  // Issue #6503 — the control plane reads the D1 store only: bind
+  // a MockD1Database as AGENT_DB (the step-7 fixture pattern) and
+  // seed the D1 rows above, or the fail-closed factory throws 500
+  // on every control/list call.
+  const mockD1 = new MockD1Database();
+  await seedD1(mockD1);
   ctx = {
-    env: {},
+    env: { AGENT_DB: mockD1 },
     agentCtx: { storage: { sql } },
     audit: vi.fn(),
+    // Issue #6503 step 9 (G2) — audit-before-write blocks every
+    // control op without a working audit store; the fixture
+    // carries the memory store (same pattern as the repro file).
+    auditStore: createMemoryAuditStore(),
     listSchedules: async () => [...schedules.values()],
     cancelSchedule: async (id: string) => schedules.delete(id),
     getScheduleById: async (id: string) => schedules.get(id),
@@ -240,11 +306,14 @@ describe("PUT /api/schedules/:id (#273)", () => {
 });
 
 describe("POST /api/schedules/:id/trigger (#273)", () => {
-  it("dispatches the job's callback with its payload plus a manual trigger mark", async () => {
+  it("dispatches the job's callback with its payload plus a triggered dispatch mark", async () => {
     const res = await call("POST", "/api/schedules/job-cron/trigger");
     expect(res?.status).toBe(200);
     expect(callbackRuns).toEqual([
-      { callback: "autonomousMarketScreen", payload: { universe: "SP500", userLogin: "venus", trigger: "manual", scheduleId: "job-cron" } },
+      // Issue #6503 — a Run-now click is a "triggered" dispatch
+      // (#5028/#3214), not a manual one; the route stamps
+      // trigger: "triggered" (see triggerUnifiedSchedule).
+      { callback: "autonomousMarketScreen", payload: { universe: "SP500", userLogin: "venus", trigger: "triggered", scheduleId: "job-cron" } },
     ]);
   });
 

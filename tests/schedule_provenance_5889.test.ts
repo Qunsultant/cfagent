@@ -21,20 +21,14 @@ import {
   ivHistoryCollectionToRecord,
   listUnifiedScheduleItems,
   nightlyResearchRecordToListItem,
-  nightlyResearchToRecord,
   resolveScheduleSource,
   retentionRecordToListItem,
-  retentionToRecord,
   scheduleWatchdogRecordToListItem,
-  scheduleWatchdogToRecord,
   staleAsyncJobSweepRecordToListItem,
-  staleAsyncJobSweepToRecord,
   staleLedgerSweepRecordToListItem,
-  staleLedgerSweepToRecord,
   tickerPushRecordToListItem,
   tickerPushScheduleToRecord,
   tokenRenewalRecordToListItem,
-  tokenRenewalToRecord,
   unifiedRecordToListItem,
   type ScheduleAlarmLike,
 } from "../src/services/unifiedScheduleManagement";
@@ -101,38 +95,89 @@ function alarmsPort(
   };
 }
 
-describe("5889 source derivation — derived records (#4238–#4242)", () => {
-  it("the token-renewal row is Derived, job token-renewal, system due-check origin", () => {
-    const item = tokenRenewalRecordToListItem(tokenRenewalToRecord(NOW_ISO));
-    expect(item.source?.kind).toBe("derived");
+describe("5889 source derivation — stored system records (#4239–#4242, #6503)", () => {
+  /** A stored system row, as the seed creates it (paused, monthly interval). */
+  function storedSystemRecord(
+    id: string,
+    callback: string,
+  ): UnifiedScheduleRecord {
+    return {
+      id,
+      kind: "internal",
+      state: "paused",
+      callback,
+      definition: {
+        type: "interval",
+        intervalSeconds: 2_592_000,
+        callback,
+      } as unknown as UnifiedScheduleRecord["definition"],
+      ownerLogin: null,
+      provenance: { origin: "system", createdBy: "system", reason: id, createdAt: NOW_ISO },
+      alarmId: null,
+      pausedAt: NOW_ISO,
+      createdAt: NOW_ISO,
+      updatedAt: NOW_ISO,
+    };
+  }
+
+  it("the token-renewal row is System, job token-renewal, system origin", () => {
+    const item = tokenRenewalRecordToListItem(
+      storedSystemRecord("token-renewal", "autoRenewETradeTokens"),
+    );
+    expect(item.source?.kind).toBe("system");
     expect(item.source?.job).toBe("token-renewal");
     expect(item.source?.origin).toMatch(/system/i);
     // The record's provenance rides the list item, not just the derivation.
     expect(item.provenance).toEqual(systemProvenance("token-renewal"));
   });
 
-  it("the retention row is Derived, job retention", () => {
-    const item = retentionRecordToListItem(retentionToRecord(NOW_ISO));
-    expect(item.source?.kind).toBe("derived");
+  it("the retention row is System, job retention", () => {
+    const item = retentionRecordToListItem(
+      storedSystemRecord("retention", "retention"),
+    );
+    expect(item.source?.kind).toBe("system");
     expect(item.source?.job).toBe("retention");
   });
 
-  it("the nightly-research row is Derived, job nightly-research", () => {
-    const item = nightlyResearchRecordToListItem(nightlyResearchToRecord(NOW_ISO));
-    expect(item.source?.kind).toBe("derived");
+  it("the nightly-research row is System, job nightly-research", () => {
+    const item = nightlyResearchRecordToListItem(
+      storedSystemRecord("nightly-research", "runResearchSchedule"),
+    );
+    expect(item.source?.kind).toBe("system");
     expect(item.source?.job).toBe("nightly-research");
   });
 
-  it("the three sweep/watchdog rows are Derived by record id", () => {
-    const ledger = staleLedgerSweepRecordToListItem(staleLedgerSweepToRecord(NOW_ISO));
-    expect(ledger.source).toMatchObject({ kind: "derived", job: "sweep-stale-ledger-tasks" });
-    const asyncJobs = staleAsyncJobSweepRecordToListItem(staleAsyncJobSweepToRecord(NOW_ISO));
-    expect(asyncJobs.source).toMatchObject({ kind: "derived", job: "sweep-stale-async-jobs" });
-    const watchdog = scheduleWatchdogRecordToListItem(scheduleWatchdogToRecord(NOW_ISO));
-    expect(watchdog.source).toMatchObject({ kind: "derived", job: "schedule-watchdog" });
+  it("the three sweep/watchdog rows are Sweep alarm by callback, not by record id", () => {
+    // The sweep-alarm rule precedes provenance: a stored sweep
+    // record resolves by its callback (the duty), with the
+    // OrchestratorAgent interval guard as its origin.
+    const ledger = staleLedgerSweepRecordToListItem(
+      storedSystemRecord("sweep-stale-ledger-tasks", "sweepStaleLedgerTasks"),
+    );
+    expect(ledger.source).toMatchObject({
+      kind: "sweep-alarm",
+      job: "sweepStaleLedgerTasks",
+      agent: "OrchestratorAgent",
+    });
+    const asyncJobs = staleAsyncJobSweepRecordToListItem(
+      storedSystemRecord("sweep-stale-async-jobs", "sweepStaleAsyncJobs"),
+    );
+    expect(asyncJobs.source).toMatchObject({
+      kind: "sweep-alarm",
+      job: "sweepStaleAsyncJobs",
+      agent: "OrchestratorAgent",
+    });
+    const watchdog = scheduleWatchdogRecordToListItem(
+      storedSystemRecord("schedule-watchdog", "watchdogMissedSchedules"),
+    );
+    expect(watchdog.source).toMatchObject({
+      kind: "sweep-alarm",
+      job: "watchdogMissedSchedules",
+      agent: "OrchestratorAgent",
+    });
   });
 
-  it("the IV collection row is Derived by its provenance reason, not its alarm id", () => {
+  it("the IV collection row is System by its provenance reason, not its alarm id", () => {
     const built = ivHistoryCollectionToRecord(
       {
         id: "iv-1",
@@ -145,7 +190,7 @@ describe("5889 source derivation — derived records (#4238–#4242)", () => {
       NOW_ISO,
     );
     const item = unifiedRecordToListItem(built);
-    expect(item.source?.kind).toBe("derived");
+    expect(item.source?.kind).toBe("system");
     expect(item.source?.job).toBe("iv-history-collection");
   });
 });
@@ -178,7 +223,7 @@ describe("5889 source derivation — alarms and records in the merged list", () 
     expect(items[0]?.source?.origin).toMatch(/OrchestratorAgent/);
   });
 
-  it("a sweep interval alarm is a Sweep alarm — the same job as the derived row, a different row", async () => {
+  it("a sweep interval alarm is a Sweep alarm — the same job as the stored row, a different row", async () => {
     const store = new InMemoryUnifiedScheduleStore();
     const port = alarmsPort({
       list: async () => [
@@ -193,8 +238,8 @@ describe("5889 source derivation — alarms and records in the merged list", () 
     });
     const items = await listUnifiedScheduleItems({ store, alarms: port });
     expect(items).toHaveLength(1);
-    // The job names the duty (the callback), never the derived
-    // record's id: this alarm is not the derived row.
+    // The job names the duty (the callback), never the stored
+    // record's id: this alarm is not the stored row.
     expect(items[0]?.source).toMatchObject({
       kind: "sweep-alarm",
       job: "sweepStaleLedgerTasks",
@@ -397,8 +442,8 @@ describe("5889 source filter vocabulary (src/config/scheduleSourceModes.ts)", ()
 
   it("the env seam narrows the buttons, never invents one", () => {
     expect(
-      resolveScheduleSourceFilters({ SCHEDULE_SOURCE_FILTERS: "derived,unknown" }),
-    ).toEqual(["all", "derived", "unknown"]);
+      resolveScheduleSourceFilters({ SCHEDULE_SOURCE_FILTERS: "seeded,unknown" }),
+    ).toEqual(["all", "seeded", "unknown"]);
     expect(resolveScheduleSourceFilters({ SCHEDULE_SOURCE_FILTERS: " , " })).toEqual(
       resolveScheduleSourceFilters(),
     );
@@ -406,8 +451,11 @@ describe("5889 source filter vocabulary (src/config/scheduleSourceModes.ts)", ()
 
   it("a missing source reads as Unknown for matching and display", () => {
     expect(scheduleSourceKindOf({} as never)).toBe("unknown");
+    // Issue #6503 step 14 — `derived` left the vocabulary: a legacy
+    // row that still names it reads as Unknown, never as a filter
+    // the home can no longer show.
     expect(scheduleSourceKindOf({ source: { kind: "derived", job: "x", origin: "y" } } as never)).toBe(
-      "derived",
+      "unknown",
     );
   });
 

@@ -12,8 +12,8 @@
  * Pins (5890-P01…P10):
  *  - P01 the job key: a declared task keys by taskId (never the
  *    scheduleHash — both declared tasks share one hash); a sweep /
- *    watchdog / derived duty keys by its derived-record catalogue id
- *    (live alarm and derived row share it); anything else keys by its
+ *    watchdog / stored system duty keys by its stored-record id
+ *    (live alarm and stored row share it); anything else keys by its
  *    own row id, so distinct user schedules never collapse.
  *  - P02 the list collapses duplicate live alarms for one declared
  *    task (same occurrence armed twice, and two occurrences) to one
@@ -25,8 +25,8 @@
  *    beside them wins, because the job is firing.
  *  - P05 the owner's paste shape: per-alarm paused records plus the
  *    canonical record collapse to one row per task.
- *  - P06 the derived sweep row and its live alarm are the same row,
- *    not two (derived record wins; one cadence sentence).
+ *  - P06 the stored sweep row and its live alarm are the same row,
+ *    not two (stored record wins; one cadence sentence).
  *  - P07 pause merges into the canonical record: pausing a declared
  *    task cancels EVERY live alarm for that task and stores under the
  *    taskId; a legacy per-alarm paused record is removed, not kept.
@@ -53,7 +53,6 @@ import {
   resumeUnifiedSchedule,
   scheduleJobKeyOf,
   staleLedgerSweepRecordToListItem,
-  staleLedgerSweepToRecord,
   supersededDeclaredTaskAlarmIds,
   type ScheduleAlarmLike,
 } from "../src/services/unifiedScheduleManagement";
@@ -183,11 +182,26 @@ describe("5890-P01 the job key", () => {
     expect(scheduleJobKeyOf(a)).not.toBe(scheduleJobKeyOf(declaredAlarm("other-1", TASK_B, SF_1)));
   });
 
-  it("a sweep alarm and its derived record share one key", () => {
+  it("a sweep alarm and its stored record share one key", () => {
     const alarmKey = scheduleJobKeyOf(sweepAlarm("sdk-1", "sweepStaleLedgerTasks", "venus"));
-    const recordKey = scheduleJobKeyOf(
-      staleLedgerSweepRecordToListItem(staleLedgerSweepToRecord(NOW_ISO)),
-    );
+    const stored: UnifiedScheduleRecord = {
+      id: "sweep-stale-ledger-tasks",
+      kind: "internal",
+      state: "paused",
+      callback: "sweepStaleLedgerTasks",
+      definition: {
+        type: "interval",
+        intervalSeconds: 2_592_000,
+        callback: "sweepStaleLedgerTasks",
+      } as unknown as UnifiedScheduleRecord["definition"],
+      ownerLogin: null,
+      provenance: { origin: "system", createdBy: "system", reason: "sweep-stale-ledger-tasks", createdAt: NOW_ISO },
+      alarmId: null,
+      pausedAt: NOW_ISO,
+      createdAt: NOW_ISO,
+      updatedAt: NOW_ISO,
+    };
+    const recordKey = scheduleJobKeyOf(staleLedgerSweepRecordToListItem(stored));
     expect(alarmKey).toBe("job:sweep-stale-ledger-tasks");
     expect(recordKey).toBe(alarmKey);
   });
@@ -302,9 +316,26 @@ describe("5890-P02/P03/P04/P05 the list collapses by job identity", () => {
   });
 });
 
-describe("5890-P06 the derived row and its live alarm are one row", () => {
-  it("collapses the derived sweep record and the live sweep alarm to the derived row", () => {
-    const derived = staleLedgerSweepRecordToListItem(staleLedgerSweepToRecord(NOW_ISO));
+describe("5890-P06 the stored row and its live alarm are one row", () => {
+  it("collapses the stored sweep record and the live sweep alarm to the stored row", () => {
+    const stored: UnifiedScheduleRecord = {
+      id: "sweep-stale-ledger-tasks",
+      kind: "internal",
+      state: "paused",
+      callback: "sweepStaleLedgerTasks",
+      definition: {
+        type: "interval",
+        intervalSeconds: 2_592_000,
+        callback: "sweepStaleLedgerTasks",
+      } as unknown as UnifiedScheduleRecord["definition"],
+      ownerLogin: null,
+      provenance: { origin: "system", createdBy: "system", reason: "sweep-stale-ledger-tasks", createdAt: NOW_ISO },
+      alarmId: null,
+      pausedAt: NOW_ISO,
+      createdAt: NOW_ISO,
+      updatedAt: NOW_ISO,
+    };
+    const storedItem = staleLedgerSweepRecordToListItem(stored);
     const live = {
       id: "sdk-sweep-1",
       kind: "screen",
@@ -322,12 +353,13 @@ describe("5890-P06 the derived row and its live alarm are one row", () => {
         agent: "OrchestratorAgent",
       },
     } as unknown as ReturnType<typeof staleLedgerSweepRecordToListItem>;
-    const collapsed = collapseScheduleListItems([live, derived]);
+    const collapsed = collapseScheduleListItems([live, storedItem]);
     expect(collapsed).toHaveLength(1);
-    // The derived record wins: one row, one cadence sentence.
+    // The stored record wins: one row, one cadence sentence.
     expect(collapsed[0]?.id).toBe("sweep-stale-ledger-tasks");
-    expect(collapsed[0]?.type).toBe("cron");
-    expect(collapsed[0]?.cron).toBe("0 */6 * * *");
+    expect(collapsed[0]?.type).toBe("interval");
+    expect(collapsed[0]?.intervalSeconds).toBe(2_592_000);
+    expect(collapsed[0]?.cron).toBeUndefined();
   });
 });
 

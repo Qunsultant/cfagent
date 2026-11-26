@@ -14,11 +14,12 @@
  * #359-08 caught a missing-return-null bug on exactly this); (d) the #308
  * canonical seam stays orchestrator-owned: runResearchAndPublish arrives
  * via the context and is invoked with identical arguments (trigger source +
- * userLogin); the scheduled-tick guard keeps its write-after-success
- * mas_settings semantics; (e) the research trigger imports
+ * userLogin); (e) the research trigger imports
  * (triggerManualResearch/triggerScheduledResearch, shouldFireResearchTick,
  * RESEARCH_SCHEDULED_LAST_RUN_KEY) moved WITH the blocks out of
- * orchestrator.ts.
+ * orchestrator.ts. Issue #6503 — the scheduled-tick route is retired:
+ * nightly research is a stored schedule now, so the tick tests below
+ * assert the path is no longer owned instead of its guard behavior.
  *
  * LANDMARK RULE (#405): position assertions anchor to DELEGATION CALLS or
  * own-domain markers, never to a neighboring domain's inline comments or
@@ -33,12 +34,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 
-vi.mock("../src/services/researchScheduleGuard", () => ({
-  shouldFireResearchTick: vi.fn(),
-  RESEARCH_SCHEDULED_LAST_RUN_KEY: "research:scheduled-last-run",
-}));
-
-import { shouldFireResearchTick } from "../src/services/researchScheduleGuard";
 import {
   handleScreenerResearchRoutes,
   type ScreenerResearchRouteContext,
@@ -104,7 +99,6 @@ describe("screener + research route inventory (extraction #378)", () => {
       'path.endsWith("/screener/report.pdf") && request.method === "GET"',
       'path.endsWith("/options/report.pdf") && request.method === "GET"',
       'path.endsWith("/research/run") && request.method === "POST"',
-      'path.endsWith("/research/scheduled-tick") && request.method === "POST"',
       'path.endsWith("/research/latest") && request.method === "GET"',
       'path.endsWith("/research/history") && request.method === "GET"',
       'path.endsWith("/research/settings") && request.method === "GET"',
@@ -256,45 +250,18 @@ describe("screener + research behavior (extraction #378)", () => {
     });
   });
 
-  it("POST /research/scheduled-tick skips without running when the guard says no", async () => {
-    (shouldFireResearchTick as any).mockReturnValue({ fire: false, reason: "already-ran", dateKey: "2026-10-19" });
+  it("POST /research/scheduled-tick is retired: the path is no longer owned", async () => {
     const runResearchAndPublish = vi.fn();
     const writeSetting = vi.fn();
     const ctx = baseCtx({ runResearchAndPublish: runResearchAndPublish as any, writeSetting });
-    // Issue #2327: the tick request carries the identity header
-    // server.ts asserts (the service identity); a header-less tick
-    // is refused 401 before the guard is ever consulted.
+    // Issue #6503 — nightly research is a real stored schedule now,
+    // fired through runResearchSchedule; the tick route is gone, so
+    // the handler returns null (the orchestrator keeps routing) and
+    // nothing runs and no guard marker is written.
     const res = await handleScreenerResearchRoutes(req("POST", "/research/scheduled-tick", undefined, { "x-user-login": "cronbot" }), urlOf("/research/scheduled-tick"), "/research/scheduled-tick", "s1", ctx);
-    const body = await (res as Response).json();
-    expect(body.skipped).toBe(true);
+    expect(res).toBeNull();
     expect(runResearchAndPublish).not.toHaveBeenCalled();
     expect(writeSetting).not.toHaveBeenCalled();
-  });
-
-  it("POST /research/scheduled-tick runs and writes the guard only after a successful run", async () => {
-    (shouldFireResearchTick as any).mockReturnValue({ fire: true, dateKey: "2026-10-19" });
-    const runResearchAndPublish = vi.fn(async () => ({ success: true }));
-    const writeSetting = vi.fn();
-    const ctx = baseCtx({ runResearchAndPublish: runResearchAndPublish as any, writeSetting });
-    const res = await handleScreenerResearchRoutes(
-      req("POST", "/research/scheduled-tick", undefined, { "x-user-login": "cronbot" }),
-      urlOf("/research/scheduled-tick"),
-      "/research/scheduled-tick",
-      "s1",
-      ctx
-    );
-    expect((res as Response).status).toBe(200);
-    expect(runResearchAndPublish).toHaveBeenCalledWith(
-      "scheduled",
-      "cronbot",
-      expect.objectContaining({
-        // Issue #6355 - feed/enrich now run, so the call carries them and stage.
-        feed: expect.objectContaining({ universe: "nasdaq100", quotes: [] }),
-        enrich: expect.objectContaining({ bySymbol: {} }),
-        stage: "analyze",
-      }),
-  );
-    expect(writeSetting).toHaveBeenCalledWith("research:scheduled-last-run", "2026-10-19");
   });
 
   it("GET /research/latest returns a null latest when no agent is configured", async () => {

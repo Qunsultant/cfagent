@@ -90,9 +90,11 @@ describe("scheduled-job outcome codes (#2037)", () => {
   // Adapted for #3527 S5: the dispatch-path set grew with the
   // vocabulary — both new POST paths are observed; the paged
   // manual backfill route is still NOT a scheduled dispatch.
-  it("matches only the five scheduled-job POST dispatches", () => {
+  // Issue #6503 — the research scheduled-tick left the set with
+  // the retired route: four dispatches remain.
+  it("matches only the four scheduled-job POST dispatches", () => {
     expect(isScheduledJobDispatchPath("/reflection/run", "POST")).toBe(true);
-    expect(isScheduledJobDispatchPath("/research/scheduled-tick", "POST")).toBe(true);
+    expect(isScheduledJobDispatchPath("/research/scheduled-tick", "POST")).toBe(false);
     expect(isScheduledJobDispatchPath("/adaptation/weights/run", "POST")).toBe(true);
     expect(isScheduledJobDispatchPath("/reflection/run", "GET")).toBe(false);
     expect(isScheduledJobDispatchPath("/knowledge/corpus-sync", "POST")).toBe(true);
@@ -334,7 +336,7 @@ describe("handler outcome audits (#2037 acceptance: a skip leaves a record)", ()
     }
   });
 
-  it("a research tick that does not fire audits a skipped outcome with its guard reason", async () => {
+  it("a retired research tick audits nothing: the route is not owned, so no outcome row is written", async () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-11-07T12:00:00.000Z")); // Saturday
@@ -366,18 +368,13 @@ describe("handler outcome audits (#2037 acceptance: a skip leaves a record)", ()
         "session",
         ctx,
       );
-      expect(res?.status).toBe(200);
-      const data = (await res!.json()) as Record<string, unknown>;
-      expect(data.skipped).toBe(true);
+      // Issue #6503 — the scheduled-tick route is retired: nightly
+      // research is a stored schedule now. The handler owns nothing
+      // at this path, so it returns null and no outcome row is
+      // written for a dispatch that never happened.
+      expect(res).toBeNull();
       const rows = await d1Store.findMany({ where: { type: SCHEDULED_JOB_OUTCOME_TYPE } });
-      expect(rows).toHaveLength(1);
-      const row = rows[0];
-      expect(row.type).toBe(SCHEDULED_JOB_OUTCOME_TYPE);
-      const payload = JSON.parse(row.payload as unknown as string) as Record<string, unknown>;
-      expect(payload.job).toBe("research");
-      expect(payload.outcome).toBe("skipped");
-      expect(payload.reason).toBe("weekend");
-      expect(payload.traceId).toBe(TRACE_ID);
+      expect(rows).toHaveLength(0);
     } finally {
       vi.useRealTimers();
     }
