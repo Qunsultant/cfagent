@@ -120,6 +120,8 @@ const REMAINDER_STATEMENT_SHA256 = {
   "schema.do.job_run_records.alter_table_add_column_binding_scope": "10ee9270fa4c4cc521f3e36ca20bf407c33bec9cbb589fd435e7e33bbe54ddfd",
   "schema.do.job_run_records.alter_table_add_column_binding_source": "f47ce60f3889252b513df0ba7addbcfde22046b2fb988f40b38765e69883ec57",
   "schema.do.job_pipeline_instances.alter_table_add_column_run_definition_version": "79adb986bb037badc60f653bce7f99084930e6fd05fac0da3d8f6e2e83da6719",
+  // Issue #6557 — the instance provenance carrier.
+  "schema.do.job_pipeline_instances.alter_table_add_column_run_provenance_json": "eb5ba21a46f94f1bc720aa051eaadb4eaf5c7b087fa392c59ff6275ea8fa0008",
   "schema.do.mas_async_jobs.alter_table_add_column_chain_id": "6ce7bfa86fd12746c47e09735e8ca618df98cef7542c8c9612c6bc490b1afdc1",
   "schema.do.mas_async_jobs.alter_table_add_column_tenant_id": "f4ce90ba9f7582002a6ca54d40a3dccbd340e77bb829294e09e770cb8175487d",
   "schema.do.mas_async_jobs.alter_table_add_column_attempts_json": "70d5184ee37c16118cc5e47be2cdf6b602c130b1ff0301545ac210765251c580",
@@ -473,15 +475,15 @@ const P3_DELEGATED_FILES = [
 ];
 
 describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)", () => {
-  it("catalogues all 85 remainder statements: 8 table + 2 index + 73 alter + 1 drop + 1 seed-form", () => {
+  it("catalogues all 86 remainder statements: 8 table + 2 index + 74 alter + 1 drop + 1 seed-form", () => {
     const catalogue = buildRemainderCatalogue();
     // Issue #6167 adds 1 probed DO ALTER (mas_async_jobs.host_version):
     // 64 → 65. Issue #5100 (F3 of #5094) adds 13 literal ALTERs: the
     // job_run_records binding columns (4), the mas_trades binding columns
     // (4), and the mas_policy_verdicts binding columns (5): 65 → 78.
-    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(85);
-    expect(catalogue.size()).toBe(85);
-    expect(catalogue.byKind("schema").length).toBe(84);
+    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(86);
+    expect(catalogue.size()).toBe(86);
+    expect(catalogue.byKind("schema").length).toBe(85);
 
     expect(catalogue.byKind("seed").length).toBe(1);
     const verbs = new Map<string, number>();
@@ -507,19 +509,19 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
     }
     expect(verbs.get("CREATE TABLE")).toBe(8);
     expect(verbs.get("CREATE INDEX")).toBe(2);
-    expect(verbs.get("ALTER TABLE")).toBe(73);
+    expect(verbs.get("ALTER TABLE")).toBe(74);
     expect(verbs.get("DROP INDEX")).toBe(1);
     expect(verbs.get("INSERT OR REPLACE")).toBe(1);
     expect(verbs.get("OTHER")).toBeUndefined();
     // Every code is unique and every entry is reachable by its code.
     const codes = new Set(REMAINDER_CATALOGUE_ENTRIES.map((e) => e.code));
-    expect(codes.size).toBe(85);
+    expect(codes.size).toBe(86);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       expect(catalogue.get(entry.code).statement).toBe(entry.statement);
     }
     // Planes: do 64, d1 1, orm 9, index 3, route 1.
     // Issue #6167 adds one probed DO ALTER (mas_async_jobs.host_version).
-    expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "do").length).toBe(71);
+    expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "do").length).toBe(72);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "d1").length).toBe(1);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "orm").length).toBe(9);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "index").length).toBe(3);
@@ -624,6 +626,15 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
       "schema.do.job_run_records.alter_table_add_column_account_id",
       "schema.do.job_run_records.alter_table_add_column_binding_scope",
       "schema.do.job_run_records.alter_table_add_column_binding_source",
+      // Issue #6557 — the instance provenance carrier exists in both
+      // catalogues (same ALTER text, D1 migration 0090 + DO probe), and
+      // the four #3655 record columns do too now (migration 0091 closed
+      // the D1 gap; the DO probe's ALTER text is identical).
+      "schema.do.job_pipeline_instances.alter_table_add_column_run_provenance_json",
+      "schema.do.job_run_records.alter_table_add_column_broker_id",
+      "schema.do.job_run_records.alter_table_add_column_data_provider_id",
+      "schema.do.job_run_records.alter_table_add_column_mode",
+      "schema.do.job_run_records.alter_table_add_column_mode_source",
     ]);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       if (crossPlane.has(entry.code)) continue;
@@ -632,7 +643,7 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
   });
 
   it("each entry's statement is byte-identical to the base (sha256 pin)", () => {
-    expect(Object.keys(REMAINDER_STATEMENT_SHA256).length).toBe(85);
+    expect(Object.keys(REMAINDER_STATEMENT_SHA256).length).toBe(86);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       const digest = createHash("sha256")
         .update(entry.statement, "utf8")

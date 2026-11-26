@@ -251,7 +251,8 @@
         "ALTER TABLE job_pipeline_instances ADD COLUMN run_workflow_instance_id TEXT",
         "ALTER TABLE job_pipeline_instances ADD COLUMN run_kind TEXT",
         "ALTER TABLE job_pipeline_instances ADD COLUMN run_origin_id TEXT",
-        "ALTER TABLE job_pipeline_instances ADD COLUMN run_definition_version INTEGER"
+        "ALTER TABLE job_pipeline_instances ADD COLUMN run_definition_version INTEGER",
+        "ALTER TABLE job_pipeline_instances ADD COLUMN run_provenance_json TEXT"
       ]
     },
     {

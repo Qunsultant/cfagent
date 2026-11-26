@@ -23,6 +23,7 @@ import {
   JOB_PIPELINE_DEFINITIONS_TABLE,
   JOB_PIPELINE_INSTANCES_TABLE,
   jobPipelineArtifactId,
+  parseRunProvenance,
   type JobDefinition,
   type JobInstanceRecord,
   type JobPipelineStores,
@@ -74,6 +75,9 @@ function instanceToRow(record: JobInstanceRecord): JobInstanceRow {
     runAsyncJobId: record.runAsyncJobId,
     runWorkflowInstanceId: record.runWorkflowInstanceId,
     runDefinitionVersion: record.runDefinitionVersion ?? null,
+    runProvenanceJson: record.runProvenance
+      ? JSON.stringify(record.runProvenance)
+      : null,
     checkpointJson: record.checkpoint ? JSON.stringify(record.checkpoint) : null,
     stageCheckpointJson: record.stageCheckpoint ? JSON.stringify(record.stageCheckpoint) : null,
     stageDesiredJson: record.stageDesired ? JSON.stringify(record.stageDesired) : null,
@@ -96,6 +100,7 @@ function rowToInstance(row: JobInstanceRow): JobInstanceRecord {
     runAsyncJobId: row.runAsyncJobId ?? null,
     runWorkflowInstanceId: row.runWorkflowInstanceId ?? null,
     runDefinitionVersion: row.runDefinitionVersion ?? null,
+    runProvenance: parseRunProvenance(row.runProvenanceJson),
     checkpoint: row.checkpointJson
       ? (JSON.parse(row.checkpointJson) as JobInstanceRecord["checkpoint"])
       : null,

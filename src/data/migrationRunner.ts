@@ -1516,6 +1516,33 @@ export const MIGRATION_0089_MAS_EVENTS: DataMigration = {
   name: "0089_mas_events",
   sql: d1MigrationSql(89),
 };
+/**
+ * Migration 0090 â€” run provenance on the instance (#6557). One nullable
+ * JSON column: the broker/provider/mode facts are stamped at dispatch from
+ * the firing schedule payload and read at settle, and the settle path can
+ * be a different process (resume, replay, a cancelled run settled by the
+ * control plane) â€” an in-memory pass would lose them exactly there.
+ * Its own migration because the job-pipeline store applies only this one
+ * (the 0075/0076 precedent: a shared migration altered a table the other
+ * store had not created yet).
+ */
+export const MIGRATION_0090_JOB_INSTANCE_RUN_PROVENANCE: DataMigration = {
+  version: 90,
+  name: "0090_job_instance_run_provenance",
+  sql: d1MigrationSql(90),
+};
+/**
+ * Migration 0091 â€” the four #3655 provenance fields on the D1 run record
+ * (#6557). The DO table has carried broker_id / data_provider_id / mode /
+ * mode_source since #3655 and the engine never had values to fill them;
+ * with the instance carrier in place, D1 gains the columns so both
+ * residencies record the same facts.
+ */
+export const MIGRATION_0091_JOB_RUN_RECORD_PROVENANCE: DataMigration = {
+  version: 91,
+  name: "0091_job_run_record_provenance",
+  sql: d1MigrationSql(91),
+};
 export const MIGRATION_0082_REFERRAL_TRIAL_EXTENSION: DataMigration = {
   version: 82,
   name: "0082_referral_trial_extension",
@@ -1792,6 +1819,8 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0087_NAV_ADMIN_CONFIG,
   MIGRATION_0088_IDP_ATTRIBUTES_PROFILE,
   MIGRATION_0089_MAS_EVENTS,
+  MIGRATION_0090_JOB_INSTANCE_RUN_PROVENANCE,
+  MIGRATION_0091_JOB_RUN_RECORD_PROVENANCE,
 ];
 
 function splitStatements(sqlText: string): string[] {

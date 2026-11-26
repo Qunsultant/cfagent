@@ -150,6 +150,14 @@ const INSTANCE: JobInstanceRecord = {
   // round-trip below proves the column carries it through every
   // residency.
   runDefinitionVersion: 3,
+  // Issue #6557 — the firing payload's provenance; the round-trip below
+  // proves the carrier survives every residency.
+  runProvenance: {
+    brokerId: "etrade",
+    dataProviderId: "etrade",
+    mode: "paper",
+    modeSource: "pin",
+  },
   checkpoint: {
     runId: "run-1",
     nodePath: "",

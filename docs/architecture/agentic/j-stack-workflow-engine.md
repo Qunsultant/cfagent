@@ -1200,22 +1200,25 @@ or duplicate the run (`src/services/jobPipelineEngine.ts:235-237`).
 
 `JobRunRecord` (`src/data/jobRunRecordPorts.ts:141`) carries the #3655
 provenance fields — `brokerId`, `dataProviderId`, `mode`,
-`modeSource` (pin / selection / inference) — stamped from the firing
-schedule payload at record creation. The D1-backed rows do not carry
-these fields yet (no migration adds the columns there); the DO-SQLite
-ledger is the surface that stores them. The engine itself never stamps
-them: there are zero `provenance` references and zero `audit`
-references in `src/services/jobPipelineEngine.ts`. Provenance is a
-writer concern (schedules, doors, hosts), and the engine stamping them
-is filed as #5491 (G4).
+`modeSource` (pin / selection / inference). Since #6557 the engine
+stamps them from the firing schedule payload: `runPipelineJobSchedule`
+parses the payload into the run's `JobRunProvenance` carrier, the
+dispatch persists it on the instance (`run_provenance_json`, D1
+migration 0090 / the DO probed ALTER), and `recordTerminal` reads the
+instance — so the facts survive a settle that runs in another process.
+The payload is the ONLY source (owner decision 2026-11-25): a manual,
+retried, replayed or re-run dispatch records explicit nulls, never an
+inferred broker. D1 stores them too now (migration 0091), so both
+residencies agree on the run's provenance.
 
 ### 3.14 Run records
 
 The terminal record is written by `recordTerminal`
 (`src/services/jobPipelineEngine.ts:2050-2101`): job id, operation,
 timestamps, outcome, trigger, schedule id, async-job id, workflow
-instance id, descriptor, artifact references, and the provenance
-fields (§3.13). The run-record store surface is `JobRunRecordStore`
+instance id, definition version, descriptor, artifact references, and
+the provenance fields (§3.13), read from the instance's dispatch
+stamp. The run-record store surface is `JobRunRecordStore`
 (`src/data/jobRunRecordPorts.ts:182`); the ScheduledAgent host wires a
 SQL-backed recorder (`jobRunRecorderFromStore`,
 `src/services/jobPipelineEngine.ts:194`). The terminal descriptor is

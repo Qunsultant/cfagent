@@ -29,9 +29,11 @@ import {
   type MigrationDb,
   MIGRATION_0074_JOB_PIPELINE_DEFINITION_VERSIONS,
   MIGRATION_0075_JOB_INSTANCE_DEFINITION_VERSION,
+  MIGRATION_0090_JOB_INSTANCE_RUN_PROVENANCE,
 } from "./migrationRunner";
 import {
   jobPipelineArtifactId,
+  parseRunProvenance,
   type JobDefinition,
   type JobInstanceRecord,
   type JobPipelineStores,
@@ -66,6 +68,7 @@ export async function ensureJobPipelineSchema(db: JobPipelineDb): Promise<number
     MIGRATION_0071_JOB_PIPELINE_RUN_KIND,
     MIGRATION_0074_JOB_PIPELINE_DEFINITION_VERSIONS,
     MIGRATION_0075_JOB_INSTANCE_DEFINITION_VERSION,
+    MIGRATION_0090_JOB_INSTANCE_RUN_PROVENANCE,
   ]);
 }
 
@@ -85,6 +88,9 @@ function instanceToRow(record: JobInstanceRecord): JobInstanceRow {
     runAsyncJobId: record.runAsyncJobId,
     runWorkflowInstanceId: record.runWorkflowInstanceId,
     runDefinitionVersion: record.runDefinitionVersion ?? null,
+    runProvenanceJson: record.runProvenance
+      ? JSON.stringify(record.runProvenance)
+      : null,
     checkpointJson: record.checkpoint ? JSON.stringify(record.checkpoint) : null,
     stageCheckpointJson: record.stageCheckpoint ? JSON.stringify(record.stageCheckpoint) : null,
     stageDesiredJson: record.stageDesired ? JSON.stringify(record.stageDesired) : null,
@@ -107,6 +113,7 @@ function rowToInstance(row: JobInstanceRow): JobInstanceRecord {
     runAsyncJobId: row.runAsyncJobId ?? null,
     runWorkflowInstanceId: row.runWorkflowInstanceId ?? null,
     runDefinitionVersion: row.runDefinitionVersion ?? null,
+    runProvenance: parseRunProvenance(row.runProvenanceJson),
     checkpoint: row.checkpointJson
       ? (JSON.parse(row.checkpointJson) as JobInstanceRecord["checkpoint"])
       : null,

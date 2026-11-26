@@ -31,6 +31,7 @@ import {
   JOB_PIPELINE_DEFINITIONS_TABLE,
   JOB_PIPELINE_INSTANCES_TABLE,
   jobPipelineArtifactId,
+  parseRunProvenance,
   type JobDefinition,
   type JobInstanceRecord,
   type JobPipelineStores,
@@ -75,6 +76,8 @@ export const JOB_PIPELINE_INSTANCE_COLUMNS: Record<keyof JobInstanceRow & string
   runAsyncJobId: "run_async_job_id",
   runWorkflowInstanceId: "run_workflow_instance_id",
   runDefinitionVersion: "run_definition_version",
+  // Issue #6557 â€” the provenance carrier (#6557).
+  runProvenanceJson: "run_provenance_json",
   checkpointJson: "checkpoint_json",
   stageCheckpointJson: "stage_checkpoint_json",
   stageDesiredJson: "stage_desired_json",
@@ -229,6 +232,9 @@ function instanceToRow(record: JobInstanceRecord): JobInstanceRow {
     runAsyncJobId: record.runAsyncJobId,
     runWorkflowInstanceId: record.runWorkflowInstanceId,
     runDefinitionVersion: record.runDefinitionVersion ?? null,
+    runProvenanceJson: record.runProvenance
+      ? JSON.stringify(record.runProvenance)
+      : null,
     checkpointJson: record.checkpoint ? JSON.stringify(record.checkpoint) : null,
     stageCheckpointJson: record.stageCheckpoint ? JSON.stringify(record.stageCheckpoint) : null,
     stageDesiredJson: record.stageDesired ? JSON.stringify(record.stageDesired) : null,
@@ -251,6 +257,7 @@ function rowToInstance(row: JobInstanceRow): JobInstanceRecord {
     runAsyncJobId: row.runAsyncJobId ?? null,
     runWorkflowInstanceId: row.runWorkflowInstanceId ?? null,
     runDefinitionVersion: row.runDefinitionVersion ?? null,
+    runProvenance: parseRunProvenance(row.runProvenanceJson),
     checkpoint: row.checkpointJson
       ? (JSON.parse(row.checkpointJson) as JobInstanceRecord["checkpoint"])
       : null,
@@ -335,6 +342,11 @@ export class DoSqliteJobPipelineStores implements JobPipelineStores {
     // dispatched with (same additive-column probe).
     if (!names.has("run_definition_version")) {
       this.sql.exec(remainderAlterSql("job_pipeline_instances", "run_definition_version"));
+    }
+    // Issue #6557 — `run_provenance_json`, the broker/provider/mode facts
+    // the firing schedule payload carried (same additive-column probe).
+    if (!names.has("run_provenance_json")) {
+      this.sql.exec(remainderAlterSql("job_pipeline_instances", "run_provenance_json"));
     }
   }
 

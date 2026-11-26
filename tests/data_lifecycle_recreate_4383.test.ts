@@ -409,12 +409,13 @@ describe("recreate, tenant scope (#4383)", () => {
     // skips five more: 13 → 18.
     // #6151 S4 adds migration 0087 (nav admin config: 3 tables + 1 index): 300 → 304.
     // #5160 adds migration 0088 (IDP attributes profile: rebuild + index table): 300 → 306.
-    // Union: 310.
+    // Issue #6557 adds 5 D1 provenance ALTERs: 310 → 315.
+    // Union: 315.
     // #6102 adds migration 0089 (mas_events D1 table + 6 indexes): the
     // projected-model walk already has them (the ORM CREATE carries
     // the table), so the D1 leg skips seven more: 18 → 25. Selected
     // stays 310.
-    expect(body.d1.selected).toHaveLength(310);
+    expect(body.d1.selected).toHaveLength(315);
     expect(body.d1.skipped).toHaveLength(25);
     // Two member instances (alice, bob), each planning the fresh DO leg.
     expect(body.instances).toHaveLength(2);
@@ -423,7 +424,7 @@ describe("recreate, tenant scope (#4383)", () => {
       // Issue #3185 adds the usage_events tenant index to the DO leg: 139 → 140.
       // Issue #6167 adds one probed DO ALTER (mas_async_jobs.host_version):
       // 140 → 141.
-      expect(inst.selected).toHaveLength(141);
+      expect(inst.selected).toHaveLength(142);
       // Issue #4623 adds one probed DO statement (mas_async_jobs.tenant_id).
       // Issue #3185 adds one probed DO statement (usage_events.tenant_id):
       // the fresh CREATE TABLE already carries the column, so the ALTER
@@ -516,8 +517,9 @@ describe("recreate, tenant scope (#4383)", () => {
     // adds 9 ALTERs (migration 0086): 291 → 300.
     // #6151 S4 adds migration 0087 (nav admin config: 3 tables + 1 index): 300 → 304.
     // #5160 adds migration 0088 (IDP attributes profile: rebuild + index table): 300 → 306.
-    // Union: 310.
-    expect(body.d1.report.executed).toHaveLength(310);
+    // Issue #6557 adds 5 D1 provenance ALTERs: 310 → 315.
+    // Union: 315.
+    expect(body.d1.report.executed).toHaveLength(315);
     expect(body.d1.verification.ok).toBe(true);
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {
@@ -526,7 +528,7 @@ describe("recreate, tenant scope (#4383)", () => {
       // Issue #3185 adds the usage_events tenant index to the DO leg: 139 → 140.
       // Issue #6167 adds one probed DO ALTER (mas_async_jobs.host_version):
       // 140 → 141.
-      expect(inst.report.executed).toHaveLength(141);
+      expect(inst.report.executed).toHaveLength(142);
       expect(inst.verification.ok).toBe(true);
     }
     expect(body.uncreatableLayers).toHaveLength(5);

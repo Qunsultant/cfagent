@@ -78,6 +78,7 @@ import type {
   JobInstanceRecord,
   JobNodeConfig,
   JobPipelineStores,
+  JobRunProvenance,
   JobRunState,
   JobScheduleConfig,
 } from "../data/jobPipelinePorts";
@@ -1226,7 +1227,7 @@ export class JobPipelineControl {
    */
   async runJob(
     jobId: string,
-    opts?: { trigger?: JobRunTrigger; kind?: JobRunKind; originRunId?: string | null; scopePath?: string; scheduleId?: string; asyncJobId?: string; workflowInstanceId?: string },
+    opts?: { trigger?: JobRunTrigger; kind?: JobRunKind; originRunId?: string | null; scopePath?: string; scheduleId?: string; asyncJobId?: string; workflowInstanceId?: string; provenance?: JobRunProvenance | null },
   ): Promise<JobDispatchResult> {
     const definition = await this.requireDefinition(jobId);
     return this.dispatchResolved(definition, opts ?? {});
@@ -1291,7 +1292,7 @@ export class JobPipelineControl {
    */
   private async dispatchResolved(
     definition: JobDefinition,
-    opts: { trigger?: JobRunTrigger; kind?: JobRunKind; originRunId?: string | null; scopePath?: string; scheduleId?: string; asyncJobId?: string; workflowInstanceId?: string },
+    opts: { trigger?: JobRunTrigger; kind?: JobRunKind; originRunId?: string | null; scopePath?: string; scheduleId?: string; asyncJobId?: string; workflowInstanceId?: string; provenance?: JobRunProvenance | null },
   ): Promise<JobDispatchResult> {
     const jobId = definition.jobId;
     const instance = await this.requireInstance(jobId);
@@ -1320,6 +1321,10 @@ export class JobPipelineControl {
       scheduleId: opts.scheduleId ?? null,
       asyncJobId: opts.asyncJobId ?? null,
       workflowInstanceId: opts.workflowInstanceId ?? null,
+      // Issue #6557 — the firing schedule payload's provenance, and only
+      // that: a manual, retried or re-run dispatch passes none and the
+      // run records explicit nulls.
+      provenance: opts.provenance ?? null,
       resuming: false,
     });
     this.inflight.set(runId, completion);
@@ -1753,6 +1758,7 @@ export class JobPipelineControl {
       runKind: null,
       runOriginId: null,
       runDefinitionVersion: null,
+      runProvenance: null,
       runScheduleId: null,
       runWorkflowInstanceId: null,
       lastError: null,
@@ -2773,6 +2779,7 @@ export class JobPipelineControl {
       runKind: null,
       runOriginId: null,
       runDefinitionVersion: null,
+      runProvenance: null,
       runScheduleId: null,
       runAsyncJobId: null,
       runWorkflowInstanceId: null,
@@ -2881,6 +2888,14 @@ export class JobPipelineControl {
       kind: normalizeJobRunKind(instance.runKind),
       originRunId: instance.runOriginId ?? null,
       definitionVersion: instance.runDefinitionVersion ?? null,
+      // Issue #6557 — the four #3655 provenance fields, from the instance
+      // carrier (stamped at dispatch from the firing schedule payload).
+      // Explicit nulls on every other dispatch: a manual, retried or
+      // replayed run never infers them.
+      brokerId: instance.runProvenance?.brokerId ?? null,
+      dataProviderId: instance.runProvenance?.dataProviderId ?? null,
+      mode: instance.runProvenance?.mode ?? null,
+      modeSource: instance.runProvenance?.modeSource ?? null,
       // Issue #3310 — the terminal record joins to the dispatching
       // schedule and to the workflow instance (the pipeline run IS
       // the workflow instance on the direct-execution firing path).
@@ -2995,6 +3010,12 @@ export class JobPipelineControl {
       scheduleId: string | null;
       asyncJobId: string | null;
       workflowInstanceId: string | null;
+      /**
+       * Issue #6557 — the dispatch's provenance carrier. Read only on a
+       * fresh dispatch; a resume keeps the instance's own (the payload
+       * that fired the run is still the run's fact).
+       */
+      provenance?: JobRunProvenance | null;
       resuming: boolean;
     },
   ): Promise<JobRunOutcome> {
@@ -3038,6 +3059,11 @@ export class JobPipelineControl {
       // instance, never the current pointer: a reconfigure during the run
       // must not change what the run records it used.
       runDefinitionVersion: definition.version,
+      // Issue #6557 — the payload provenance rides the instance from
+      // dispatch to settle. A resume keeps the run's own provenance: the
+      // firing payload is still the fact of the run it fired, and a
+      // resume never re-fires anything.
+      runProvenance: opts.resuming ? instance.runProvenance ?? null : opts.provenance ?? null,
       runScheduleId: opts.scheduleId,
       // Issue #4357 — the join key: the async job that dispatched
       // this run, persisted on the instance so the terminal record
