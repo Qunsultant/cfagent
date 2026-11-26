@@ -370,6 +370,7 @@ describe("S6-P07 retired-module determination: the #3123 renames", () => {
     walk("docs");
     expect(found.sort()).toEqual([
       "docs/compliance/anti-drift-controls.deprecated.md",
+      "src/agents/orchestrator/meshResearchDoor.deprecated.ts",
       "src/client/accountPanels.deprecated.css",
       "src/client/agenticWalletPanel.deprecated.css",
       "src/client/agentsPanel.deprecated.css",
