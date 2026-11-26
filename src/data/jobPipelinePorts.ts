@@ -177,6 +177,15 @@ export interface JobOutputsConfig {
 
 /** One configured step invocation: a name into the platform step library plus data. */
 export interface JobStepConfig {
+  /**
+   * Issue #6396 — the step's own retry bucket, when its retry economics differ
+   * from its stage's. A bucket name into the ONE pipeline policy
+   * (`RETRY_BUCKET_NAMES`), never a second list; absent ⇒ the stage's bucket,
+   * exactly as before. The analyze step is the case that proves it: retrying
+   * one cheap fetch and retrying a whole awaited agent turn are opposite
+   * economics inside one stage.
+   */
+  retry?: { bucket?: string };
   step: string;
   params?: Record<string, unknown>;
 }
