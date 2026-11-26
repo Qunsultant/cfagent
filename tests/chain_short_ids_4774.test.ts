@@ -323,7 +323,7 @@ describe("chain short ids (#4774)", () => {
     // mint a UUID; ledger rows carry their `id` PK. No instance level is
     // id-less.
     const engine = src("services/jobPipelineEngine.ts");
-    expect(engine).toContain('import { newRunId, stepExecutionId } from "./executionTreeIds"');
+    expect(engine).toContain('import { newRunId, runIdBody, stageIdBody, stepExecutionId } from "./executionTreeIds"');
     expect(engine).toContain("deps.newRunId ?? newRunId");
     expect(engine).not.toContain("`run:${this.now().getTime().toString(36)}-${(++counter).toString(36)}`");
     const research = src("services/researchPipeline.ts");
