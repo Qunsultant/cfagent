@@ -107,7 +107,7 @@ import type { JobStageEventRecord, JobStageEventStore } from "../data/jobStageEv
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 import { publishJobStatus, publishStageAction } from "./jobPipelineEvents";
-import { newRunId, stepExecutionId } from "./executionTreeIds";
+import { newRunId, runIdBody, stageIdBody, stepExecutionId } from "./executionTreeIds";
 import type { MessagePublisher, StageName } from "../messaging/messagingPorts";
 import {
   RETRY_BUCKET_NAMES,
@@ -1876,6 +1876,102 @@ export class JobPipelineControl {
         }`,
       );
     }
+    return { jobId, runId, state: "running" };
+  }
+
+  /**
+   * Issue #6395 — rewind a LIVE run to ONE named journal entry.
+   *
+   * This is the general form of `restartFromStage` (#6552): the platform
+   * journals every engine step under the name `stepExecutionId` computed, so
+   * "a journal entry" and "a step execution id" are the same name. Where
+   * #6552 derives that name from a stage's first step, this takes the entry
+   * an operator (or the checkpoint viewer, #6377) names.
+   *
+   * Addressability is checked against the run's OWN record, never guessed:
+   * the entry's run segment must be this run, and its stage segment must be
+   * one the run actually recorded in its stage checkpoint. A foreign or
+   * stale entry refuses by name rather than rewinding something else.
+   *
+   * The definition is the run's pinned version (#5278, reused through
+   * `pinnedRunDefinition`), so a rewind never executes today's configuration
+   * against a half-executed run. The restart event is published only after
+   * the platform accepts the rewind — an event that claims a restart which
+   * did not happen is worse than no event.
+   */
+  async restartFromJournalEntry(
+    jobId: string,
+    runId: string,
+    entryId: string,
+  ): Promise<JobDispatchResult> {
+    const instance = await this.requireInstance(jobId);
+    if (instance.state !== "running") {
+      throw new JobPipelineError(
+        "job_not_running",
+        `Job "${jobId}" is ${instance.state}; a platform restart rewinds a live run only.`,
+      );
+    }
+    this.assertRunAddressed(instance, runId);
+    // The entry's own construction is the first check: the id embeds the
+    // run's body (never another run's) — `step:<runBody>:<stage>:...`.
+    const runBody = runIdBody(runId);
+    const segments = entryId.split(":");
+    if (!entryId.startsWith(`step:${runBody}:`) || segments.length < 4) {
+      throw new JobPipelineError(
+        "journal_entry_not_addressed",
+        `Entry "${entryId}" is not a step of run "${runId}" of job "${jobId}"; a restart rewinds the run's own journal, never another run's.`,
+      );
+    }
+    // The named stage must be one this run recorded. The checkpoint is the
+    // run's own record of which stages it produced, so it is the authority
+    // here — not the current definition, which may have moved on.
+    const stageSegment = segments[2];
+    const ledger = await createJobPipelineStageCheckpointStore(
+      this.deps.stores.instances,
+      jobId,
+    ).read(runId);
+    const stageId = (ledger?.units ?? [])
+      .map((unit) => unit.stage)
+      .find((id) => (stageIdBody(id) || "root") === stageSegment);
+    if (!stageId) {
+      throw new JobPipelineError(
+        "journal_entry_not_addressed",
+        `Entry "${entryId}" names stage "${stageSegment}", which run "${runId}" of job "${jobId}" never recorded; the entry is not one of this run's journal entries.`,
+      );
+    }
+    // Issue #5278, reused: the run executes under the version it started
+    // with, and a missing or unresolvable version refuses by name.
+    await this.pinnedRunDefinition(jobId, instance);
+    const restart = this.deps.restartRun;
+    const workflowInstanceId = instance.runWorkflowInstanceId;
+    if (!restart || !workflowInstanceId) {
+      throw new JobPipelineError(
+        "stage_port_unavailable",
+        `Job "${jobId}" cannot be rewound to "${entryId}": ${
+          workflowInstanceId
+            ? "this host exposes no restart channel"
+            : "the run is not stamped to a workflow instance"
+        }.`,
+      );
+    }
+    try {
+      await restart({ jobId, runId, workflowInstanceId, fromStep: entryId });
+    } catch (error) {
+      throw new JobPipelineError(
+        "restart_rejected",
+        `The platform refused to rewind job "${jobId}" to "${entryId}": ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    await publishStageAction(this.deps.publisher, {
+      jobId,
+      runId,
+      stageId,
+      action: "restart",
+      at: this.iso(),
+      detail: entryId,
+    });
     return { jobId, runId, state: "running" };
   }
 

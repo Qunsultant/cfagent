@@ -84,6 +84,12 @@ export type JobPipelineErrorCode =
   // the "unaddressable" refusal: the target is now derived from the plan, so a
   // sharded or per-item stage is addressable by its first unit.
   | "stage_restart_rejected"
+  // Issue #6395 — a named journal entry that is not one of THIS run's
+  // entries (another run's id, or a stage the run never recorded), and a
+  // platform that rejected a rewind target. Both refuse by name: the engine
+  // never rewinds an entry it could not prove belongs to the run.
+  | "journal_entry_not_addressed"
+  | "restart_rejected"
   | "replay_pre_retention_run"
   | "replay_definition_version_unresolved"
   // Issue #5278 â€” the execution half: a resume/replay re-enters the run
