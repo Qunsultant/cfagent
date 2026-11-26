@@ -7,8 +7,8 @@
  * 21 operations (`src/orchestrate.ts`), the 9 seeded goals
  * (`config/builtin-scheduled-goals.json`), the 9 schedule kinds
  * (`src/config/scheduleListModes.ts` + `src/services/scheduleKinds.ts`),
- * and the worker-duty / derived registries
- * (`src/services/scheduleSystems.ts`, the #4237–#4242 derived
+ * and the worker-duty registry (`src/services/scheduleSystems.ts`,
+ * the #4237 ticker-push feed and the #4238–#4242 stored system
  * records). This module is the one reader for the one list:
  * `config/job-catalogue.json` — every schedulable job listed ONCE
  * with a stable unique id, its kind, its operation or callback, its
@@ -25,8 +25,9 @@
  * all read through here.
  *
  * One id per job: an operation job's id IS its operation, a callback
- * job's id IS its callback, a derived duty's id IS its stable record
- * id. The id resolution work is reused, not reinvented — a job's id
+ * job's id IS its callback, a stored system duty's id IS its stable
+ * record id (the ticker-push feed's id IS its stable record id too).
+ * The id resolution work is reused, not reinvented — a job's id
  * resolves through `declaredTaskIdOf` (a code-declared task is
  * identified by its TASK id), the record-id-is-list-id rule, and
  * `canonicalJson` dedupe; see `src/services/jobCatalogueResolution.ts`
@@ -102,6 +103,15 @@ export interface JobCatalogueEntry {
   operation?: string;
   callback?: string;
   defaultCron?: string;
+  /**
+   * Issue #6503 — the default interval cadence, in seconds, for a
+   * job whose stored timing is an interval rather than a cron. The
+   * seven stored system schedules carry 2,592,000s (monthly) here;
+   * a job carries either a defaultCron or a defaultIntervalSeconds,
+   * never both — the retired daily/15-minute crons were the old
+   * derived cadences, not the stored timing.
+   */
+  defaultIntervalSeconds?: number;
   defaultTimeZone?: string;
   formJob?: string;
   triggerRoute?: string;
@@ -326,6 +336,18 @@ export function validateJobCatalogue(value: unknown): JobCatalogueFile {
     if (job.defaultCron !== undefined) {
       if (typeof job.defaultCron !== "string" || !isValidCronShape(job.defaultCron)) {
         throw new Error(`job catalogue: job ${job.id} has an invalid cron`);
+      }
+    }
+    if (job.defaultIntervalSeconds !== undefined) {
+      if (
+        typeof job.defaultIntervalSeconds !== "number" ||
+        !Number.isSafeInteger(job.defaultIntervalSeconds) ||
+        job.defaultIntervalSeconds <= 0
+      ) {
+        throw new Error(`job catalogue: job ${job.id} has an invalid defaultIntervalSeconds`);
+      }
+      if (job.defaultCron !== undefined) {
+        throw new Error(`job catalogue: job ${job.id} carries both a defaultCron and a defaultIntervalSeconds`);
       }
     }
     if (job.defaultTimeZone !== undefined) {

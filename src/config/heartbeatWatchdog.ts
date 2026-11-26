@@ -33,17 +33,6 @@
  *   threshold would flag every healthy alarm as stale, so there is
  *   no disabling value — the watchdog is the ADR 0030 backstop and
  *   must not be silently switched off).
- *
- * HEARTBEAT_RENEWAL_DUE_HOUR_UTC / HEARTBEAT_RETENTION_DUE_HOUR_UTC
- * (non-secret, owner-set; this slice sets NO production value):
- *   The UTC hour after which the token-renewal / retention duty is
- *   due inside the one heartbeat tick (issue #4234 verdicts 2–3:
- *   the duties ride the tick as daily due-checks, never as separate
- *   crons). Built-in defaults: renewal 03:00 UTC (the old `0 3`
- *   cron's hour), retention 04:00 UTC (the old `0 4` cron's hour).
- *   A blank, unparseable, or out-of-range (not an integer hour
- *   0–23) value falls through to the default — the duties have no
- *   disabling value.
  */
 
 /** The watchdog's own Worker cron expression (ADR 0030: hourly). */
@@ -55,10 +44,21 @@ export const HEARTBEAT_ALARM_CALLBACK = "onCron";
 export const HEARTBEAT_INTERVAL_ENV_VAR = "HEARTBEAT_INTERVAL_SECONDS";
 export const HEARTBEAT_WATCHDOG_STALE_AFTER_ENV_VAR =
   "HEARTBEAT_WATCHDOG_STALE_AFTER_MINUTES";
-export const HEARTBEAT_RENEWAL_DUE_HOUR_ENV_VAR =
-  "HEARTBEAT_RENEWAL_DUE_HOUR_UTC";
-export const HEARTBEAT_RETENTION_DUE_HOUR_ENV_VAR =
-  "HEARTBEAT_RETENTION_DUE_HOUR_UTC";
+
+/**
+ * Issue #6503 step 13 — the heartbeat values are MANAGED settings,
+ * not env-only: mas_settings `schedule.heartbeatIntervalSeconds` /
+ * `schedule.heartbeatWatchdogStaleAfterMinutes`, settable from the
+ * schedules home. Precedence everywhere: managed > env carrier >
+ * default (1800s / 120 minutes). The env carriers and the defaults
+ * are unchanged; a managed value only wins, it never redefines
+ * what "no value" means (blank / unparseable / non-positive still
+ * falls through, exactly as the env resolvers have always done —
+ * there is no disabling value for either knob).
+ */
+export const HEARTBEAT_INTERVAL_SETTING_KEY = "schedule.heartbeatIntervalSeconds";
+export const HEARTBEAT_WATCHDOG_STALE_AFTER_SETTING_KEY =
+  "schedule.heartbeatWatchdogStaleAfterMinutes";
 
 /** The built-in default heartbeat interval: 30 minutes, in seconds. */
 export const DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 1800;
@@ -66,11 +66,89 @@ export const DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 1800;
 /** The built-in default staleness threshold: 120 minutes, in milliseconds. */
 export const DEFAULT_HEARTBEAT_WATCHDOG_STALE_AFTER_MS = 120 * 60 * 1000;
 
-/** The built-in default renewal due hour: 03:00 UTC (the old `0 3` cron's hour). */
-export const DEFAULT_HEARTBEAT_RENEWAL_DUE_HOUR_UTC = 3;
+/** The built-in default staleness threshold, in minutes (the managed/env unit). */
+export const DEFAULT_HEARTBEAT_WATCHDOG_STALE_AFTER_MINUTES = 120;
 
-/** The built-in default retention due hour: 04:00 UTC (the old `0 4` cron's hour). */
-export const DEFAULT_HEARTBEAT_RETENTION_DUE_HOUR_UTC = 4;
+/** Where the effective heartbeat value came from (named for the home + the audit trail). */
+export type HeartbeatWatchdogSource = "managed" | "env" | "default";
+
+/**
+ * Parse a heartbeat interval in seconds: a positive number, or
+ * undefined (blank, non-numeric, non-positive — falls through to
+ * the next source). Strings parse as numbers so managed settings
+ * (stored as text) resolve the same way as env carriers.
+ */
+export function parseHeartbeatIntervalSeconds(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value <= 0) return undefined;
+    return Math.floor(value);
+  }
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const seconds = Number(value.trim());
+  if (!Number.isFinite(seconds) || seconds <= 0) return undefined;
+  return Math.floor(seconds);
+}
+
+/**
+ * Parse a watchdog staleness threshold in minutes: a positive
+ * number, or undefined (blank, non-numeric, non-positive — falls
+ * through to the next source; a zero threshold would flag every
+ * healthy alarm as stale, so there is no disabling value).
+ */
+export function parseHeartbeatWatchdogStaleAfterMinutes(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value <= 0) return undefined;
+    return value;
+  }
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const minutes = Number(value.trim());
+  if (!Number.isFinite(minutes) || minutes <= 0) return undefined;
+  return minutes;
+}
+
+/** Resolve the heartbeat interval from already-read sources: managed > env > default (1800s). */
+export function resolveHeartbeatIntervalSecondsFrom(input: {
+  managed?: unknown;
+  env?: unknown;
+}): number {
+  return (
+    parseHeartbeatIntervalSeconds(input.managed) ??
+    parseHeartbeatIntervalSeconds(input.env) ??
+    DEFAULT_HEARTBEAT_INTERVAL_SECONDS
+  );
+}
+
+/** Name the winning heartbeat-interval source for the same inputs. */
+export function heartbeatIntervalSecondsSource(input: {
+  managed?: unknown;
+  env?: unknown;
+}): HeartbeatWatchdogSource {
+  if (parseHeartbeatIntervalSeconds(input.managed) !== undefined) return "managed";
+  if (parseHeartbeatIntervalSeconds(input.env) !== undefined) return "env";
+  return "default";
+}
+
+/** Resolve the staleness threshold in milliseconds from already-read sources: managed > env > default (120 min). */
+export function resolveHeartbeatWatchdogStaleAfterMsFrom(input: {
+  managed?: unknown;
+  env?: unknown;
+}): number {
+  const minutes =
+    parseHeartbeatWatchdogStaleAfterMinutes(input.managed) ??
+    parseHeartbeatWatchdogStaleAfterMinutes(input.env) ??
+    DEFAULT_HEARTBEAT_WATCHDOG_STALE_AFTER_MINUTES;
+  return Math.round(minutes * 60 * 1000);
+}
+
+/** Name the winning staleness-threshold source for the same inputs. */
+export function heartbeatWatchdogStaleAfterSource(input: {
+  managed?: unknown;
+  env?: unknown;
+}): HeartbeatWatchdogSource {
+  if (parseHeartbeatWatchdogStaleAfterMinutes(input.managed) !== undefined) return "managed";
+  if (parseHeartbeatWatchdogStaleAfterMinutes(input.env) !== undefined) return "env";
+  return "default";
+}
 
 /**
  * Resolvers take the env as a `Record<string, unknown>` (the
@@ -82,35 +160,27 @@ export const DEFAULT_HEARTBEAT_RETENTION_DUE_HOUR_UTC = 4;
 /**
  * Resolve the heartbeat alarm interval in seconds. Blank,
  * unparseable, or non-positive values fall through to the default.
+ * Issue #6503 step 13 — delegates to the managed-aware resolver
+ * with no managed value, so the env-only behavior is unchanged.
  */
 export function resolveHeartbeatIntervalSeconds(
   env: Record<string, unknown>,
 ): number {
-  const rawValue = env[HEARTBEAT_INTERVAL_ENV_VAR];
-  const raw =
-    typeof rawValue === "string" ? rawValue.trim() : "";
-  if (raw === "") return DEFAULT_HEARTBEAT_INTERVAL_SECONDS;
-  const seconds = Number(raw);
-  if (!Number.isFinite(seconds) || seconds <= 0)
-    return DEFAULT_HEARTBEAT_INTERVAL_SECONDS;
-  return Math.floor(seconds);
+  return resolveHeartbeatIntervalSecondsFrom({ env: env[HEARTBEAT_INTERVAL_ENV_VAR] });
 }
 
 /**
  * Resolve the watchdog staleness threshold in milliseconds. Blank,
  * unparseable, or non-positive values fall through to the default.
+ * Issue #6503 step 13 — delegates to the managed-aware resolver
+ * with no managed value, so the env-only behavior is unchanged.
  */
 export function resolveHeartbeatWatchdogStaleAfterMs(
   env: Record<string, unknown>,
 ): number {
-  const rawValue = env[HEARTBEAT_WATCHDOG_STALE_AFTER_ENV_VAR];
-  const raw =
-    typeof rawValue === "string" ? rawValue.trim() : "";
-  if (raw === "") return DEFAULT_HEARTBEAT_WATCHDOG_STALE_AFTER_MS;
-  const minutes = Number(raw);
-  if (!Number.isFinite(minutes) || minutes <= 0)
-    return DEFAULT_HEARTBEAT_WATCHDOG_STALE_AFTER_MS;
-  return Math.round(minutes * 60 * 1000);
+  return resolveHeartbeatWatchdogStaleAfterMsFrom({
+    env: env[HEARTBEAT_WATCHDOG_STALE_AFTER_ENV_VAR],
+  });
 }
 
 /** Both watchdog values, resolved together from one env read. */
@@ -128,62 +198,29 @@ export function resolveHeartbeatWatchdogConfig(
   };
 }
 
-/** Both due-check hours, resolved together from one env read. */
-export interface HeartbeatDueCheckConfig {
-  renewalDueHourUtc: number;
-  retentionDueHourUtc: number;
-}
-
-function resolveDueHourUtc(
-  env: Record<string, unknown>,
-  envVar: string,
-  fallback: number,
-): number {
-  const rawValue = env[envVar];
-  const raw = typeof rawValue === "string" ? rawValue.trim() : "";
-  if (raw === "") return fallback;
-  const hour = Number(raw);
-  if (!Number.isFinite(hour)) return fallback;
-  const floored = Math.floor(hour);
-  if (floored < 0 || floored > 23) return fallback;
-  return floored;
-}
-
 /**
- * Resolve the renewal due hour (UTC). Blank, unparseable, or
- * out-of-range (not an integer hour 0–23) values fall through to
- * the default.
+ * Issue #6503 step 13 — both watchdog values, resolved together
+ * from already-read sources: managed > env > default. The managed
+ * values are the mas_settings keys above, read by the caller (the
+ * schedules home); the env values are the raw carrier strings.
+ * This is also the step-12 staleness threshold's managed home: the
+ * outer observation's `staleAfterMs` is this same value.
  */
-export function resolveHeartbeatRenewalDueHourUtc(
-  env: Record<string, unknown>,
-): number {
-  return resolveDueHourUtc(
-    env,
-    HEARTBEAT_RENEWAL_DUE_HOUR_ENV_VAR,
-    DEFAULT_HEARTBEAT_RENEWAL_DUE_HOUR_UTC,
-  );
-}
-
-/**
- * Resolve the retention due hour (UTC). Blank, unparseable, or
- * out-of-range (not an integer hour 0–23) values fall through to
- * the default.
- */
-export function resolveHeartbeatRetentionDueHourUtc(
-  env: Record<string, unknown>,
-): number {
-  return resolveDueHourUtc(
-    env,
-    HEARTBEAT_RETENTION_DUE_HOUR_ENV_VAR,
-    DEFAULT_HEARTBEAT_RETENTION_DUE_HOUR_UTC,
-  );
-}
-
-export function resolveHeartbeatDueCheckConfig(
-  env: Record<string, unknown>,
-): HeartbeatDueCheckConfig {
+export function resolveHeartbeatWatchdogConfigFrom(input: {
+  managedIntervalSeconds?: unknown;
+  envIntervalSeconds?: unknown;
+  managedStaleAfterMinutes?: unknown;
+  envStaleAfterMinutes?: unknown;
+}): HeartbeatWatchdogConfig {
   return {
-    renewalDueHourUtc: resolveHeartbeatRenewalDueHourUtc(env),
-    retentionDueHourUtc: resolveHeartbeatRetentionDueHourUtc(env),
+    intervalSeconds: resolveHeartbeatIntervalSecondsFrom({
+      managed: input.managedIntervalSeconds,
+      env: input.envIntervalSeconds,
+    }),
+    staleAfterMs: resolveHeartbeatWatchdogStaleAfterMsFrom({
+      managed: input.managedStaleAfterMinutes,
+      env: input.envStaleAfterMinutes,
+    }),
   };
 }
+

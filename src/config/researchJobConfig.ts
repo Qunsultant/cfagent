@@ -460,8 +460,72 @@ function parseBoundedInt(
   return Math.min(max, Math.max(min, parsed));
 }
 
+/**
+ * Issue #6503 step 13 — the research fire hour is a MANAGED
+ * setting, not env-only: mas_settings `research.scheduleUtcHour`,
+ * settable through the schedules-home controls surface.
+ * Precedence: managed > env carrier (`RESEARCH_SCHEDULE_UTC_HOUR`,
+ * the pre-existing carrier) > default (21, the
+ * `DEFAULT_RESEARCH_JOB_CONFIG.scheduleUtcHour` literal,
+ * unchanged). A managed hour must be a whole UTC hour 0–23;
+ * anything else falls through to the env carrier, which keeps
+ * its existing clamping behavior (out-of-range clamps into 0–23,
+ * unparseable falls to the default) — the env leg is unchanged.
+ */
+export const RESEARCH_SCHEDULE_UTC_HOUR_ENV_VAR = "RESEARCH_SCHEDULE_UTC_HOUR";
+export const RESEARCH_SCHEDULE_UTC_HOUR_SETTING_KEY = "research.scheduleUtcHour";
+
+/** Where the effective research fire hour came from (named for the home + the audit trail). */
+export type ResearchScheduleUtcHourSource = "managed" | "env" | "default";
+
+/**
+ * Parse a research fire hour: a whole UTC hour 0–23, or undefined
+ * (blank, non-numeric, fractional, or out of range — falls through
+ * to the next source). Strings parse as numbers so managed settings
+ * (stored as text) resolve the same way as env carriers.
+ */
+export function parseResearchScheduleUtcHour(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && value >= 0 && value <= 23 ? value : undefined;
+  }
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const trimmed = value.trim();
+  if (!/^-?\d+$/.test(trimmed)) return undefined;
+  const parsed = Number(trimmed);
+  return Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= 23 ? parsed : undefined;
+}
+
+/**
+ * Resolve the research fire hour from already-read sources:
+ * managed > env (clamped into 0–23, as the env leg has always
+ * done) > default (21).
+ */
+export function resolveResearchScheduleUtcHour(input: {
+  managed?: unknown;
+  env?: unknown;
+}): number {
+  const managed = parseResearchScheduleUtcHour(input.managed);
+  if (managed !== undefined) return managed;
+  const envRaw = typeof input.env === "string" ? input.env : undefined;
+  return parseBoundedInt(envRaw, DEFAULT_RESEARCH_JOB_CONFIG.scheduleUtcHour, 0, 23);
+}
+
+/** Name the winning research fire hour source for the same inputs. */
+export function researchScheduleUtcHourSource(input: {
+  managed?: unknown;
+  env?: unknown;
+}): ResearchScheduleUtcHourSource {
+  if (parseResearchScheduleUtcHour(input.managed) !== undefined) return "managed";
+  const envRaw = typeof input.env === "string" ? input.env : undefined;
+  if (envRaw && envRaw.trim() && Number.isFinite(Number(envRaw.trim()))) return "env";
+  return "default";
+}
+
 export function resolveResearchJobConfig(
   env?: Record<string, string | undefined>,
+  // Issue #6503 step 13 — the optional managed overrides (already-read
+  // mas_settings values). Absent → the env/default behavior is unchanged.
+  managed?: { scheduleUtcHour?: unknown },
 ): ResearchJobConfig {
   const accountBindingType = env?.RESEARCH_ACCOUNT_BINDING_TYPE ?? DEFAULT_RESEARCH_JOB_CONFIG.accountBindingType;
   if (!(ACCOUNT_TYPES as readonly string[]).includes(accountBindingType)) {
@@ -474,12 +538,12 @@ export function resolveResearchJobConfig(
       5_000,
       600_000,
     ),
-    scheduleUtcHour: parseBoundedInt(
-      env?.RESEARCH_SCHEDULE_UTC_HOUR,
-      DEFAULT_RESEARCH_JOB_CONFIG.scheduleUtcHour,
-      0,
-      23,
-    ),
+    scheduleUtcHour: resolveResearchScheduleUtcHour({
+      // Issue #6503 step 13 — a managed hour wins over the env
+      // carrier; without one the env/default behavior is unchanged.
+      managed: managed?.scheduleUtcHour,
+      env: env?.RESEARCH_SCHEDULE_UTC_HOUR,
+    }),
     scheduleWindowMinutes: parseBoundedInt(
       env?.RESEARCH_SCHEDULE_WINDOW_MINUTES,
       DEFAULT_RESEARCH_JOB_CONFIG.scheduleWindowMinutes,

@@ -1543,6 +1543,31 @@ export const MIGRATION_0091_JOB_RUN_RECORD_PROVENANCE: DataMigration = {
   name: "0091_job_run_record_provenance",
   sql: d1MigrationSql(91),
 };
+/**
+ * Migration 0092 — D1 unified_schedules table + built-in-goals seed (#6503).
+ *
+ * The one unified schedule store moves to D1 (owner direction
+ * 2026-11-25: schedule data lives in D1 only — no DO fallback,
+ * fail-closed on an unbound AGENT_DB). The table mirrors the DO
+ * `unified_schedules` table column-for-column, plus the kind/state/
+ * created indexes, so the Drizzle mapping agrees with this DDL.
+ * NO rows are copied — D1 starts empty (NO-COPY owner direction
+ * 2026-11-25); the DO tables stop being written after the cutover
+ * and their rows are left untouched. The six system schedules are
+ * seeded fresh by the onStart reconcile
+ * (`reconcileSystemScheduleRecords`, the only path that knows a
+ * user for the per-user ledger sweep); the five catalogued system
+ * seed entries are Recreate steps (phase 3 of the Data Lifecycle
+ * Recreate flow, #4383), NOT migration-applied — a migration
+ * seed would plant them on the first store use, so a fresh store
+ * would never be empty (#6503 step 7). The built-in goals re-seed
+ * from config and ARE migration-applied, as before.
+ */
+export const MIGRATION_0092_UNIFIED_SCHEDULES_D1: DataMigration = {
+  version: 92,
+  name: "0092_unified_schedules_d1",
+  sql: d1MigrationSql(92),
+};
 export const MIGRATION_0082_REFERRAL_TRIAL_EXTENSION: DataMigration = {
   version: 82,
   name: "0082_referral_trial_extension",
@@ -1821,6 +1846,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0089_MAS_EVENTS,
   MIGRATION_0090_JOB_INSTANCE_RUN_PROVENANCE,
   MIGRATION_0091_JOB_RUN_RECORD_PROVENANCE,
+  MIGRATION_0092_UNIFIED_SCHEDULES_D1,
 ];
 
 function splitStatements(sqlText: string): string[] {

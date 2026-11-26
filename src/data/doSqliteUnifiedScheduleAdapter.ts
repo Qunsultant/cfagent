@@ -99,6 +99,13 @@ function rowToRecord(row: Record<string, unknown>): UnifiedScheduleRecord {
   };
 }
 
+/**
+ * Issue #6503 — the row mapping, shared with the D1 adapter: the D1
+ * table mirrors the DO table column-for-column, so one mapper reads
+ * both. The D1 adapter imports this; the mapping lives here, once.
+ */
+export const unifiedScheduleRowToRecord = rowToRecord;
+
 function getSync(sql: SqlStorage, id: string): UnifiedScheduleRecord | undefined {
   ensureTable(sql);
   const rows = Array.from(

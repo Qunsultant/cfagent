@@ -75,9 +75,9 @@ import {
 } from "../services/marketStream";
 import type { Env } from "../types";
 import { PortThink } from "../actors/thinkAdapter";
-import { createUnifiedSchedulePorts } from "../data/createUnifiedSchedulePorts";
+import { createD1UnifiedSchedulePorts } from "../data/createUnifiedSchedulePorts";
 import type {
-  SyncScheduleStore,
+  ScheduleStore,
   UnifiedScheduleRecord,
 } from "../data/unifiedSchedulePorts";
 import {
@@ -265,7 +265,9 @@ export class TickerAgent extends PortThink {
     try {
       // Issue #4352 — a paused feed is never armed, and a recorded cadence
       // outranks the deployment default.
-      const existing = this.tickerScheduleStore()?.get(TICKER_PUSH_RECORD_ID) ?? null;
+      const store = await this.tickerScheduleStore();
+      const existing =
+        (await store?.get(TICKER_PUSH_RECORD_ID)) ?? null;
       if (this.recordedPaused(existing)) {
         await this.recordTickerPush({ armed: false, paused: true });
         return;
@@ -291,19 +293,16 @@ export class TickerAgent extends PortThink {
   }
 
   /**
-   * The ticker's own unified-store instance (ADR 0029 D-0 — the
-   * record lives in the same DO as the mechanism), or null when this
-   * host has no DO SQLite (test doubles, non-SQL hosts). Never throws.
+   * The ticker's own unified-store instance (issue #6503 — the D1
+   * store now; the record lives in D1, not in this DO), or null
+   * when AGENT_DB is unbound (test doubles, hosts without a
+   * binding). Never throws.
    */
-  private tickerScheduleStore(): SyncScheduleStore | null {
+  private async tickerScheduleStore(): Promise<ScheduleStore | null> {
     try {
-      const storage = (
-        this as unknown as { ctx?: { storage?: { sql?: unknown } } }
-      ).ctx?.storage;
-      const sql = storage?.sql;
-      if (!sql) return null;
-      return createUnifiedSchedulePorts({ sql: sql as never })
-        .unifiedSchedulesSync;
+      const d1 = (this as unknown as { env?: Env }).env?.AGENT_DB;
+      if (!d1) return null;
+      return createD1UnifiedSchedulePorts({ d1 }).unifiedSchedules;
     } catch {
       return null;
     }
@@ -324,11 +323,11 @@ export class TickerAgent extends PortThink {
     intervalSeconds?: number;
   }): Promise<void> {
     try {
-      const store = this.tickerScheduleStore();
+      const store = await this.tickerScheduleStore();
       if (!store) return;
       const nowIso = new Date().toISOString();
-      const existing = store.get(TICKER_PUSH_RECORD_ID);
-      store.save(
+      const existing = await store.get(TICKER_PUSH_RECORD_ID);
+      await store.save(
         tickerPushScheduleToRecord(
           {
             intervalSeconds:
@@ -359,9 +358,9 @@ export class TickerAgent extends PortThink {
    */
   async getTickerPushRecord(): Promise<UnifiedScheduleRecord | null> {
     try {
-      const store = this.tickerScheduleStore();
+      const store = await this.tickerScheduleStore();
       if (!store) return null;
-      return store.get(TICKER_PUSH_RECORD_ID) ?? null;
+      return (await store.get(TICKER_PUSH_RECORD_ID)) ?? null;
     } catch {
       return null;
     }
@@ -509,6 +508,21 @@ export class TickerAgent extends PortThink {
 
   /** Scheduled tick push: one filtered frame per subscribed connection. */
   async pushTicks(): Promise<void> {
+    // Issue #6503 (G3) — a paused feed never pushes: the pause
+    // cancels the alarm, but a stale live alarm must not push ticks
+    // either. The stored record is the state (the arming path
+    // already refuses a paused feed, and both trigger routes refuse
+    // a paused feed before calling triggerTickerPush, so gating here
+    // cannot block an operator's explicit push). An unreadable
+    // store pushes: the gate never breaks the feed on a store it
+    // cannot read, the kill-switch precedent.
+    try {
+      const store = await this.tickerScheduleStore();
+      const existing = (await store?.get(TICKER_PUSH_RECORD_ID)) ?? null;
+      if (this.recordedPaused(existing)) return;
+    } catch {
+      // An unreadable store pushes (see above).
+    }
     const env = this.env as Env | undefined;
     const connections = this.listTickerConnections();
     if (connections !== null && connections.length === 0) {

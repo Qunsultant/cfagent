@@ -89,6 +89,22 @@ export function normalizeJobRunTrigger(value: unknown): JobRunTrigger {
 }
 
 /**
+ * Issue #6503 — attended vs unattended dispatch. The money gate
+ * (native + cfpay) may mint a checkout ONLY for a run a user
+ * initiated at submission: "manual" (UX one-off) and "triggered"
+ * (a scheduler Run-now click — the user is present and authorizing
+ * right now). "scheduled" (timer-fired), "copilot" and "autopilot"
+ * are unattended: coverage-only, never an unattended card charge.
+ * BUILD DECISION for Mars to confirm at the #6503 debrief: triggered
+ * rides the manual side, copilot/autopilot ride the scheduled side.
+ * One helper here, on the one definition — every gate and every
+ * submission branch asks this, never a local two-way comparison.
+ */
+export function isAttendedTrigger(trigger: JobRunTrigger): boolean {
+  return trigger === "manual" || trigger === "triggered";
+}
+
+/**
  * Issue #4767 — the run-kind vocabulary (user ruling 2026-11-18):
  * kind and trigger are TWO dimensions. The trigger says what
  * dispatched THIS execution; the kind says what this execution IS

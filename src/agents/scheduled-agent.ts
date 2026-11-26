@@ -55,10 +55,15 @@ import {
 import {
   buildJobRunRecord,
   normalizeJobRunRecord,
-  SCHEDULED_AGENT_JOB_RUN_CAP,
   type JobRunRecord,
 } from "../services/jobRunRecords";
 import { newRunId } from "../services/executionTreeIds";
+import {
+  GOAL_RUN_JOB_RUN_RECORD_CAP_ENV_VAR,
+  GOAL_RUN_TICK_HISTORY_CAP_ENV_VAR,
+  resolveGoalRunJobRunRecordCap,
+  resolveGoalRunTickHistoryCap,
+} from "../config/goalRunRetention";
 import { resolveMissedScheduleGraceMs } from "../config/missedScheduleAlert";
 import { HEARTBEAT_ALARM_CALLBACK } from "../config/heartbeatWatchdog";
 import {
@@ -94,28 +99,17 @@ import { SHARED_ORCHESTRATOR_INSTANCE, getServiceUserLogin } from "../security/s
 import { isPlatformServiceProvisioned } from "../security/serviceDispatch";
 import { sessionStore } from "../security/session";
 import { createKvMembershipStore } from "../security/iaaaMembershipStore";
-import { backgroundDispatchHeaders } from "../security/backgroundAttribution";
-import { renewAllStoredETradeTokens } from "../security/etradeOAuth";
-import { resolveHeartbeatDueCheckConfig } from "../config/heartbeatWatchdog";
 import { armHeartbeatAlarm, isHeartbeatAlarmTick } from "../services/heartbeatClock";
 import { dispatchTickRiders } from "../services/tickRiders";
-import {
-  RENEWAL_DISPATCH_CRON,
-  RETENTION_DISPATCH_CRON,
-  runHeartbeatDueChecks,
-} from "../services/heartbeatDueChecks";
-import {
-  runRenewTokensEntryPoint,
-  runRetentionEntryPoint,
-  type CronDispatchRecordInput,
-  type CronEntryPointDeps,
-} from "../services/consolidatedCronEntries";
 import {
   runAutopilotMonthlyEvaluation,
   type AutopilotMonthlyEvaluationResult,
 } from "../services/autopilotMonthlyEvaluation";
-import { SqlUnifiedScheduleStore } from "../data/doSqliteUnifiedScheduleAdapter";
-import type { UnifiedScheduleRecord } from "../data/unifiedSchedulePorts";
+import { createD1UnifiedSchedulePorts } from "../data/createUnifiedSchedulePorts";
+import type {
+  ScheduleStore,
+  UnifiedScheduleRecord,
+} from "../data/unifiedSchedulePorts";
 import { goalToRecord, isUnchangedGoalRecord, recordToGoal } from "../services/unifiedScheduleManagement";
 import {
   fetchLedgerRuns,
@@ -553,21 +547,15 @@ export class ScheduledAgent extends PortThink {
   private agenticLoopTurnQueue: Promise<void> = Promise.resolve();
 
   /**
-   * Issue #3121 Phase 2 (#3123) — the unified schedule store for
-   * this DO (DO SQLite `unified_schedules`), or null when the host
-   * has no SQL storage (tests / legacy hosts). A null store keeps
-   * the legacy KV behavior below — the store is never a new
-   * failure mode for a tick.
+   * Issue #6503 — the unified schedule store for this DO is D1 ONLY
+   * (owner direction 2026-11-25, FAIL CLOSED): built from the bound
+   * AGENT_DB, and it THROWS when the binding is absent — no DO
+   * fallback, no KV fallback. Deploy must bind AGENT_DB on this host.
+   * The DO `unified_schedules` table and the `"goals"` KV key are
+   * never read or written; D1 starts empty (NO-COPY).
    */
-  private unifiedScheduleStore(): SqlUnifiedScheduleStore | null {
-    const storage = this.ctx.storage as unknown as { sql?: unknown };
-    const sql = storage?.sql;
-    if (!sql) return null;
-    try {
-      return new SqlUnifiedScheduleStore(sql as never);
-    } catch {
-      return null;
-    }
+  private async unifiedScheduleStore(): Promise<ScheduleStore> {
+    return createD1UnifiedSchedulePorts({ d1: this.env.AGENT_DB }).unifiedSchedules;
   }
 
   /**
@@ -655,62 +643,32 @@ export class ScheduledAgent extends PortThink {
     goals: ScheduledGoal[];
     records: UnifiedScheduleRecord[];
   }> {
-    const store = this.unifiedScheduleStore();
-    if (!store) {
-      // No SQL storage: the `"goals"` KV key, unchanged.
-      const stored = await this.ctx.storage.get<ScheduledGoal[]>("goals");
-      if (!stored) {
-        // Issue #4253 — seed from the built-in goals config, minus
-        // goals the owner removed (the removal record survives a
-        // re-seed, so a removed goal never resurrects here either).
-        const seedable = await this.seedableBuiltinGoals();
-        await this.ctx.storage.put("goals", seedable);
-        return { goals: [...seedable], records: [] };
-      }
-      // Issue #6293 — one-time reconciliation of the stale
-      // opportunity-hunt cron (see reconcileStaleOpportunityHuntCron):
-      // the stored value is corrected to the config value and the KV
-      // key re-written, so the correction is durable.
-      if (this.reconcileStaleOpportunityHuntCron(stored)) {
-        await this.ctx.storage.put("goals", stored);
-      }
-      return { goals: stored, records: [] };
-    }
-    // One-way KV → store import: goals that only exist under the
-    // legacy key move into the unified store once, keyed by id; the
-    // store wins on conflict, and the key is never written again.
-    const stored = store.listByKind("goal");
+    const store = await this.unifiedScheduleStore();
+    // Issue #6503 — D1 ONLY: the DO `"goals"` KV key is never read and
+    // the one-way KV → store import is deleted (NO-COPY: D1 starts
+    // empty; user goals are recreatable through the goals UX).
+    const stored = await store.listByKind("goal");
+    // A `deleted`-state row is a tombstone, not a goal: it never
+    // appears in the goals list and never counts toward the seed rule.
     const goals = stored
+      .filter((record) => record.state !== "deleted")
       .map((record) => recordToGoal(record))
       .filter((goal): goal is ScheduledGoal => goal !== undefined);
     const records = [...stored];
-    const kvGoals = await this.ctx.storage
-      .get<ScheduledGoal[]>("goals")
-      .catch(() => undefined);
-    if (kvGoals && kvGoals.length > 0) {
-      const known = new Set(goals.map((goal) => goal.id));
-      for (const goal of kvGoals) {
-        if (!goal || typeof goal.id !== "string" || known.has(goal.id)) continue;
-        try {
-          const record = goalToRecord(goal);
-          store.save(record);
-          records.push(record);
-          goals.push(goal);
-          known.add(goal.id);
-        } catch {
-          // The KV key stays the read for this goal.
-        }
-      }
-    }
     if (goals.length === 0) {
-      // Seed rule, new home: the built-in goals config, only when
-      // empty — minus goals the owner removed (#4253). The removal
-      // record is the durable "never seed this goal" decision, so
-      // emptying the list (or a redeploy on an empty store) cannot
-      // resurrect a cancelled goal. Distinct created_at values (one
+      // Seed rule: the built-in goals config, only when no live goal
+      // exists — minus goals the owner removed. The removal record is
+      // the D1 `deleted` row (written by saveGoals on removal) plus
+      // the legacy `#4253` KV list (read-only: pre-cutover removals,
+      // whose ids have no D1 row yet). Distinct created_at values (one
       // second apart) preserve the seed order under the store's
       // created_at ordering.
-      const seedable = await this.seedableBuiltinGoals();
+      const deletedIds = new Set(
+        stored
+          .filter((record) => record.state === "deleted")
+          .map((record) => record.id),
+      );
+      const seedable = await this.seedableBuiltinGoals(deletedIds);
       const baseMs = Date.now();
       const seeded: UnifiedScheduleRecord[] = [];
       for (let i = 0; i < seedable.length; i++) {
@@ -719,7 +677,7 @@ export class ScheduledAgent extends PortThink {
           const record = goalToRecord(goal);
           record.createdAt = new Date(baseMs + i * 1000).toISOString();
           record.updatedAt = record.createdAt;
-          store.save(record);
+          await store.save(record);
           seeded.push(record);
         } catch {
           // Seed best-effort; the return below still serves the goals.
@@ -744,7 +702,7 @@ export class ScheduledAgent extends PortThink {
           records.push(record);
         }
         record.updatedAt = new Date().toISOString();
-        store.save(record);
+        await store.save(record);
       }
     }
     return { goals, records };
@@ -807,19 +765,31 @@ export class ScheduledAgent extends PortThink {
     goals: ScheduledGoal[],
     existing?: UnifiedScheduleRecord[],
   ): Promise<void> {
-    const store = this.unifiedScheduleStore();
-    if (!store) {
-      await this.ctx.storage.put("goals", goals);
-      return;
-    }
+    const store = await this.unifiedScheduleStore();
     const nowIso = new Date().toISOString();
-    const existingRecords = existing ?? store.listByKind("goal");
+    const existingRecords = existing ?? (await store.listByKind("goal"));
     const existingById = new Map(existingRecords.map((record) => [record.id, record]));
     const wanted = new Set(goals.map((goal) => goal.id));
     for (const record of existingRecords) {
       if (wanted.has(record.id)) continue;
+      // Issue #6503 — a `deleted` row is a tombstone: never hard-remove
+      // it in the sync loop, or the re-seed would resurrect the goal.
+      if (record.state === "deleted") continue;
+      // Issue #6503 — removing a built-in goal writes a `deleted`
+      // tombstone instead of a hard remove, so the seed rule (which
+      // subtracts `deleted` ids) never resurrects it. A user goal has
+      // no seed to resurrect it, so its row is removed as before.
+      if (isBuiltinScheduledGoalId(record.id)) {
+        try {
+          await store.save({ ...record, state: "deleted", updatedAt: nowIso });
+        } catch {
+          // A failed tombstone leaves the live row in place; the goal
+          // stays visible, so the failure is not silent.
+        }
+        continue;
+      }
       try {
-        store.remove(record.id);
+        await store.remove(record.id);
       } catch {
         // A failed remove leaves a stale row the next read still serves;
         // the goal is gone from the wanted set, so it is not re-added.
@@ -841,7 +811,7 @@ export class ScheduledAgent extends PortThink {
       if (prev && isUnchangedGoalRecord(prev, record)) continue;
       record.updatedAt = nowIso;
       try {
-        store.save(record);
+        await store.save(record);
         // Issue #4205 — the snapshot is the store's picture, so a
         // write refreshes it: a second save in the same flow (the
         // triggerGoal restore) compares against what the first save
@@ -862,6 +832,31 @@ export class ScheduledAgent extends PortThink {
     }
   }
 
+  /**
+   * Issue #6503 step 13 — the goal-run retention caps, resolved
+   * from this agent's env (the managed leg needs the cross-DO
+   * mirror follow-up: this agent's storage cannot see the
+   * orchestrator's mas_settings, so a managed
+   * `goalRun.jobRunRecordCap` / `goalRun.tickHistoryCap` does not
+   * reach the tick yet; env/default governs until then, exactly
+   * as today — 500 records / 50 ticks).
+   */
+  private jobRunRecordCap(): number {
+    return resolveGoalRunJobRunRecordCap({
+      env: (this.env as unknown as Record<string, unknown> | undefined)?.[
+        GOAL_RUN_JOB_RUN_RECORD_CAP_ENV_VAR
+      ],
+    });
+  }
+
+  private tickHistoryCap(): number {
+    return resolveGoalRunTickHistoryCap({
+      env: (this.env as unknown as Record<string, unknown> | undefined)?.[
+        GOAL_RUN_TICK_HISTORY_CAP_ENV_VAR
+      ],
+    });
+  }
+
   /** Recent cron ticks, newest first (capped). */
   private async getTicks(): Promise<ScheduleTick[]> {
     const stored = await this.ctx.storage.get<ScheduleTick[]>("tickHistory");
@@ -871,7 +866,7 @@ export class ScheduledAgent extends PortThink {
   private async recordTick(tick: ScheduleTick): Promise<void> {
     const history = await this.getTicks();
     history.unshift(tick);
-    await this.ctx.storage.put("tickHistory", history.slice(0, 50));
+    await this.ctx.storage.put("tickHistory", history.slice(0, this.tickHistoryCap()));
   }
 
   /**
@@ -895,9 +890,9 @@ export class ScheduledAgent extends PortThink {
     const legacy = await this.getKvJobRuns().catch(() => [] as JobRunRecord[]);
     const post = this.ledgerPost();
     if (!post) return legacy;
-    const shared = await fetchLedgerRuns(post, { limit: SCHEDULED_AGENT_JOB_RUN_CAP });
+    const shared = await fetchLedgerRuns(post, { limit: this.jobRunRecordCap() });
     if (!shared) return legacy;
-    return mergeLedgerRuns(shared, legacy).slice(0, SCHEDULED_AGENT_JOB_RUN_CAP);
+    return mergeLedgerRuns(shared, legacy).slice(0, this.jobRunRecordCap());
   }
 
   /**
@@ -941,7 +936,7 @@ export class ScheduledAgent extends PortThink {
       }
       const runs = await this.getKvJobRuns();
       runs.unshift(built);
-      await this.ctx.storage.put("jobRunRecords", runs.slice(0, SCHEDULED_AGENT_JOB_RUN_CAP));
+      await this.ctx.storage.put("jobRunRecords", runs.slice(0, this.jobRunRecordCap()));
       return true;
     } catch (err) {
       if (onRecordFailure) {
@@ -2196,7 +2191,29 @@ export class ScheduledAgent extends PortThink {
     // Issue #3121 Phase 2 (#3124) — single evaluation scan: the
     // tick evaluates from one load; the save step below reuses the
     // same snapshot instead of re-listing the store.
-    const { goals, records } = opts?.preloadedGoals ?? (await this.loadGoalRecords());
+    //
+    // Issue #6503 — the goal load is fail-closed: when AGENT_DB is
+    // not bound (or the D1 store is otherwise unreadable) the load
+    // throws. A tick that cannot load its goals refuses to run, but
+    // records the refusal as a tick error instead of crashing the
+    // alarm — every goal stays due and the failure is visible in
+    // the tick record.
+    let goals: ScheduledGoal[];
+    let records: UnifiedScheduleRecord[];
+    try {
+      ({ goals, records } =
+        opts?.preloadedGoals ?? (await this.loadGoalRecords()));
+    } catch (error) {
+      const detail = `Scheduled goals could not be loaded: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+      structuredLog.error("scheduledAgent.goals_load_failed", {
+        message: `[ScheduledAgent][onCron] ${detail}`,
+      });
+      tick.errors.push(detail);
+      await this.recordTick(tick);
+      return tick;
+    }
     // #1517: global-halt state for governed chain goals only; other
     // goals are unaffected. A supplied sql wins over a supplied flag
     // only when the flag is absent — an explicit halted:true is never
@@ -2236,7 +2253,12 @@ export class ScheduledAgent extends PortThink {
       if (!goal.enabled && !isForced) continue;
       tick.goalsEvaluated++;
 
-      if (!isForced && !isDue(goal.cron, goal.lastRun, now, goal.timeZone, { subDailyOptIn: goal.subDailyOptIn === true })) continue;
+      // Issue #6503 (G3) — the due-check itself enforces the stored
+      // state: `paused: !goal.enabled` makes isDue answer false for
+      // a paused row even if the `continue` above were ever
+      // bypassed. The goals are the D1 store's rows (recordToGoal
+      // maps state "paused" to enabled=false), never a cached copy.
+      if (!isForced && !isDue(goal.cron, goal.lastRun, now, goal.timeZone, { subDailyOptIn: goal.subDailyOptIn === true, paused: !goal.enabled })) continue;
 
       // Issue #2964: per-run record inputs for this firing. `started`
       // is captured before the branch; each terminal point records
@@ -3100,9 +3122,11 @@ export class ScheduledAgent extends PortThink {
 
   /**
    * Issue #4234 (ADR 0030) — the alarm tick's extra work: the six
-   * piggyback rider dispatches, then the daily due-checks (token
-   * renewal + retention). Runs after the goal tick records, so a
-   * failure here never un-records the tick.
+   * piggyback rider dispatches. Runs after the goal tick records, so a
+   * failure here never un-records the tick. Issue #6503 — the daily
+   * due-checks (token renewal + retention) are RETIRED: those duties
+   * are real stored schedules now, fired through their entry points
+   * when the stored schedule fires, never from this tick.
    */
   private async runAlarmTickWork(userLogin: string): Promise<void> {
     const env = this.env;
@@ -3121,171 +3145,21 @@ export class ScheduledAgent extends PortThink {
         await postSlackText({ post: fetchSlackPost, env, text });
       },
     });
-    const lastRenewalAtMs = await this.lastSuccessfulRunAtMs(
-      RENEWAL_DISPATCH_CRON,
-    );
-    const lastRetentionAtMs = await this.lastSuccessfulRunAtMs(
-      RETENTION_DISPATCH_CRON,
-    );
-    await runHeartbeatDueChecks({
-      now: () => new Date(),
-      lastRenewalAtMs,
-      lastRetentionAtMs,
-      config: resolveHeartbeatDueCheckConfig(env),
-      runRenewal: () =>
-        runRenewTokensEntryPoint(
-          this.alarmTickEntryPointDeps(
-            RENEWAL_DISPATCH_CRON,
-            "renewTokens",
-            userLogin,
-            true,
-          ),
-        ),
-      runRetention: () =>
-        runRetentionEntryPoint(
-          this.alarmTickEntryPointDeps(
-            RETENTION_DISPATCH_CRON,
-            "retention",
-            userLogin,
-            true,
-          ),
-        ),
-      logError: (...args: unknown[]) => {
-        structuredLog.error("scheduledAgent.heartbeat_due_check_error", {
-          message: args.map((arg) => String(arg)).join(" "),
-        });
-      },
-      logInfo: (...args: unknown[]) => {
-        structuredLog.info("scheduledAgent.heartbeat_due_check_info", {
-          message: args.map((arg) => String(arg)).join(" "),
-        });
-      },
-    });
-  }
-
-  /**
-   * Issue #4234 — the entry-point deps adapter for the alarm tick's
-   * due-check runs: the renewal/retention entry points run
-   * in-process here, with the same deps the Worker dispatcher
-   * builds (the Orchestrator stub, the record-route poster, the
-   * background headers) — one implementation of each duty, never a
-   * second. The gate already proved the service user provisioned,
-   * so the adapter takes it as given.
-   */
-  private alarmTickEntryPointDeps(
-    cron: string,
-    entryPoint: "renewTokens" | "retention",
-    userLogin: string,
-    serviceProvisioned: boolean,
-  ): CronEntryPointDeps {
-    const env = this.env;
-    const orchestrator = actorGateway.stub<DoStubLike>(
-      env.ORCHESTRATOR_AGENT,
-      SHARED_ORCHESTRATOR_INSTANCE,
-    );
-    const recordDispatch = async (
-      input: CronDispatchRecordInput,
-    ): Promise<void> => {
-      // The Worker's record poster, verbatim in shape: POST the
-      // record route via the shared Orchestrator stub, under the
-      // background headers. NEVER throws — a record failure is
-      // logged and resolved, so it can never fail the dispatch it
-      // records.
-      try {
-        const response = (await orchestrator.fetch(
-          new Request(
-            "https://agent.internal/schedules/record-cron-dispatch",
-            {
-              method: "POST",
-              headers: backgroundDispatchHeaders(userLogin),
-              body: JSON.stringify(input),
-            },
-          ),
-        )) as unknown as { status?: unknown };
-        if (
-          !response ||
-          typeof response.status !== "number" ||
-          response.status >= 400
-        ) {
-          structuredLog.error("scheduledAgent.alarm_tick_record_failed", {
-            entryPoint: input.entryPoint,
-            status:
-              typeof response?.status === "number"
-                ? response.status
-                : "unknown",
-            message: "the dispatch stands, the row is missing",
-          });
-        }
-      } catch (err) {
-        structuredLog.error("scheduledAgent.alarm_tick_record_failed", {
-          entryPoint: input.entryPoint,
-          error: err instanceof Error ? err.message : String(err),
-          message:
-            "record fetch failed; the dispatch stands, the row is missing",
-        });
-      }
-    };
-    return {
-      cron,
-      entryPoint,
-      serviceUserLogin: userLogin,
-      serviceProvisioned,
-      orchestrator,
-      scheduledAgent: {
-        onCron: () => this.onCron(),
-      },
-      renewTokens: renewAllStoredETradeTokens.bind(null, env),
-      createSink: () => createObservabilitySink(env),
-      slackPoster: async (text: string) => {
-        await postSlackText({ post: fetchSlackPost, env, text });
-      },
-      dispatchAndAwait: async (promise) => {
-        await promise;
-      },
-      recordDispatch,
-      now: () => new Date(),
-      logError: (...args: unknown[]) => {
-        structuredLog.error("scheduledAgent.alarm_tick_entry_point_error", {
-          message: args.map((arg) => String(arg)).join(" "),
-        });
-      },
-      logInfo: (...args: unknown[]) => {
-        structuredLog.info("scheduledAgent.alarm_tick_entry_point_info", {
-          message: args.map((arg) => String(arg)).join(" "),
-        });
-      },
-    };
-  }
-
-  /**
-   * Issue #4234 — the last SUCCESSFUL dispatch for one cron jobId
-   * (newest first), or null when it never ran. A failed dispatch
-   * leaves no successful row, so the duty stays due and retries on
-   * the next tick. A ledger read failure reads as never-ran (the
-   * merged read falls back to the legacy KV home, and an empty home
-   * is null) — fail-open toward running the duty.
-   */
-  private async lastSuccessfulRunAtMs(
-    jobId: string,
-  ): Promise<number | null> {
-    const runs = await this.listJobRuns(jobId, 50).catch(() => []);
-    const last = runs.find((run) => run.outcome === "success");
-    if (!last) return null;
-    const atMs = Date.parse(last.finished);
-    return Number.isFinite(atMs) ? atMs : null;
   }
 
   /**
    * Issue #4253 — the durable removal record for built-in goals.
    * Removing a built-in goal is an owner decision that must survive
-   * a re-seed and a redeploy, so the removed ids live under the
-   * `"removedBuiltinGoals"` KV key (the same storage both the SQL
-   * and the no-SQL load paths read), separate from the goal list
-   * itself: the list can empty without losing the decision. The
-   * seed rule (`seedableBuiltinGoals`) and the Seed-all button (via
-   * GET /api/schedule/builtin-goals) both subtract this list. An
-   * explicit re-add of the goal (addGoal) clears its entry, so the
-   * owner can always bring a goal back on purpose.
+   * a re-seed and a redeploy. Issue #6503 — the live record is the
+   * D1 `deleted` tombstone row (written by saveGoals on removal);
+   * this `\"removedBuiltinGoals\"` KV key is LEGACY-READ-ONLY: it
+   * guards pre-cutover removals, whose ids have no D1 row yet, and
+   * nothing writes it anymore (removeGoal no longer appends; addGoal
+   * still clears an entry on explicit re-add, so the owner can always
+   * bring a goal back on purpose). The seed rule
+   * (`seedableBuiltinGoals`) and the Seed-all button (via GET
+   * /api/schedule/builtin-goals) subtract this list plus the D1
+   * `deleted` ids.
    */
   private async getRemovedBuiltinGoalIds(): Promise<string[]> {
     const stored = await this.ctx.storage
@@ -3300,14 +3174,26 @@ export class ScheduledAgent extends PortThink {
   }
 
   /** The config's built-in goals minus the owner-removed ones: what a seed may plant. */
-  private async seedableBuiltinGoals(): Promise<ScheduledGoal[]> {
-    const removed = new Set(await this.getRemovedBuiltinGoalIds());
+  private async seedableBuiltinGoals(deletedIds?: Set<string>): Promise<ScheduledGoal[]> {
+    const removed = new Set([
+      ...(await this.getRemovedBuiltinGoalIds()),
+      ...(deletedIds ?? []),
+    ]);
     return getBuiltinScheduledGoals().filter((goal) => !removed.has(goal.id));
   }
 
   /** Owner-removed built-in goal ids, in removal order. */
   async listRemovedBuiltinGoalIds(): Promise<string[]> {
-    return this.getRemovedBuiltinGoalIds();
+    const kv = await this.getRemovedBuiltinGoalIds();
+    // Issue #6503 — the D1 `deleted` rows are the live removal record;
+    // the KV list is legacy (pre-cutover removals) and read-only.
+    const store = await this.unifiedScheduleStore();
+    const deleted = await store.listByState("deleted");
+    const ids = [...kv];
+    for (const record of deleted) {
+      if (record.kind === "goal" && !ids.includes(record.id)) ids.push(record.id);
+    }
+    return ids;
   }
 
   /** List all scheduled goals. */
@@ -3586,15 +3472,12 @@ export class ScheduledAgent extends PortThink {
     if (idx < 0) return false;
     goals.splice(idx, 1);
     await this.saveGoals(goals, records);
-    // Issue #4253 — removing a built-in goal is a durable owner
-    // decision: record it so the seed rule (and Seed-all) never
-    // resurrect it. Removing a user goal records nothing.
-    if (isBuiltinScheduledGoalId(id)) {
-      const removed = await this.getRemovedBuiltinGoalIds();
-      if (!removed.includes(id)) {
-        await this.setRemovedBuiltinGoalIds([...removed, id]);
-      }
-    }
+    // Issue #6503 — removing a built-in goal is a durable owner
+    // decision, recorded as a D1 `deleted` tombstone by saveGoals
+    // above — the seed rule subtracts `deleted` ids, so the goal never
+    // resurrects. The `#4253` KV list is legacy-read-only (pre-cutover
+    // removals); nothing writes it anymore. Removing a user goal
+    // records nothing.
     // Issue #3121 S3 (#3312) — only an actual removal is a
     // lifecycle event; a miss is a state answer, not an event.
     await this.auditGoalLifecycle("schedule.goal.removed", id, undefined, actor);

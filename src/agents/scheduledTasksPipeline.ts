@@ -36,7 +36,7 @@
  */
 import type { AgentContext } from "agents";
 import type { SqlStorage } from "../orm";
-import { createUnifiedSchedulePorts } from "../data/createUnifiedSchedulePorts";
+import { createD1UnifiedSchedulePorts } from "../data/createUnifiedSchedulePorts";
 import { filterUndeclaredTasks } from "../services/unifiedScheduleManagement";
 import type {
   ThinkScheduledTasks,
@@ -991,9 +991,11 @@ export async function declarePipelineTasks(
   }
   // Issue #4351 — one declaration filter for every declarer: a pipeline task the
   // user paused or deleted is not declared, so Think cancels its schedule and
-  // never arms it again. The store is this host's own (the ScheduledAgent DO),
-  // which is where the pause/delete record lands.
-  const { unifiedSchedules } = createUnifiedSchedulePorts({ sql });
+  // never arms it again. The store is the D1 unified store (#6503);
+  // with no AGENT_DB binding the filter declares as before.
+  const d1 = ctx.env.AGENT_DB;
+  if (!d1) return declared;
+  const { unifiedSchedules } = createD1UnifiedSchedulePorts({ d1 });
   return filterUndeclaredTasks(unifiedSchedules, declared);
 }
 

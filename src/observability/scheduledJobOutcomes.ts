@@ -98,11 +98,14 @@ function isScheduledJobOutcome(
 }
 
 /**
- * The five scheduled-job dispatches, by DO route path. Only these
+ * The four scheduled-job dispatches, by DO route path. Only these
  * ride the onRequest-tail observability wrap: wrapping every DO
  * route would multiply AE volume for all API traffic. The corpus
  * sync and the reports sweep joined the set in #3527 S5; the
  * paged manual backfill route is deliberately NOT a dispatch.
+ * Issue #6503 — the research scheduled-tick left the set with the
+ * retired route: nightly research is a stored schedule now, not a
+ * rider dispatch.
  */
 export function isScheduledJobDispatchPath(
   path: string,
@@ -111,7 +114,6 @@ export function isScheduledJobDispatchPath(
   if (method !== "POST") return false;
   return (
     path.endsWith("/reflection/run") ||
-    path.endsWith("/research/scheduled-tick") ||
     path.endsWith("/adaptation/weights/run") ||
     path.endsWith("/knowledge/corpus-sync") ||
     path.endsWith("/trading/reports/index-backfill-sweep")
