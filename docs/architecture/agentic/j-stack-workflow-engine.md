@@ -1149,6 +1149,14 @@ never pass a policy — operator control of retry budgets is filed as
 (`src/services/resilience.ts:37`) without an injected RNG, so it uses
 `Math.random` — a determinism gap filed as #5280.
 
+**Per-step retry (#6396).** Retry is per-node by default, and a step now
+overrides it: `JobStepConfig.retry.bucket` names a bucket from the ONE policy
+list (`RETRY_BUCKET_NAMES`), validated at define — an unknown name refuses by
+name rather than falling back. The retry loop honours the FAILING step's
+bucket when it declared one, and the stage's exactly as before when it did
+not, so a cheap fetch and an awaited agent turn can hold opposite budgets
+inside one stage.
+
 **Stuck units are detected and reaped (#3954).** A unit that starts and never
 progresses used to be invisible: the per-unit `timeoutMs` race only fires for
 work still awaited, and the stale-running sweep lived on the async-jobs side.

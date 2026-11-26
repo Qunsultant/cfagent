@@ -77,6 +77,7 @@ import type {
   JobExecutionMode,
   JobInstanceRecord,
   JobNodeConfig,
+  JobStepConfig,
   JobPipelineStores,
   JobRunProvenance,
   JobRunState,
@@ -814,6 +815,12 @@ interface RunContext {
   ledger: StageRunnerCheckpoint;
   checkpoints: StageCheckpointStore;
   memory: Map<string, unknown>;
+  /**
+   * Issue #6396 — the index of the last step that STARTED in this unit. The
+   * retry loop reads it to attribute a failure to a step and honour that
+   * step's own retry bucket; absent ⇒ the stage budget, exactly as before.
+   */
+  lastStepIndex?: number;
   artifactKeys: string[];
   stepsSinceCheckpoint: number;
   currentGranularity: number;
@@ -4595,7 +4602,18 @@ export class JobPipelineControl {
           // working as designed — not a defect to poison.
           const retryable =
             error instanceof JobPipelineError ? error.code === "job_step_failed" : true;
-          if (retryable && tries < budget.maxAttempts) {
+          // Issue #6396 — the failing step's own bucket, when it declared one,
+          // replaces the stage's budget for this retry decision: the step's
+          // economics decide how often it is attempted. Absent ⇒ exactly the
+          // stage budget as before.
+          const stepOverride = (node.steps ?? [])[
+            ctx.lastStepIndex ?? -1
+          ]?.retry;
+          const attemptBudget =
+            stepOverride?.bucket && isRetryBucketName(stepOverride.bucket)
+              ? this.policy.retry[stepOverride.bucket]
+              : budget;
+          if (retryable && tries < attemptBudget.maxAttempts) {
             // Issue #6278 — record the attempt's error before
             // the backoff, so the deadline catch in executeRun
             // can name the last leg error when the run dies at
@@ -4604,7 +4622,7 @@ export class JobPipelineControl {
             // and the leg that was slow is undiagnosable from
             // the production error.
             ctx.lastLegError = { message, attempt: attemptNow };
-            await this.sleep(computeBackoffDelayMs(budget, tries));
+            await this.sleep(computeBackoffDelayMs(attemptBudget, tries));
             // Issue #4544 — a forced re-run restarts at step 0
             // on retry, exactly as it starts: deriving here
             // would find the dispatch's recorded step artifacts
@@ -5108,6 +5126,9 @@ export class JobPipelineControl {
         ctx.stepExecutions += 1;
         return slept;
       }
+      // Issue #6396 — the last step that STARTED is the one that failed;
+      // the retry loop reads it to pick the step's own bucket.
+      ctx.lastStepIndex = stepIndex;
       const handler = this.deps.steps.resolve(stepConfig.step);
       const stepCtx: JobStepContext = {
         jobId: ctx.jobId,

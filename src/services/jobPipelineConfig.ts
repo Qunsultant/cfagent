@@ -263,9 +263,30 @@ function resolveNode(raw: unknown, path: string): JobNodeConfig {
       if (entry.params !== undefined && !isRecord(entry.params)) {
         throw invalid(`Step ${i} of node ${path} "params" must be an object.`);
       }
+      // Issue #6396 — the step's optional retry bucket, validated against
+      // the ONE policy list; a name outside it refuses here, never as a
+      // silent fallback to the stage's bucket.
+      let retry: { bucket?: string } | undefined;
+      if (entry.retry !== undefined) {
+        if (!isRecord(entry.retry)) {
+          throw invalid(
+            `Step ${i} of node ${path} "retry" must be an object like { "bucket": "report" }.`,
+          );
+        }
+        const bucket = entry.retry.bucket;
+        if (bucket !== undefined) {
+          if (!isRetryBucketName(bucket)) {
+            throw invalid(
+              `Step ${i} of node ${path} names retry bucket ${JSON.stringify(bucket)}, which is not one of: ${RETRY_BUCKET_NAMES.join(", ")}.`,
+            );
+          }
+          retry = { bucket };
+        }
+      }
       return {
         step: entry.step,
         ...(entry.params !== undefined ? { params: entry.params } : {}),
+        ...(retry ? { retry } : {}),
       };
     });
   }

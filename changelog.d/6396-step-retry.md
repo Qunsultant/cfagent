@@ -1,0 +1,3 @@
+### Added
+
+- **A step can declare its own retry bucket (#6396):** retry was per-node, so a cheap fetch and a whole awaited agent turn shared one budget — opposite economics inside one stage. `JobStepConfig.retry` now takes a bucket name from the ONE policy list (`RETRY_BUCKET_NAMES`, validated at define against that list, so a typo refuses by name instead of silently falling back), and the engine's existing retry loop uses the failing step's bucket when it declared one, the stage's exactly as before when it did not. No new retry mechanism, no second policy list, no new knob: the bucket is the same one `retryBucket` already names, just at step granularity. Pins: `tests/job_step_retry_6396.test.ts`; the engine reference (§3.9) states the override.
