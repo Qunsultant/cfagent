@@ -106,7 +106,7 @@
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -134,7 +134,9 @@ interface ScannedFile {
   source: string;
 }
 
-const ALL_FILES = walkSrc(SRC_ROOT).map((full) => relative(repo, full));
+const ALL_FILES = walkSrc(SRC_ROOT).map((full) =>
+  relative(repo, full).split(sep).join("/"),
+);
 const SCAN: ScannedFile[] = ALL_FILES.filter((rel) => rel !== LEAF_REL).map(
   (rel) => ({ rel, source: stripComments(readFileSync(join(repo, rel), "utf8")) }),
 );

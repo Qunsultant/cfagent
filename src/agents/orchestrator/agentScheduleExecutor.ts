@@ -18,7 +18,7 @@ type ScheduleActionAudit = (
   payload: Record<string, unknown>,
 ) => void;
 
-export interface AgentScheduleExecutorContext {
+export interface AgentScheduleExecutorInput {
   env: Env;
   sql: AgentContext["storage"]["sql"];
   storage: AgentContext["storage"];
@@ -29,7 +29,7 @@ export interface AgentScheduleExecutorContext {
 }
 
 export function createOrchestratorAgentScheduleExecutorDeps(
-  context: AgentScheduleExecutorContext,
+  context: AgentScheduleExecutorInput,
 ): AgentScheduleExecutorDeps {
   const unifiedStore = createUnifiedSchedulePorts({
     sql: context.sql,
