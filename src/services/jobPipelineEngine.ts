@@ -409,6 +409,27 @@ export interface JobPoisonLanding {
 
 export type JobPoisonLandingSink = (landing: JobPoisonLanding) => Promise<void>;
 
+/**
+ * Issue #3954 — one unit the stuck sweep reaped: which run, which stage, which
+ * unit, and how long it had been silent. The unit is surfaced as failed with a
+ * coded error AND its run is settled, so "stuck" is an outcome rather than a
+ * run left hanging.
+ */
+export interface JobStuckUnit {
+  jobId: string;
+  runId: string;
+  stageId: string;
+  unitId: string;
+  /** How long the unit had gone without a heartbeat when it was reaped. */
+  silentMs: number;
+}
+
+export interface JobStuckSweepResult {
+  stuck: JobStuckUnit[];
+  /** The job ids whose run was settled failed because a unit was stuck. */
+  settled: string[];
+}
+
 export type JobPipelineRestartRun = (request: {
   jobId: string;
   runId: string;
@@ -2070,24 +2091,135 @@ export class JobPipelineControl {
         `Orphaned by a host restart: the run was still 'running' when the pipeline host started, ` +
         `so no executor can still be running it (run ${instance.currentRunId ?? "unknown"}, ` +
         `started ${instance.runStartedAt ?? "unknown"}). The run never recorded a result.`;
-      const updated: JobInstanceRecord = {
-        ...instance,
-        state: "failed",
-        desiredState: "none",
-        lastError: message,
-      };
-      await this.setInstance(updated);
-      await publishJobStatus(this.deps.publisher, {
-        jobId: definition.jobId,
-        runId: instance.currentRunId ?? "unknown",
-        state: "failed",
-        at: this.iso(),
-        detail: message,
-      });
-      await this.recordTerminal(updated, "failed", message);
+      await this.settleRunningInstance(definition.jobId, instance, message);
       settled.push(definition.jobId);
     }
     return { settled };
+  }
+
+  /**
+   * Issue #3954 / #4002 — settle one instance still marked `running` through
+   * the engine's own failure path: state + published transition + terminal run
+   * record. One settle, two triggers (an orphaned host, a reaped stuck unit).
+   */
+  private async settleRunningInstance(
+    jobId: string,
+    instance: JobInstanceRecord,
+    message: string,
+  ): Promise<void> {
+    const updated: JobInstanceRecord = {
+      ...instance,
+      state: "failed",
+      desiredState: "none",
+      lastError: message,
+    };
+    await this.setInstance(updated);
+    await publishJobStatus(this.deps.publisher, {
+      jobId,
+      runId: instance.currentRunId ?? "unknown",
+      state: "failed",
+      at: this.iso(),
+      detail: message,
+    });
+    await this.recordTerminal(updated, "failed", message);
+  }
+
+  /**
+   * Issue #3954 — the uniform stuck sweep: find RUNNING units whose recorded
+   * liveness is older than the configured bound, mark them failed with a coded
+   * error, and settle their run.
+   *
+   * The bound is policy (`pipeline.stuckUnitAfterMs`, default 30 minutes), the
+   * same order as the async-jobs alert threshold this capability makes
+   * uniform across families. The activity stamp is `heartbeatAt`, falling back
+   * to `updatedAt`/`startedAt` so checkpoints written before heartbeats
+   * existed stay sweepable — a run is never left unswept because it predates
+   * the field.
+   *
+   * Additive by contract: a unit is touched only when it is provably stale. A
+   * unit with no readable stamp is left alone (sweeping on no evidence would be
+   * a guess), and a terminal unit is never reaped.
+   */
+  async sweepStuckUnits(
+    opts: { nowMs?: number; stuckAfterMs?: number } = {},
+  ): Promise<JobStuckSweepResult> {
+    const nowMs = opts.nowMs ?? this.now().getTime();
+    const bound = opts.stuckAfterMs ?? this.policy.stuckUnitAfterMs;
+    const stuck: JobStuckUnit[] = [];
+    const settled: string[] = [];
+    const definitions = await this.deps.stores.definitions.listDefinitions();
+    for (const definition of definitions) {
+      const instance = await this.deps.stores.instances.getInstance(definition.jobId);
+      if (!instance || instance.state !== "running" || !instance.currentRunId) continue;
+      const runId = instance.currentRunId;
+      const checkpoints = createJobPipelineStageCheckpointStore(
+        this.deps.stores.instances,
+        definition.jobId,
+      );
+      const checkpoint = await checkpoints.read(runId);
+      if (!checkpoint) continue;
+      const reaped = checkpoint.units
+        .filter((unit) => unit.status === "running")
+        .map((unit) => {
+          const stamp = unit.heartbeatAt ?? unit.updatedAt ?? unit.startedAt;
+          const at = stamp ? Date.parse(stamp) : Number.NaN;
+          return { unit, silentMs: Number.isFinite(at) ? nowMs - at : Number.NaN };
+        })
+        .filter(({ silentMs }) => Number.isFinite(silentMs) && silentMs > bound);
+      if (reaped.length === 0) continue;
+      const at = this.iso();
+      const reapedKeys = new Set(reaped.map(({ unit }) => `${unit.stage}\u0000${unit.unitId}`));
+      await checkpoints.write({
+        ...checkpoint,
+        units: checkpoint.units.map((unit) =>
+          reapedKeys.has(`${unit.stage}\u0000${unit.unitId}`)
+            ? {
+                ...unit,
+                status: "failed" as never,
+                error:
+                  `job_unit_stuck: no step progress for ` +
+                  `${Math.round((reaped.find((r) => r.unit === unit)?.silentMs ?? 0) / 1000)}s ` +
+                  `(bound ${Math.round(bound / 1000)}s); the stuck sweep reaped the unit.`,
+                updatedAt: at,
+              }
+            : unit,
+        ),
+      });
+      for (const { unit, silentMs } of reaped) {
+        const landing: JobStuckUnit = {
+          jobId: definition.jobId,
+          runId,
+          stageId: unit.stage,
+          unitId: unit.unitId,
+          silentMs,
+        };
+        stuck.push(landing);
+        await publishStageAction(this.deps.publisher, {
+          jobId: definition.jobId,
+          runId,
+          stageId: unit.stage,
+          unitId: unit.unitId,
+          action: "failed",
+          at,
+          detail:
+            `job_unit_stuck: no step progress for ${Math.round(silentMs / 1000)}s ` +
+            `(bound ${Math.round(bound / 1000)}s)`,
+        });
+      }
+      // The settle writes the whole instance record, so it must read the one
+      // that carries the checkpoint we just wrote — a stale snapshot would
+      // clobber the reaped units back to `running`.
+      const fresh = (await this.deps.stores.instances.getInstance(definition.jobId)) ?? instance;
+      await this.settleRunningInstance(
+        definition.jobId,
+        fresh,
+        `Stuck run: ${reaped.length} unit(s) recorded no step progress for more than ` +
+          `${Math.round(bound / 1000)}s in run ${runId}, so the run was settled failed ` +
+          `rather than left hanging. The reaped units are named on the stage read.`,
+      );
+      settled.push(definition.jobId);
+    }
+    return { stuck, settled };
   }
 
   /** The status view: definition + live instance + run history from the one run-record machinery + per-stage states. */
@@ -4313,6 +4445,8 @@ export class JobPipelineControl {
           // keeps the original stamp so the window stays the wall clock.
           startedAt: claimed?.startedAt ?? this.iso(),
           updatedAt: this.iso(),
+          // Issue #3954 — the first sign of life; the stuck sweep reads it.
+          heartbeatAt: this.iso(),
           ...(resume.stepIndex > 0 || resume.itemIndex > 0
             ? { progress: { ...resume } }
             : {}),
@@ -4839,6 +4973,17 @@ export class JobPipelineControl {
         );
       }
       ctx.stepExecutions += 1;
+      // Issue #3954 — a completed step IS progress: refresh the unit's
+      // liveness stamp so a long-but-working unit is never reaped as stuck.
+      // In-memory here; the ledger's own write points persist it.
+      const live = this.entryFor(ctx.ledger, jobStageId(path), unitId);
+      if (live) {
+        this.setEntry(ctx, {
+          ...live,
+          heartbeatAt: this.iso(),
+          updatedAt: this.iso(),
+        });
+      }
       const descriptor = (result as { descriptor?: unknown }).descriptor;
       if (typeof descriptor === "string" && descriptor.length > 0) resultRef = descriptor;
       return result.output;

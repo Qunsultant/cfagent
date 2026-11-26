@@ -254,6 +254,14 @@ export interface StageUnitCheckpoint {
    */
   startedAt?: string;
   /**
+   * Issue #3954 — the unit's last recorded sign of life, stamped by the engine
+   * at the running transition and at every step boundary after it. The stuck
+   * sweep reads it (falling back to `updatedAt`/`startedAt` for checkpoints
+   * written before this field existed) to tell "slow" from "hung": a unit
+   * whose stamp is older than the configured bound is reaped, not waited on.
+   */
+  heartbeatAt?: string;
+  /**
    * Issue #4359 — when this unit reached a terminal state (completed,
    * failed, timed_out, cancelled, retired), stamped by the engine at
    * that transition. Absent while the unit is queued, running, stopped
