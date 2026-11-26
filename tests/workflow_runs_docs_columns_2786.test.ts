@@ -17,8 +17,22 @@
  *    reports=only returns report-backed runs only, the filter applies
  *    BEFORE the 50-slice (a report run past position 50 still shows),
  *    and another user's canonical rows never leak in.
+ *
+ * Issue #6103 — the route-level tests seed D1, not the DO: the runs
+ * route reads D1 alone now, so each test seeds its DO rows
+ * (MockSqlStorage) and then projects each row at write time via
+ * postRunLedgerBestEffort — the ORM-carrier path, using the sweep's
+ * own input mapping from src/agents/orchestrator/runLedgerReconcile.ts
+ * (reports leg: listScheduledReports mapping; async_jobs leg:
+ * createAsyncJobPorts(...).read.workflowRunRows mapping). The sweep
+ * itself is never run — it copies existing DO rows into D1, which
+ * the replacement ruling forbids. Outcome-carrying D1 rows are
+ * seeded via the REAL fold D1JobRunRecordStore.attachOutcomeFacts,
+ * never via buildJobRunRecord (it drops the outcome-fact fields).
+ * The carrier row is set so storeErrors.runs stays unset.
  */
 import { describe, it, expect } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 import { MockSqlStorage } from "./mock-sql";
 import {
   hasReportDocuments,
@@ -35,9 +49,194 @@ import {
 } from "../src/agents/routes/workflowRuns";
 import { documentRunSource } from "../src/client/docsAndReports";
 import type { ScheduledReportHit } from "../src/services/scheduledReports";
-import { recordJobOutcome } from "../src/services/jobOutcomes";
-import { persistScheduledReportSql } from "../src/services/scheduledReports";
+import { listScheduledReports, persistScheduledReportSql } from "../src/services/scheduledReports";
+import type { JobOutcomeRow } from "../src/services/jobOutcomes";
 import type { RunSummary } from "../src/services/runSummaries";
+import { createRunLedgerAdapter, ensureRunLedgerTables } from "../src/data/createRunLedgerPorts";
+import { createAuditReportAdapter } from "../src/data/createAuditReportPorts";
+import { createAsyncJobPorts } from "../src/data/createAsyncJobPorts";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+  ensureJobRunRecordsSchema,
+} from "../src/data/d1JobRunRecordAdapter";
+import { postRunLedgerBestEffort } from "../src/services/runLedgerProjectionPosting";
+
+/** Minimal D1Database stand-in over node:sqlite (the #4116 suite's double). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: { changes: info.changes, last_row_id: info.lastInsertRowid },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+  async batch(statements: any[]) {
+    const results: any[] = [];
+    this.sqlite.exec("BEGIN");
+    try {
+      for (const stmt of statements) results.push(await stmt.run());
+      this.sqlite.exec("COMMIT");
+    } catch (err) {
+      this.sqlite.exec("ROLLBACK");
+      throw err;
+    }
+    return results;
+  }
+}
+
+const SESSION = "session-1";
+
+/**
+ * Issue #6103 — the D1 fixture: a MockD1Database env plus the
+ * carrier row, so the route's D1 reads serve and storeErrors.runs
+ * stays unset. DO rows are still seeded in MockSqlStorage first
+ * (the write-time source), then projected per row below.
+ */
+async function d1Fixture() {
+  const mock = new MockD1Database();
+  const sql = new MockSqlStorage();
+  const env = { AGENT_DB: mock as never, IAAA_TENANT_ID: "primary" };
+  const adapter = createRunLedgerAdapter(env)!;
+  await ensureRunLedgerTables(adapter);
+  await adapter.setTenantProjectionCarriers(
+    "primary",
+    { queues: true, orm: true, sweep: true },
+    "merged",
+    Date.now(),
+  );
+  return { mock, sql, env };
+}
+
+type D1Fixture = Awaited<ReturnType<typeof d1Fixture>>;
+
+/**
+ * Issue #6103 — project every DO canonical report at write time,
+ * using the sweep's own reports-leg input mapping
+ * (runLedgerReconcile.ts). Never the sweep itself.
+ */
+async function projectReportsAtWriteTime(fx: D1Fixture): Promise<number> {
+  const nowMs = Date.now();
+  let projectedCount = 0;
+  for (const hit of listScheduledReports(fx.sql as never, { limit: 100 })) {
+    const createdAtMs = Date.parse(hit.createdAt);
+    const posted = await postRunLedgerBestEffort(
+      fx.env,
+      "primary",
+      {
+        ledger: "reports",
+        row: {
+          reportId: hit.id,
+          tenantId: "primary",
+          workspaceId: "primary",
+          runId: hit.runId,
+          generationId: hit.generationId,
+          title: hit.title,
+          source: hit.source,
+          summary: hit.summary,
+          body: hit.body,
+          createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : nowMs,
+          updatedAtMs: Number.isFinite(createdAtMs) ? createdAtMs : nowMs,
+          userLogin: hit.userLogin,
+          bodyR2Key: hit.bodyR2Key,
+        },
+      },
+      nowMs,
+    );
+    expect(posted.projected).toBe(true);
+    projectedCount += 1;
+  }
+  return projectedCount;
+}
+
+/**
+ * Issue #6103 — project every DO async job at write time, using
+ * the sweep's own async_jobs-leg input mapping
+ * (runLedgerReconcile.ts). Never the sweep itself.
+ */
+async function projectJobsAtWriteTime(fx: D1Fixture, sessionId = SESSION): Promise<number> {
+  const nowMs = Date.now();
+  let projectedCount = 0;
+  for (const row of createAsyncJobPorts(fx.sql as never).read.workflowRunRows(sessionId, 100)) {
+    const posted = await postRunLedgerBestEffort(
+      fx.env,
+      "primary",
+      {
+        ledger: "async_jobs",
+        row: {
+          jobId: row.job_id,
+          sessionId,
+          tenantId: "primary",
+          status: row.status,
+          capability: row.capability,
+          displayName: row.display_name,
+          payloadJson: row.payload_json ?? "{}",
+          resultJson: row.result_json,
+          responseStatus: null,
+          error: row.error,
+          errorCode: row.error_code,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          startedAt: row.started_at,
+          completedAt: row.completed_at,
+          parentJobId: row.parent_job_id,
+          jobKind: row.job_kind,
+          channel: row.channel,
+          notBefore: row.not_before,
+          stage: row.stage,
+          chainId: row.chain_id,
+          stuckAlertedAt: row.stuck_alerted_at,
+          trigger: row.trigger,
+          triggeredBy: row.triggered_by,
+          scheduleId: row.schedule_id,
+          lastActivityAt: row.last_activity_at,
+        },
+      },
+      nowMs,
+    );
+    expect(posted.projected).toBe(true);
+    projectedCount += 1;
+  }
+  return projectedCount;
+}
+
+/**
+ * Issue #6103 — seed an outcome-carrying D1 row via the REAL fold
+ * (attachOutcomeFacts, the entry point production uses). Never via
+ * buildJobRunRecord: the builder drops the outcome-fact fields and
+ * rejects the "job-outcome" system.
+ */
+async function foldOutcome(fx: D1Fixture, outcome: JobOutcomeRow): Promise<void> {
+  const jobDb = createD1JobRunRecordDb(fx.mock as never);
+  await ensureJobRunRecordsSchema(jobDb);
+  const store = new D1JobRunRecordStore(jobDb);
+  const folded = await store.attachOutcomeFacts({ outcome, tenantId: "primary" }, Date.now());
+  expect(folded.landed).toBe(true);
+  expect(folded.created).toBe(true);
+}
 
 const JOB_COLUMNS =
   "job_id, session_id, capability, display_name, status, payload_json, result_json, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id";
@@ -67,8 +266,11 @@ function insertJob(sql: MockSqlStorage, jobId: string, createdAt: string): void 
   );
 }
 
-function ctxFor(sql: MockSqlStorage, userLogin = "analyst") {
-  return { ensureTables: () => sql, userLogin, env: {} };
+function ctxFor(sql: MockSqlStorage, env: D1Fixture["env"], userLogin = "analyst") {
+  // Issue #6103 — the route reads D1 from ctx.env; the schedule
+  // reader is stubbed to [] (the parity fixture's seam) so the
+  // orchestrator schedule read cannot add rows here.
+  return { ensureTables: () => sql, userLogin, env, scheduleReader: async () => [] };
 }
 
 function request(path = "/workflow-runs"): Request {
@@ -269,20 +471,33 @@ describe("hasReportDocuments", () => {
   });
 });
 
-describe("GET /workflow-runs reports filter (route level)", () => {
-  it("attaches canonical documents to a twin and filters to report runs only", async () => {
-    const sql = new MockSqlStorage();
-    recordJobOutcome(sql, {
+describe("GET /workflow-runs reports filter (route level, D1-only #6103)", () => {
+  it("attaches canonical documents to a twin and filters to report runs only (D1-only, #6103)", async () => {
+    const fx = await d1Fixture();
+    // The outcome is folded onto D1 FIRST, so the canonical
+    // report's twin link (generationId == outcome id, in-window)
+    // resolves at write-time projection and the fold row is
+    // absorbed into the canonical run instead of rendering twice.
+    await foldOutcome(fx, {
       id: "outcome-1",
       kind: "goal",
       trigger: "manual",
       status: "completed",
+      scanned: null,
+      matched: null,
+      codedError: null,
+      reportUrl: null,
+      pdfKey: null,
+      xlsxKey: null,
+      csvKey: null,
+      deliveryStates: {},
       origin: "manual",
       createdAt: "2026-10-27T13:00:00.000Z",
     });
-    insertJob(sql, "job-other", "2026-10-27T12:00:00.000Z");
-    const repId = persistScheduledReportSql(sql, {
+    insertJob(fx.sql, "job-other", "2026-10-27T12:00:00.000Z");
+    const repId = persistScheduledReportSql(fx.sql, {
       runId: "outcome-1",
+      generationId: "outcome-1",
       userLogin: "analyst",
       title: "Goal report",
       source: "goal_screen",
@@ -298,26 +513,35 @@ describe("GET /workflow-runs reports filter (route level)", () => {
       createdAt: "2026-10-27T13:00:00.000Z",
     });
     expect(repId).not.toBeNull();
+    expect(await projectReportsAtWriteTime(fx)).toBe(1);
+    expect(await projectJobsAtWriteTime(fx)).toBe(1);
 
-    const all = (await (await handleWorkflowRunsRoutes(request("/workflow-runs?limit=50"), new URL("https://agent.internal/workflow-runs?limit=50"), "/workflow-runs", "session-1", ctxFor(sql)))!.json()) as any;
+    const all = (await (await handleWorkflowRunsRoutes(request("/workflow-runs?limit=50"), new URL("https://agent.internal/workflow-runs?limit=50"), "/workflow-runs", "session-1", ctxFor(fx.sql, fx.env)))!.json()) as any;
+    expect(all.storeErrors?.runs).toBeUndefined();
+    expect(all.storeErrors?.stages).toMatch("not projected");
     const twin = all.runs.find((r: any) => r.runId === "outcome-1");
     expect(twin).toBeDefined();
     expect(twin.documents.reportId).toBe(repId);
     expect(twin.documents.family).toBe("goal");
     expect(twin.documents.xlsxStatus).toBe("failed");
     expect(twin.documents.xlsxError).toBe("workbook blew up");
+    // The fold row is the twin, not a second run: its D1 id never
+    // renders alongside the canonical run.
+    expect(all.runs.map((r: any) => r.runId)).not.toContain(
+      "d1:outcome-1:2026-10-27T13:00:00.000Z:2026-10-27T13:00:00.000Z",
+    );
 
-    const filtered = (await (await handleWorkflowRunsRoutes(request("/workflow-runs?limit=50&reports=only"), new URL("https://agent.internal/workflow-runs?limit=50&reports=only"), "/workflow-runs", "session-1", ctxFor(sql)))!.json()) as any;
+    const filtered = (await (await handleWorkflowRunsRoutes(request("/workflow-runs?limit=50&reports=only"), new URL("https://agent.internal/workflow-runs?limit=50&reports=only"), "/workflow-runs", "session-1", ctxFor(fx.sql, fx.env)))!.json()) as any;
     expect(filtered.runs.map((r: any) => r.runId)).toEqual(["outcome-1"]);
   });
 
-  it("filters BEFORE the 50-slice: a report run past position 50 still shows", async () => {
-    const sql = new MockSqlStorage();
+  it("filters BEFORE the 50-slice: a report run past position 50 still shows (D1-only, #6103)", async () => {
+    const fx = await d1Fixture();
     for (let i = 0; i < 60; i++) {
       const minute = String(59 - i).padStart(2, "0");
-      insertJob(sql, `job-${i}`, `2026-11-01T00:${minute}:00.000Z`);
+      insertJob(fx.sql, `job-${i}`, `2026-11-01T00:${minute}:00.000Z`);
     }
-    persistScheduledReportSql(sql, {
+    persistScheduledReportSql(fx.sql, {
       runId: "report-old",
       userLogin: "analyst",
       title: "Old goal report",
@@ -326,17 +550,19 @@ describe("GET /workflow-runs reports filter (route level)", () => {
       body: { pdfKey: "goal/old.pdf" },
       createdAt: "2026-10-01T00:00:00.000Z",
     });
+    expect(await projectReportsAtWriteTime(fx)).toBe(1);
+    expect(await projectJobsAtWriteTime(fx)).toBe(60);
 
-    const all = (await (await handleWorkflowRunsRoutes(request("/workflow-runs?limit=50"), new URL("https://agent.internal/workflow-runs?limit=50"), "/workflow-runs", "session-1", ctxFor(sql)))!.json()) as any;
+    const all = (await (await handleWorkflowRunsRoutes(request("/workflow-runs?limit=50"), new URL("https://agent.internal/workflow-runs?limit=50"), "/workflow-runs", "session-1", ctxFor(fx.sql, fx.env)))!.json()) as any;
     expect(all.runs.map((r: any) => r.runId)).not.toContain("report-old");
 
-    const filtered = (await (await handleWorkflowRunsRoutes(request("/workflow-runs?limit=50&reports=only"), new URL("https://agent.internal/workflow-runs?limit=50&reports=only"), "/workflow-runs", "session-1", ctxFor(sql)))!.json()) as any;
+    const filtered = (await (await handleWorkflowRunsRoutes(request("/workflow-runs?limit=50&reports=only"), new URL("https://agent.internal/workflow-runs?limit=50&reports=only"), "/workflow-runs", "session-1", ctxFor(fx.sql, fx.env)))!.json()) as any;
     expect(filtered.runs.map((r: any) => r.runId)).toContain("report-old");
   });
 
-  it("never leaks another user's canonical rows", async () => {
-    const sql = new MockSqlStorage();
-    persistScheduledReportSql(sql, {
+  it("never leaks another user's canonical rows (D1-only, #6103)", async () => {
+    const fx = await d1Fixture();
+    persistScheduledReportSql(fx.sql, {
       runId: "foreign-run",
       userLogin: "someone-else",
       title: "Foreign report",
@@ -345,8 +571,16 @@ describe("GET /workflow-runs reports filter (route level)", () => {
       body: { pdfKey: "goal/foreign.pdf" },
       createdAt: "2026-10-27T13:00:00.000Z",
     });
-    const filtered = (await (await handleWorkflowRunsRoutes(request("/workflow-runs?limit=50&reports=only"), new URL("https://agent.internal/workflow-runs?limit=50&reports=only"), "/workflow-runs", "session-1", ctxFor(sql)))!.json()) as any;
+    expect(await projectReportsAtWriteTime(fx)).toBe(1);
+    // The row IS in D1 under its owner — the route still hides it
+    // from analyst, so the empty page below is a real owner-scope
+    // pin, not an empty-store accident.
+    const audit = createAuditReportAdapter(fx.env as never)!;
+    expect(await audit.listReports("primary", { limit: 10, userLogin: "someone-else" })).toHaveLength(1);
+    const filtered = (await (await handleWorkflowRunsRoutes(request("/workflow-runs?limit=50&reports=only"), new URL("https://agent.internal/workflow-runs?limit=50&reports=only"), "/workflow-runs", "session-1", ctxFor(fx.sql, fx.env)))!.json()) as any;
     expect(filtered.runs).toEqual([]);
+    const all = (await (await handleWorkflowRunsRoutes(request("/workflow-runs?limit=50"), new URL("https://agent.internal/workflow-runs?limit=50"), "/workflow-runs", "session-1", ctxFor(fx.sql, fx.env)))!.json()) as any;
+    expect(all.runs.map((r: any) => r.runId)).not.toContain("foreign-run");
   });
 });
 
@@ -410,9 +644,9 @@ describe("Issue #2786 losslessness fix: preserved canonical stages", () => {
     expect(entry?.stages[0].stage).toBe("feed");
   });
 
-  it("route mints a report-only run carrying a staged canonical body's stages", async () => {
-    const sql = new MockSqlStorage();
-    persistScheduledReportSql(sql, {
+  it("route mints a report-only run carrying a staged canonical body's stages (D1-only, #6103)", async () => {
+    const fx = await d1Fixture();
+    persistScheduledReportSql(fx.sql, {
       runId: "staged-goal",
       userLogin: "analyst",
       title: "Staged goal report",
@@ -427,7 +661,9 @@ describe("Issue #2786 losslessness fix: preserved canonical stages", () => {
       },
       createdAt: "2026-10-27T13:00:00.000Z",
     });
-    const all = (await (await handleWorkflowRunsRoutes(request("/workflow-runs?limit=50"), new URL("https://agent.internal/workflow-runs?limit=50"), "/workflow-runs", "session-1", ctxFor(sql)))!.json()) as any;
+    expect(await projectReportsAtWriteTime(fx)).toBe(1);
+    const all = (await (await handleWorkflowRunsRoutes(request("/workflow-runs?limit=50"), new URL("https://agent.internal/workflow-runs?limit=50"), "/workflow-runs", "session-1", ctxFor(fx.sql, fx.env)))!.json()) as any;
+    expect(all.storeErrors?.runs).toBeUndefined();
     const run = all.runs.find((r: any) => r.runId === "staged-goal");
     expect(run).toBeDefined();
     expect(run.source).toBe("report");

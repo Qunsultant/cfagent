@@ -24,10 +24,28 @@
  *    the runs.
  *  - 4420-P07 no regression: #4359's engine-run stage read still governs a
  *    run whose job is an engine run.
+ *
+ * Issue #6103 — the jobs feeding the P04/P05/P06 route tests now come
+ * from D1, not the DO: each shard row is written to the DO async-job
+ * port and projected at write time via postRunLedgerBestEffort (the
+ * ORM-carrier path, using the sweep's own input mapping) — never via
+ * the sweep, which copies existing DO rows. The inner-shard stage
+ * readers are untouched by #6103 (still store-direct via
+ * ctx.ensureTables() + D1); only the jobs changed. What P04/P05/P06
+ * pin about inner stages is unchanged.
  */
 import { describe, expect, it } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 import { createInMemoryJobPipelineStores } from "../src/data/inMemoryJobPipelineAdapter";
 import { InMemoryJobRunRecordStore } from "../src/data/inMemoryJobRunRecordAdapter";
+import { createAsyncJobPorts } from "../src/data/createAsyncJobPorts";
+import { createRunLedgerAdapter, ensureRunLedgerTables } from "../src/data/createRunLedgerPorts";
+import {
+  createD1JobRunRecordDb,
+  ensureJobRunRecordsSchema,
+} from "../src/data/d1JobRunRecordAdapter";
+import { postRunLedgerBestEffort } from "../src/services/runLedgerProjectionPosting";
+import { MockSqlStorage } from "./mock-sql";
 import {
   JobPipelineControl,
   jobRunRecorderFromStore,
@@ -80,6 +98,149 @@ function sqlWithJobs(rows: Array<Record<string, unknown>>) {
   return {
     exec: (query: string) => (String(query).includes("FROM mas_async_jobs") ? rows : []),
   } as never;
+}
+
+/** Minimal D1Database stand-in over node:sqlite (the #4116 parity fixture's double). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: { changes: info.changes, last_row_id: info.lastInsertRowid },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+  async batch(statements: any[]) {
+    const results: any[] = [];
+    this.sqlite.exec("BEGIN");
+    try {
+      for (const stmt of statements) results.push(await stmt.run());
+      this.sqlite.exec("COMMIT");
+    } catch (err) {
+      this.sqlite.exec("ROLLBACK");
+      throw err;
+    }
+    return results;
+  }
+}
+
+/** The session the route reads jobs for — the DO rows and the D1 projection both carry it. */
+const D1_SESSION = "session-1";
+
+/**
+ * Issue #6103 — seed shard jobs in D1 through the write-time
+ * projection path: each shard row is written to the DO async-job
+ * port, then projected via postRunLedgerBestEffort using the
+ * sweep's own input mapping (runLedgerReconcile.ts) — the sweep
+ * itself is never run (it copies existing DO rows, which the
+ * replacement ruling forbids). The carrier row is set so
+ * storeErrors.runs stays unset. Returns the env + DO store the
+ * route context needs.
+ */
+async function seedShardJobsInD1(rows: WorkflowRunJobRow[]) {
+  const mock = new MockD1Database();
+  const sql = new MockSqlStorage();
+  const jobDb = createD1JobRunRecordDb(mock as never);
+  await ensureJobRunRecordsSchema(jobDb);
+  const ports = createAsyncJobPorts(sql as never);
+  ports.queue.ensureSchema();
+  for (const row of rows) {
+    ports.queue.insertQueued({
+      jobId: row.job_id,
+      sessionId: D1_SESSION,
+      capability: row.capability,
+      displayName: row.display_name,
+      payloadJson: row.payload_json ?? "{}",
+      nowIso: row.created_at,
+      parentJobId: row.parent_job_id ?? null,
+      jobKind: row.job_kind ?? null,
+      channel: row.channel ?? null,
+      notBefore: row.not_before ?? null,
+      stage: row.stage ?? null,
+      chainId: row.chain_id ?? null,
+      trigger: null,
+      triggeredBy: null,
+      scheduleId: null,
+    });
+  }
+  const adapter = createRunLedgerAdapter({ AGENT_DB: mock as never })!;
+  await ensureRunLedgerTables(adapter);
+  await adapter.setTenantProjectionCarriers(
+    "primary",
+    { queues: true, orm: true, sweep: true },
+    "merged",
+    Date.now(),
+  );
+  const env = { AGENT_DB: mock as never, IAAA_TENANT_ID: "primary" };
+  const nowMs = Date.now();
+  let projectedCount = 0;
+  for (const row of ports.read.workflowRunRows(D1_SESSION, 100)) {
+    const posted = await postRunLedgerBestEffort(
+      env,
+      "primary",
+      {
+        ledger: "async_jobs",
+        row: {
+          jobId: row.job_id,
+          // The workflow projection does not select session_id;
+          // the list is session-scoped, so this call's session is
+          // the row's session by construction.
+          sessionId: D1_SESSION,
+          tenantId: "primary",
+          status: row.status,
+          capability: row.capability,
+          displayName: row.display_name,
+          payloadJson: row.payload_json ?? "{}",
+          resultJson: row.result_json,
+          responseStatus: null,
+          error: row.error,
+          errorCode: row.error_code,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          startedAt: row.started_at,
+          completedAt: row.completed_at,
+          parentJobId: row.parent_job_id,
+          jobKind: row.job_kind,
+          channel: row.channel,
+          notBefore: row.not_before,
+          stage: row.stage,
+          chainId: row.chain_id,
+          stuckAlertedAt: row.stuck_alerted_at,
+          trigger: row.trigger,
+          triggeredBy: row.triggered_by,
+          scheduleId: row.schedule_id,
+          lastActivityAt: row.last_activity_at,
+        },
+      },
+      nowMs,
+    );
+    expect(posted.projected).toBe(true);
+    projectedCount += 1;
+  }
+  expect(projectedCount).toBe(rows.length);
+  return { mock, sql, env };
 }
 
 /** A two-stage engine job with a durable, completed checkpoint. */
@@ -240,6 +401,19 @@ describe("4420-P04 /workflow-runs reads each shard's own inner checkpoint", () =
     const msft = shardScanJobId(CHAIN_ID, "MSFT");
     const a = await runInnerJob(aapl);
     const b = await runInnerJob(msft);
+    // Issue #6103 — the shard jobs feeding the inner read now come
+    // from D1 (projected at write time); the inner-shard stage
+    // assertions below are unchanged.
+    const fx = await seedShardJobsInD1([
+      shardRow(),
+      shardRow({
+        job_id: "shard-msft",
+        payload_json: JSON.stringify({
+          shard: { stage: "feed", key: "MSFT" },
+          chain: { chainId: CHAIN_ID, screenType: "options" },
+        }),
+      }),
+    ]);
     const asked: Array<Array<{ shardJobId: string; engineJobId: string }>> = [];
     const res = await handleWorkflowRunsRoutes(
       new Request("https://agent.internal/workflow-runs", { method: "GET" }),
@@ -247,19 +421,11 @@ describe("4420-P04 /workflow-runs reads each shard's own inner checkpoint", () =
       "/workflow-runs",
       "session-1",
       {
-        ensureTables: () =>
-          sqlWithJobs([
-            shardRow(),
-            shardRow({
-              job_id: "shard-msft",
-              payload_json: JSON.stringify({
-                shard: { stage: "feed", key: "MSFT" },
-                chain: { chainId: CHAIN_ID, screenType: "options" },
-              }),
-            }),
-          ]),
+        ensureTables: () => fx.sql as never,
         userLogin: "analyst",
-        env: {},
+        env: fx.env as never,
+        jobRunRecordReader: async () => [],
+        scheduleReader: async () => [],
         innerShardStageReader: async (refs) => {
           asked.push(refs);
           return new Map<string, JobStagesRead>([
@@ -285,15 +451,21 @@ describe("4420-P04 /workflow-runs reads each shard's own inner checkpoint", () =
 
 describe("4420-P05 honest empty and no claim on a non-shard row", () => {
   it("renders an empty inner list when the shard checkpoint is absent", async () => {
+    // Issue #6103 — the shard job feeding the inner read now comes
+    // from D1 (projected at write time); the honest-empty
+    // assertion below is unchanged.
+    const fx = await seedShardJobsInD1([shardRow()]);
     const res = await handleWorkflowRunsRoutes(
       new Request("https://agent.internal/workflow-runs", { method: "GET" }),
       new URL("https://agent.internal/workflow-runs"),
       "/workflow-runs",
       "session-1",
       {
-        ensureTables: () => sqlWithJobs([shardRow()]),
+        ensureTables: () => fx.sql as never,
         userLogin: "analyst",
-        env: {},
+        env: fx.env as never,
+        jobRunRecordReader: async () => [],
+        scheduleReader: async () => [],
         innerShardStageReader: async () => new Map(),
         jobStageReader: async () => new Map(),
       } as never,
@@ -329,15 +501,21 @@ describe("4420-P05 honest empty and no claim on a non-shard row", () => {
 
 describe("4420-P06 a failing inner read is named, never fatal", () => {
   it("records storeErrors.innerShardStages and still renders the runs", async () => {
+    // Issue #6103 — the shard job feeding the inner read now comes
+    // from D1 (projected at write time); the named-failure
+    // assertions below are unchanged.
+    const fx = await seedShardJobsInD1([shardRow()]);
     const res = await handleWorkflowRunsRoutes(
       new Request("https://agent.internal/workflow-runs", { method: "GET" }),
       new URL("https://agent.internal/workflow-runs"),
       "/workflow-runs",
       "session-1",
       {
-        ensureTables: () => sqlWithJobs([shardRow()]),
+        ensureTables: () => fx.sql as never,
         userLogin: "analyst",
-        env: {},
+        env: fx.env as never,
+        jobRunRecordReader: async () => [],
+        scheduleReader: async () => [],
         innerShardStageReader: async () => {
           throw new Error("inner stage store unavailable");
         },

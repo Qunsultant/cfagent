@@ -1,160 +1,255 @@
 /**
  * Issue #1057 (consolidation S5): GET /api/runs — the one Runs read
- * surface over the four DO run stores. The fifth store — the engine's
- * D1 job run records (#3946 Option B) — merges here too; its pins live
- * in tests/run_recorder_two_ledgers_3946.test.ts, and this file pins
- * the four DO stores' merge contract unchanged.
+ * surface over the run stores.
  *
- * Pinned through the real route module the server dispatches to
- * (handleReportsRoutes, the §17.3 route-test idiom):
- *  1. kind=all merges all four stores newest-first, de-duplicated on
- *     the exact canonical joins (canonical row wins over both its
- *     scan-store twin and its ScreenerAgent-feed twin).
- *  2. kind filters server-side: a discovery-only read never touches
- *     the scan store or the canonical list.
- *  3. An invalid kind is a 400 with the S1 field-named error.
- *  4. Scoping: the scan store is queried with the caller's login
- *     (x-user-login header), exactly as its own route scopes it.
+ * Issue #6103 (D1-only): the merged DO view is gone. /api/runs reads
+ * the D1 ledgers alone — projected canonical reports (agent_reports),
+ * the engine's D1 job run records, and the outcomes folded onto them.
+ * There is no per-tenant mode switch and no ledgerReadMode response
+ * field. Scans, discovery, and the screener feed are NOT projected:
+ * those lists are empty and named in storeErrors, never silent. The
+ * tests below pin the D1-only equivalents of the old merged-view
+ * pins, at the same assertion strength:
+ *  1. kind=all serves the projected canonical rows + the engine's D1
+ *     rows newest-first; a job-run-record twin named by a projected
+ *     report's link is absorbed into the canonical row (one run,
+ *     one row) — the old canonical de-duplication, now at the D1
+ *     twin link.
+ *  2. kind filters server-side: kind=discovery returns no rows and
+ *     names discovery as not projected; the projected canonical rows
+ *     never leak into the discovery read.
+ *  3. kind=screener returns the canonical screener rows only; the
+ *     feed is gone and named in storeErrors.
+ *  4. Scoping: the scan store is gone, so the caller-scoping
+ *     assertion now pins the reports owner scope — the projected
+ *     reports are filtered by the caller's x-user-login header,
+ *     exactly as the DO read scoped them.
  *  5. Round-trip: a run persisted through the canonical write path
- *     (persistScheduledReportSql) is returned by /api/runs with the
- *     same id — write path and read surface agree on the row.
- *  6. The panel reads the Runs surface: ReportsPanel fetches
+ *     (persistScheduledReportSql), projected at write time, is
+ *     returned by /api/runs with the same id — write path and read
+ *     surface agree on the row.
+ *  6. An invalid kind is a 400 with the S1 field-named error.
+ *  7. The panel reads the Runs surface: ReportsPanel fetches
  *     /api/runs (not the old /api/reports list) and offers the
  *     discovery kind.
+ *
+ * Seeding (the #4116 parity fixture's shape): DO rows are written
+ * through the canonical write path, then each row is projected at
+ * write time via postRunLedgerBestEffort using the sweep's own input
+ * mapping (runLedgerReconcile.ts). The sweep itself is never run —
+ * it copies existing DO rows into D1, which the replacement ruling
+ * forbids. The tenant's carrier row is set so storeErrors.runs stays
+ * unset.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { handleReportsRoutes, type ReportsRouteContext } from "../src/agents/routes/reports";
 import { MockSqlStorage } from "./mock-sql";
 import {
   ensureScheduledReportsTable,
+  listScheduledReports,
   persistScheduledReportSql,
+  storeReportAtGeneration,
 } from "../src/services/scheduledReports";
+import { buildJobRunRecord } from "../src/services/jobRunRecords";
+import { d1JobRunRecordId } from "../src/services/jobRunRecordReads";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+  ensureJobRunRecordsSchema,
+} from "../src/data/d1JobRunRecordAdapter";
+import { createRunLedgerAdapter, ensureRunLedgerTables } from "../src/data/createRunLedgerPorts";
+import { postRunLedgerBestEffort } from "../src/services/runLedgerProjectionPosting";
+
+/** Minimal D1Database stand-in over node:sqlite (the J1 suite's double). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: { changes: info.changes, last_row_id: info.lastInsertRowid },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+  async batch(statements: any[]) {
+    const results: any[] = [];
+    this.sqlite.exec("BEGIN");
+    try {
+      for (const stmt of statements) results.push(await stmt.run());
+      this.sqlite.exec("COMMIT");
+    } catch (err) {
+      this.sqlite.exec("ROLLBACK");
+      throw err;
+    }
+    return results;
+  }
+}
 
 const TS = {
   discovery: "2026-10-22T11:00:00.000Z",
   options: "2026-10-22T10:00:00.000Z",
-  scan2: "2026-10-22T09:30:00.000Z",
   screener: "2026-10-22T08:00:00.000Z",
 };
 
-const REPORT_ROWS = [
-  {
-    id: "rep-options-1",
-    run_id: `options_scanner:${TS.options}:balanced`,
+const OPTIONS_RUN_ID = `options_scanner:${TS.options}:balanced`;
+const SCREENER_RUN_ID = `screener:${TS.screener}`;
+
+/** Project every canonical DO row in `sql` into `mock` at write time (never the sweep). */
+async function projectReportsInto(mock: MockD1Database, sql: MockSqlStorage) {
+  const adapter = createRunLedgerAdapter({ AGENT_DB: mock as never })!;
+  await ensureRunLedgerTables(adapter);
+  await adapter.setTenantProjectionCarriers(
+    "primary",
+    { queues: true, orm: true, sweep: true },
+    "merged",
+    Date.now(),
+  );
+  const env = { AGENT_DB: mock as never, IAAA_TENANT_ID: "primary" };
+  const nowMs = Date.now();
+  for (const hit of listScheduledReports(sql as never, { limit: 100 })) {
+    const createdAtMs = Date.parse(hit.createdAt);
+    const posted = await postRunLedgerBestEffort(
+      env,
+      "primary",
+      {
+        ledger: "reports",
+        row: {
+          reportId: hit.id,
+          tenantId: "primary",
+          workspaceId: "primary",
+          runId: hit.runId,
+          generationId: hit.generationId,
+          title: hit.title,
+          source: hit.source,
+          summary: hit.summary,
+          body: hit.body,
+          createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : nowMs,
+          updatedAtMs: Number.isFinite(createdAtMs) ? createdAtMs : nowMs,
+          userLogin: hit.userLogin,
+          bodyR2Key: hit.bodyR2Key,
+        },
+      },
+      nowMs,
+    );
+    expect(posted.projected).toBe(true);
+  }
+  return env;
+}
+
+async function d1Fixture() {
+  const mock = new MockD1Database();
+  const sql = new MockSqlStorage();
+  const jobDb = createD1JobRunRecordDb(mock as never);
+  await ensureJobRunRecordsSchema(jobDb);
+  const jobStore = new D1JobRunRecordStore(jobDb);
+  // The engine's D1 twin of the options report: same run id, run
+  // window covering the report's creation — the projector stamps the
+  // twin link and the list absorbs this row into the canonical row.
+  const twin = buildJobRunRecord({
+    system: "job-pipeline",
+    jobId: OPTIONS_RUN_ID,
+    operation: "run",
+    started: TS.options,
+    finished: "2026-10-22T10:05:00.000Z",
+    outcome: "success",
+    triggeredBy: "manual",
+  });
+  await jobStore.record(twin);
+  // A standalone engine row (no report twin): the newest run.
+  const pipeline = buildJobRunRecord({
+    system: "job-pipeline",
+    jobId: "pipeline-feed-quotes",
+    operation: "job",
+    started: TS.discovery,
+    finished: "2026-10-22T11:02:30.000Z",
+    outcome: "success",
+    triggeredBy: "scheduled",
+    descriptor: "run run-abc123: 12 step executions, 3 artifacts",
+  });
+  await jobStore.record(pipeline);
+  const storedOptions = storeReportAtGeneration(sql as never, {
+    runId: OPTIONS_RUN_ID,
+    generationId: OPTIONS_RUN_ID,
     title: "Options scanner — balanced",
     source: "options_scanner",
     summary: "Options scan summary.",
-    body: JSON.stringify({ report: { result: { scanRunId: "scan-1", withTrades: 7 } } }),
-    created_at: TS.options,
-  },
-  {
-    id: "rep-screener-1",
-    run_id: `screener:${TS.screener}`,
+    userLogin: "alice",
+    body: { report: { result: { scanRunId: "scan-1", withTrades: 7 } } },
+    createdAt: TS.options,
+  });
+  const storedScreener = storeReportAtGeneration(sql as never, {
+    runId: SCREENER_RUN_ID,
+    generationId: SCREENER_RUN_ID,
     title: "Market screen — NASDAQ100 (scheduled)",
     source: "screener",
     summary: "Scanned 100 symbols, 5 matched.",
-    body: JSON.stringify({ trigger: "scheduled", success: true, matchedCount: 5, timestamp: TS.screener }),
-    created_at: TS.screener,
-  },
-];
-
-const SCAN_FIXTURE = {
-  id: "scan-1",
-  generatedAt: TS.options,
-  mode: "best_trade",
-  modelVersion: "1.1.2",
-  gate: { fit: 3, borderline: 2, noFit: 5 },
-  coverage: {
-    considered: 10, scanned: 10, truncated: 0, evaluated: 10, errors: 0, withTrades: 4,
-    eventCalendar: { covered: 0, total: 0, coveragePct: 0 },
-  },
-  profileRef: { id: "p1", name: "Growth", version: 2 },
-  userLogin: "alice",
-};
-
-const SCAN2_FIXTURE = { ...SCAN_FIXTURE, id: "scan-2", generatedAt: TS.scan2 };
-
-const DISCOVERY_FIXTURE = {
-  id: "disc-1",
-  createdAt: TS.discovery,
-  userLogin: "alice",
-  trigger: "scheduled",
-  inputModel: "saved-request",
-  status: "completed",
-  requestCount: 2,
-  completedCount: 2,
-  failedCount: 0,
-  abstainedCount: 0,
-  symbols: ["AAPL"],
-};
-
-const FEED_RUN = {
-  timestamp: TS.screener,
-  trigger: "scheduled",
-  provider: "etrade",
-  universe: "NASDAQ100",
-  sector: "ALL",
-  success: true,
-  totalScanned: 100,
-  matchedCount: 5,
-  opportunities: [],
-  allStocks: [],
-  discoveryMessage: "",
-};
-
-/** Per-table stub SQL over the four stores' list queries. The stores'
- *  ensure() DDL is answered benignly (PRAGMA claims user_login exists,
- *  so no ALTER is attempted); SELECTs are served per table. */
-function makeSql() {
-  const calls: { query: string; params: unknown[] }[] = [];
-  const sql = {
-    calls,
-    exec(query: string, ...params: unknown[]) {
-      calls.push({ query, params });
-      if (query.includes("PRAGMA")) return [{ name: "user_login" }];
-      if (query.includes("mas_opportunity_scans")) {
-        if (query.includes("SELECT summary_json")) {
-          return [SCAN_FIXTURE, SCAN2_FIXTURE].map((s) => ({ summary_json: JSON.stringify(s) }));
-        }
-        return [];
-      }
-      if (query.includes("mas_discovery_runs")) {
-        if (query.includes("SELECT summary_json")) {
-          return [{ summary_json: JSON.stringify(DISCOVERY_FIXTURE) }];
-        }
-        return [];
-      }
-      if (query.includes("mas_reports") && query.includes("SELECT")) return REPORT_ROWS;
-      return [];
-    },
+    userLogin: "alice",
+    body: { trigger: "scheduled", success: true, matchedCount: 5, timestamp: TS.screener },
+    createdAt: TS.screener,
+  });
+  // A second owner's report: the owner-scoping pin's other side.
+  const storedBob = storeReportAtGeneration(sql as never, {
+    runId: "screener:2026-10-22T07:00:00.000Z",
+    generationId: "screener:2026-10-22T07:00:00.000Z",
+    title: "Market screen — NASDAQ100 (scheduled)",
+    source: "screener",
+    summary: "Scanned 100 symbols, 1 matched.",
+    userLogin: "bob",
+    body: { trigger: "scheduled", success: true, matchedCount: 1, timestamp: "2026-10-22T07:00:00.000Z" },
+    createdAt: "2026-10-22T07:00:00.000Z",
+  });
+  expect(storedOptions).not.toBeNull();
+  expect(storedScreener).not.toBeNull();
+  expect(storedBob).not.toBeNull();
+  const env = await projectReportsInto(mock, sql);
+  return {
+    mock,
+    sql,
+    env,
+    twinId: d1JobRunRecordId(twin),
+    pipelineId: d1JobRunRecordId(pipeline),
+    optionsReportId: storedOptions!.reportId,
+    screenerReportId: storedScreener!.reportId,
+    bobReportId: storedBob!.reportId,
   };
-  return sql as any;
 }
 
-function makeCtx(sql: any, feed: unknown[] = [FEED_RUN]): ReportsRouteContext {
+function runsCtx(fx: Awaited<ReturnType<typeof d1Fixture>>): ReportsRouteContext {
   return {
-    ensureTables: () => sql,
-    getScreenerAgent: () => ({ getHistory: async () => feed }) as any,
-    getScreenerExecutionContext: async () => ({ userLogin: "alice" }),
-    getReportDispatchHitl: () => ({}) as any,
-    hitlPreviewReady: () => true,
-    executeApprovedSend: async () => {},
-    buildResearchEmailBody: (hit: any) => hit.body,
-    buildResearchWebhookBody: (hit: any) => ({ body: hit.body }),
-    reportHitlActions: new Map(),
-    hitlApprovedDispatches: new Map(),
-    hitlDispatchHistory: new Map(),
-    recordHitlDispatchHistory: () => {},
-    watchdogTimerCount: () => 0,
-    lastReportWatchdogSweepCount: () => 0,
-    lastReportWatchdogSweepAt: () => null,
-    startReportWatchdog: () => {},
-    stopReportWatchdog: () => {},
-    persistApproval: () => {},
-    persistDispatchStatus: () => {},
+    ensureTables: () => fx.sql as never,
+    env: fx.env as never,
+  } as ReportsRouteContext;
+}
+
+function bareCtx(): ReportsRouteContext {
+  return {
+    ensureTables: () => new MockSqlStorage() as never,
+    env: { AGENT_DB: new MockD1Database() as never, IAAA_TENANT_ID: "primary" },
   } as ReportsRouteContext;
 }
 
@@ -168,76 +263,120 @@ async function call(path: string, ctx: ReportsRouteContext, init: RequestInit = 
 }
 
 describe("GET /api/runs (S5)", () => {
-  it("merges all four DO stores newest-first with canonical de-duplication", async () => {
-    const res = await call("/api/runs?kind=all", makeCtx(makeSql()), {
+  it("D1-only (#6103): serves projected canonical rows newest-first with the twin absorbed", async () => {
+    const fx = await d1Fixture();
+    const res = await call("/api/runs?kind=all", runsCtx(fx), {
       headers: { "x-user-login": "alice" },
     });
     expect(res).not.toBeNull();
     expect(res!.status).toBe(200);
     const data = (await res!.json()) as any;
     expect(data.kind).toBe("all");
-    // scan-1 (canonical twin) and the feed twin of the canonical
-    // screener row are gone; everything else survives, newest first.
+    // Issue #6103 (Q5) — no mode rides the response anymore.
+    expect("ledgerReadMode" in data).toBe(false);
+    // Newest first: the standalone engine row (11:00), the options
+    // report (10:00), the screener report (08:00). Bob's report is
+    // owner-scoped out by the alice header; the twin job-run-record
+    // row is absorbed into the canonical options row, never a
+    // second row.
     expect(data.runs.map((r: any) => r.id)).toEqual([
-      "disc-1",
-      "rep-options-1",
-      "scan-2",
-      "rep-screener-1",
+      fx.pipelineId,
+      fx.optionsReportId,
+      fx.screenerReportId,
     ]);
-    expect(data.count).toBe(4);
-    const canonical = data.runs.find((r: any) => r.id === "rep-options-1");
-    expect(canonical.reportId).toBe("rep-options-1");
+    expect(data.count).toBe(3);
+    expect(data.runs.map((r: any) => r.id)).not.toContain(fx.twinId);
+    expect(data.runs.map((r: any) => r.id)).not.toContain(fx.bobReportId);
+    const canonical = data.runs.find((r: any) => r.id === fx.optionsReportId);
+    expect(canonical.reportId).toBe(fx.optionsReportId);
     expect(canonical.scanRunId).toBe("scan-1");
-    const detailOnly = data.runs.find((r: any) => r.id === "scan-2");
-    expect(detailOnly.reportId).toBeNull();
-    expect(detailOnly.status).toBeNull();
+    const screener = data.runs.find((r: any) => r.id === fx.screenerReportId);
+    expect(screener.kind).toBe("screener");
+    expect(screener.status).toBe("completed");
+    expect(screener.resultCount).toBe(5);
+    // The projected stores land; the unprojected families are empty
+    // + named, never silent.
+    expect(data.storeErrors?.reports).toBeUndefined();
+    expect(data.storeErrors?.jobRunRecords).toBeUndefined();
+    expect(data.storeErrors?.runs).toBeUndefined();
+    expect(data.storeErrors?.scans).toMatch("not projected");
+    expect(data.storeErrors?.discovery).toMatch("not projected");
+    expect(data.storeErrors?.screener).toMatch("not projected");
   });
 
-  it("kind=discovery reads only the discovery store", async () => {
-    const sql = makeSql();
-    const res = await call("/api/runs?kind=discovery", makeCtx(sql), {
+  it("kind=discovery (#6103): no discovery rows — discovery is not projected, named in storeErrors", async () => {
+    const fx = await d1Fixture();
+    const res = await call("/api/runs?kind=discovery", runsCtx(fx), {
       headers: { "x-user-login": "alice" },
     });
     const data = (await res!.json()) as any;
-    expect(data.runs.map((r: any) => r.kind)).toEqual(["discovery"]);
-    const queried = sql.calls.map((c: any) => c.query).join("\n");
-    expect(queried).not.toContain("mas_opportunity_scans");
-    expect(queried).not.toContain("FROM mas_reports");
+    expect("ledgerReadMode" in data).toBe(false);
+    expect(data.runs).toEqual([]);
+    expect(data.storeErrors?.discovery).toMatch("not projected");
+    // The projected canonical rows never leak into the discovery
+    // read — the discovery family is empty by itself.
+    expect(data.storeErrors?.reports).toBeUndefined();
   });
 
-  it("kind=screener returns canonical + feed screener runs only", async () => {
-    const res = await call("/api/runs?kind=screener", makeCtx(makeSql()));
+  it("kind=screener (#6103): canonical screener rows only — the feed is gone, named in storeErrors", async () => {
+    const fx = await d1Fixture();
+    const res = await call("/api/runs?kind=screener", runsCtx(fx), {
+      headers: { "x-user-login": "alice" },
+    });
     const data = (await res!.json()) as any;
-    expect(data.runs.map((r: any) => r.id)).toEqual(["rep-screener-1"]);
+    expect(data.runs.map((r: any) => r.id)).toEqual([fx.screenerReportId]);
     expect(data.runs[0].kind).toBe("screener");
+    expect(data.storeErrors?.screener).toMatch("not projected");
+    expect(data.storeErrors?.discovery).toBeUndefined();
+    expect(data.storeErrors?.scans).toBeUndefined();
   });
 
   it("an invalid kind is a 400 with the S1 field-named error", async () => {
-    const res = await call("/api/runs?kind=bogus", makeCtx(makeSql()));
+    const res = await call("/api/runs?kind=bogus", bareCtx());
     expect(res!.status).toBe(400);
     const data = (await res!.json()) as any;
     expect(data.error).toContain("kind:");
     expect(data.runs).toEqual([]);
   });
 
-  it("scopes the scan store by the caller's x-user-login header", async () => {
-    const sql = makeSql();
-    await call("/api/runs?kind=options_scanner", makeCtx(sql), {
-      headers: { "x-user-login": "alice" },
-    });
-    const scanSelect = sql.calls.find(
-      (c: any) => c.query.includes("mas_opportunity_scans") && c.query.includes("SELECT summary_json"),
-    );
-    expect(scanSelect).toBeDefined();
-    expect(scanSelect!.params[0]).toBe("alice");
+  it("scopes the projected reports by the caller's x-user-login header (#6103: the scan store is gone — the caller-scoping assertion now pins the reports owner scope)", async () => {
+    const fx = await d1Fixture();
+    const alice = (await (
+      await call("/api/runs?kind=all", runsCtx(fx), { headers: { "x-user-login": "alice" } })
+    )!.json()) as any;
+    expect(alice.runs.map((r: any) => r.id)).toEqual([
+      fx.pipelineId,
+      fx.optionsReportId,
+      fx.screenerReportId,
+    ]);
+    expect(alice.runs.map((r: any) => r.id)).not.toContain(fx.bobReportId);
+    const bob = (await (
+      await call("/api/runs?kind=all", runsCtx(fx), { headers: { "x-user-login": "bob" } })
+    )!.json()) as any;
+    // Bob sees his own report + the ownerless engine row — but the
+    // twin ALSO surfaces here: its canonical report is owner-scoped
+    // out of bob's read, so the absorption link (which rides the
+    // owner-filtered reports list) never names it. Alice's report
+    // rows themselves never leak; only the ownerless twin row shows.
+    expect(bob.runs.map((r: any) => r.id)).toEqual([fx.pipelineId, fx.twinId, fx.bobReportId]);
+    expect(bob.runs.map((r: any) => r.id)).not.toContain(fx.optionsReportId);
+    expect(bob.runs.map((r: any) => r.id)).not.toContain(fx.screenerReportId);
+    // No header: tenant-scoped, both owners' rows show.
+    const unscoped = (await (await call("/api/runs?kind=all", runsCtx(fx)))!.json()) as any;
+    expect(unscoped.runs.map((r: any) => r.id)).toEqual([
+      fx.pipelineId,
+      fx.optionsReportId,
+      fx.screenerReportId,
+      fx.bobReportId,
+    ]);
   });
 
   it("does not claim POST /api/runs (falls through to the next family)", async () => {
-    const res = await call("/api/runs", makeCtx(makeSql()), { method: "POST" });
+    const res = await call("/api/runs", bareCtx(), { method: "POST" });
     expect(res).toBeNull();
   });
 
-  it("round-trip: a run persisted via the canonical write path is returned with its id", async () => {
+  it("round-trip (#6103): a run persisted via the canonical write path is returned with its id from D1", async () => {
     const mock = new MockSqlStorage() as any;
     ensureScheduledReportsTable(mock);
     const persistedId = persistScheduledReportSql(mock, {
@@ -250,7 +389,13 @@ describe("GET /api/runs (S5)", () => {
       body: { trigger: "scheduled", success: true, matchedCount: 5, timestamp: TS.screener },
       createdAt: TS.screener,
     });
-    const res = await call("/api/runs?kind=all", makeCtx(mock, []));
+    const d1 = new MockD1Database();
+    const env = await projectReportsInto(d1, mock);
+    const res = await call(
+      "/api/runs?kind=all",
+      { ensureTables: () => mock, env: env as never } as ReportsRouteContext,
+      { headers: { "x-user-login": "alice" } },
+    );
     expect(res!.status).toBe(200);
     const data = (await res!.json()) as any;
     const row = data.runs.find((r: any) => r.id === persistedId);
@@ -259,6 +404,7 @@ describe("GET /api/runs (S5)", () => {
     expect(row.reportId).toBe(persistedId);
     expect(row.resultCount).toBe(5);
     expect(row.status).toBe("completed");
+    expect(data.storeErrors?.reports).toBeUndefined();
   });
 });
 

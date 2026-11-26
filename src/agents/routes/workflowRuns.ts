@@ -10,9 +10,11 @@
  * reasons, the trigger and how it was evidenced, artifacts, and
  * delivery states.
  *
- * Reads are scoped to this Durable Object (one per signed-in user):
- * jobs by session id, outcomes by the object's own store, stage
- * transitions by the verified login. Each source is read defensively:
+ * Reads are D1-only (issue #6103): jobs by session id and outcomes
+ * from the folded facts on D1 job_run_records, both owner/session
+ * scoped exactly as the DO reads were; stage transitions are not
+ * read at all — they are not part of the D1 run ledger, and the
+ * gap is named in `storeErrors`. Each source is read defensively:
  * one broken store never hides the others — its error is named in
  * `storeErrors` and the rest of the ledger still renders.
  *
@@ -26,9 +28,7 @@ import { createShardJobAdapter } from "../../data/createShardJobPorts";
 import type { ShardJobReader, ShardJobRow } from "../../data/shardJobPorts";
 import { d1JobRunRecordId, listD1JobRunRecords } from "../../services/jobRunRecordReads";
 import type { JobRunRecord } from "../../services/jobRunRecords";
-import { listJobOutcomes } from "../../services/jobOutcomes";
 import { listScreeningActivity } from "../../services/screeningActivity";
-import { listScheduledReports } from "../../services/scheduledReports";
 import { runSummaryFromReport, scanRunMatchesLedgerRow, type RunSummary } from "../../services/runSummaries";
 import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
 import { DEPLOYMENT_DEFAULT_TENANT_ID } from "../../config/tenantDefaults";
@@ -146,10 +146,6 @@ function clampLimit(raw: string | null): number {
 
 function str(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
-}
-
-function num(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 /** Read the job tree with payloads — the only read that needs them. */
@@ -469,25 +465,6 @@ export function dropAbsorbedReportSummaries<
   );
 }
 
-function outcomeRow(row: ReturnType<typeof listJobOutcomes>[number]): WorkflowRunOutcomeRow {
-  return {
-    id: row.id,
-    kind: row.kind,
-    trigger: row.trigger,
-    status: row.status,
-    scanned: num(row.scanned),
-    matched: num(row.matched),
-    codedError: row.codedError,
-    reportUrl: row.reportUrl,
-    pdfKey: row.pdfKey,
-    xlsxKey: row.xlsxKey,
-    csvKey: row.csvKey,
-    deliveryStates: row.deliveryStates,
-    origin: row.origin,
-    createdAt: row.createdAt,
-  };
-}
-
 export interface SagaChainRunsInput {
   auditRows: Array<Record<string, unknown>>;
   /** Per-chain saga projection rows (null when the D1 read did not answer). */
@@ -795,17 +772,38 @@ export async function handleWorkflowRunsRoutes(
   // a 5-stage chain must not displace five single-job runs.
   const jobLimit = Math.min(MAX_LIMIT * 10, Math.max(120, (limit + offset) * 8));
   const storeErrors: Record<string, string> = {};
-  // Issue #4116 — the D1-only read mode: when the tenant's readMode
-  // is "d1-only", jobs / report docs / unified records read the
-  // projected ledgers from D1 alone (no DO read in the path);
-  // anything else keeps the Option B merged view. The resolved
-  // mode rides the response so it is visible, never silent.
-  const { resolveLedgerReadMode, listProjectedReportSummaries, listProjectedWorkflowRunJobs } =
+  // Issue #6103 — the run-ledger reads are D1-only: jobs / report
+  // docs / unified records / outcomes read the D1 ledgers alone
+  // (no DO read in the path, no mode switch). The resolved mode is
+  // gone from the response (Q5) — there is one mode now.
+  const { listProjectedReportSummaries, listProjectedWorkflowRunJobs, listD1JobOutcomes } =
     await import("../../services/runLedgerReads");
-  const ledgerReadMode =
-    ctx.env !== undefined ? await resolveLedgerReadMode(ctx.env as never) : "merged";
   const tenantId =
     ctx.env !== undefined ? resolveIaaaTenant(ctx.env as never) : DEPLOYMENT_DEFAULT_TENANT_ID;
+  // Issue #6103 (Q4) — the D1 rows arrive via the grandfathered
+  // #6099 projector, which runs only when a carrier is configured
+  // for this tenant. When none is, the runs are incomplete and the
+  // gap is named here, never silent. A carrier row that cannot be
+  // read is NOT named: the D1 reads below already fail loudly
+  // there, so naming it too would double-report the same failure.
+  // The carrier state itself cannot be verified from the repo —
+  // it is live D1 state — so this names the configuration gap, not
+  // a verified live state.
+  if (ctx.env !== undefined) {
+    try {
+      const { readTenantProjectionCarriers } = await import("../../services/projectionCarriers");
+      const carriers = await readTenantProjectionCarriers(ctx.env as never);
+      if (carriers.status === "unconfigured") {
+        storeErrors.runs =
+          "runs incomplete: no projection carrier configured for this tenant — projected rows are missing; engine D1 records still show";
+      } else if (carriers.status === "ok" && !carriers.carriers?.orm && !carriers.carriers?.queues) {
+        storeErrors.runs =
+          "runs incomplete: no projection carrier enabled for this tenant — projected rows are missing; engine D1 records still show";
+      }
+    } catch {
+      // Unreadable carrier store — the D1 reads below report it.
+    }
+  }
   let linkedJobRunIds = new Set<string>();
 
   let jobs: WorkflowRunJobRow[] = [];
@@ -814,42 +812,28 @@ export async function handleWorkflowRunsRoutes(
   let unifiedRecords: UnifiedWorkflowRunRecord[] = [];
 
   try {
-    if (ledgerReadMode === "d1-only") {
-      if (ctx.env === undefined) {
-        throw new Error("run-ledger projection unavailable: no environment available to read the D1 ledgers");
-      }
-      jobs = await listProjectedWorkflowRunJobs(ctx.env as never, { tenantId, sessionId, limit: jobLimit });
-    } else {
-      const sql = ctx.ensureTables();
-      jobs = readWorkflowRunJobs(sql, sessionId, jobLimit);
+    if (ctx.env === undefined) {
+      throw new Error("run-ledger projection unavailable: no environment available to read the D1 ledgers");
     }
+    jobs = await listProjectedWorkflowRunJobs(ctx.env as never, { tenantId, sessionId, limit: jobLimit });
   } catch (err) {
     storeErrors.jobs = err instanceof Error ? err.message : String(err);
   }
-  if (ledgerReadMode === "d1-only") {
-    // Issue #4116 — job outcomes are not projected: the list is
-    // empty in D1-only mode, named here, never silent.
-    storeErrors.outcomes = "not projected: job outcomes are not part of the #4116 D1 projection";
-  } else {
-    try {
-      outcomes = listJobOutcomes(ctx.ensureTables(), Math.min(MAX_LIMIT * 2, Math.max(50, (limit + offset) * 2))).map(outcomeRow);
-    } catch (err) {
-      storeErrors.outcomes = err instanceof Error ? err.message : String(err);
+  try {
+    if (ctx.env === undefined) {
+      throw new Error("run-ledger projection unavailable: no environment available to read the D1 ledgers");
     }
+    outcomes = await listD1JobOutcomes(ctx.env as never, {
+      limit: Math.min(MAX_LIMIT * 2, Math.max(50, (limit + offset) * 2)),
+    });
+  } catch (err) {
+    storeErrors.outcomes = err instanceof Error ? err.message : String(err);
   }
-  if (ledgerReadMode === "d1-only") {
-    // Issue #4116 — stage transitions are not projected: the list
-    // is empty in D1-only mode, named here, never silent.
-    storeErrors.stages = "not projected: stage transitions are not part of the #4116 D1 projection";
-  } else if (ctx.userLogin) {
-    try {
-      transitions = readWorkflowRunTransitions(ctx.ensureTables(), ctx.userLogin, 400);
-    } catch (err) {
-      storeErrors.stages = err instanceof Error ? err.message : String(err);
-    }
-  } else {
-    storeErrors.stages = "skipped: no authenticated user identity available to scope the stage records";
-  }
+  // Issue #6103 — stage transitions are not projected, permanently
+  // (user ruling 2026-11-25, "no more projections"): the list is
+  // empty, named here, never silent. Runs that had stages show
+  // their outcomes + docs instead.
+  storeErrors.stages = "not projected: stage transitions are not part of the D1 run ledger — the #4116 projection never carried them and no new projection is planned";
   // Unified strategy records: the same canonical bodies Docs Run
   // Details reads, overlaid onto their outcome twins by runId.
   // Best-effort and windowed (newest 100 strategy rows) — a
@@ -857,25 +841,20 @@ export async function handleWorkflowRunsRoutes(
   // outcome-only view, and a read failure never hides the others.
   if (ctx.userLogin) {
     try {
-      if (ledgerReadMode === "d1-only") {
-        // Issue #4116 — the projected reports (newest 100 rows,
-        // strategy rows among them) feed the same overlay; bodies
-        // are R2-resolved, read-only, so pointer rows overlay
-        // fully here.
-        if (ctx.env === undefined) {
-          throw new Error("run-ledger projection unavailable: no environment available to read the D1 ledgers");
-        }
-        const projected = await listProjectedReportSummaries(ctx.env as never, {
-          tenantId,
-          userLogin: ctx.userLogin,
-          limit: 100,
-        });
-        const strategy = projected.hits.filter((h) => h.source === "options_strategy");
-        unifiedRecords = unifiedRecordsFromCanonicalReports(strategy.map((h) => ({ id: h.id, runId: h.runId, title: h.title, body: h.body })));
-      } else {
-        const hits = listScheduledReports(ctx.ensureTables(), { userLogin: ctx.userLogin, sourceFilter: "options_strategy", limit: 100 });
-        unifiedRecords = unifiedRecordsFromCanonicalReports(hits.map((h) => ({ id: h.id, runId: h.runId, title: h.title, body: h.body })));
+      // Issue #6103 — the projected reports (newest 100 rows,
+      // strategy rows among them) feed the same overlay; bodies
+      // are R2-resolved, read-only, so pointer rows overlay
+      // fully here.
+      if (ctx.env === undefined) {
+        throw new Error("run-ledger projection unavailable: no environment available to read the D1 ledgers");
       }
+      const projected = await listProjectedReportSummaries(ctx.env as never, {
+        tenantId,
+        userLogin: ctx.userLogin,
+        limit: 100,
+      });
+      const strategy = projected.hits.filter((h) => h.source === "options_strategy");
+      unifiedRecords = unifiedRecordsFromCanonicalReports(strategy.map((h) => ({ id: h.id, runId: h.runId, title: h.title, body: h.body })));
     } catch (err) {
       storeErrors.canonical = err instanceof Error ? err.message : String(err);
     }
@@ -897,36 +876,24 @@ export async function handleWorkflowRunsRoutes(
   }> = [];
   if (ctx.userLogin) {
     try {
-      if (ledgerReadMode === "d1-only") {
-        // Issue #4116 — the projected reports feed the same Docs
-        // attachment + report-only runs, from D1 alone.
-        if (ctx.env === undefined) {
-          throw new Error("run-ledger projection unavailable: no environment available to read the D1 ledgers");
-        }
-        const projected = await listProjectedReportSummaries(ctx.env as never, {
-          tenantId,
-          userLogin: ctx.userLogin,
-          limit: 100,
-        });
-        linkedJobRunIds = projected.linkedJobRunIds;
-        const kept = new Set(dropAbsorbedReportSummaries(projected.summaries));
-        projected.hits.forEach((h, i) => {
-          if (!kept.has(projected.summaries[i])) return;
-          const entry = reportDocumentsFromCanonicalHit(h);
-          if (!entry) return;
-          reportDocs.push({ ...entry, summary: projected.summaries[i] });
-        });
-      } else {
-        const hits = listScheduledReports(ctx.ensureTables(), { userLogin: ctx.userLogin, limit: 100 });
-        const summaries = hits.map((h) => runSummaryFromReport(h));
-        const kept = new Set(dropAbsorbedReportSummaries(summaries));
-        hits.forEach((h, i) => {
-          if (!kept.has(summaries[i])) return;
-          const entry = reportDocumentsFromCanonicalHit(h);
-          if (!entry) return;
-          reportDocs.push({ ...entry, summary: summaries[i] });
-        });
+      // Issue #6103 — the projected reports feed the same Docs
+      // attachment + report-only runs, from D1 alone.
+      if (ctx.env === undefined) {
+        throw new Error("run-ledger projection unavailable: no environment available to read the D1 ledgers");
       }
+      const projected = await listProjectedReportSummaries(ctx.env as never, {
+        tenantId,
+        userLogin: ctx.userLogin,
+        limit: 100,
+      });
+      linkedJobRunIds = projected.linkedJobRunIds;
+      const kept = new Set(dropAbsorbedReportSummaries(projected.summaries));
+      projected.hits.forEach((h, i) => {
+        if (!kept.has(projected.summaries[i])) return;
+        const entry = reportDocumentsFromCanonicalHit(h);
+        if (!entry) return;
+        reportDocs.push({ ...entry, summary: projected.summaries[i] });
+      });
     } catch (err) {
       storeErrors.canonicalDocs = err instanceof Error ? err.message : String(err);
     }
@@ -1006,24 +973,33 @@ export async function handleWorkflowRunsRoutes(
       const records = await reader(
         Math.min(MAX_LIMIT * 2, Math.max(50, (limit + offset) * 2)),
       );
-      // Issue #4116 — in D1-only mode a job-run-record twin named
-      // by a projected report's link is absorbed into the canonical
-      // row (one run, one row); in merged mode both rows appear.
+      // Issue #6103 — a job-run-record twin named by a projected
+      // report's link is absorbed into the canonical row (one run,
+      // one row).
       let keptRecords = records;
-      if (ledgerReadMode === "d1-only" && linkedJobRunIds.size > 0) {
+      if (linkedJobRunIds.size > 0) {
         const { d1JobRunRecordId } = await import("../../services/jobRunRecordReads");
         keptRecords = records.filter((r) => !linkedJobRunIds.has(d1JobRunRecordId(r)));
       }
       // Issue #4357 — the join key: an engine D1 record whose
       // asyncJobId names a bridge row present in this read is
-      // absorbed into that run (one run, one row), in BOTH modes —
-      // the grouped run already represents it. A record whose
-      // bridge row is absent from the window still renders
-      // standalone; unlinked records (asyncJobId null) are
-      // untouched, so pre-slice rows render as today.
+      // absorbed into that run (one run, one row) — the grouped
+      // run already represents it. A record whose bridge row is
+      // absent from the window still renders standalone; unlinked
+      // records (asyncJobId null) are untouched, so pre-slice rows
+      // render as today.
       keptRecords = keptRecords.filter(
         (r) => !isInnerShardScanJobId(r.jobId) && !d1RecordLinkedToJobs(r, jobs),
       );
+      // Issue #6103 (Q1) — a fold-created outcome row (system
+      // "job-outcome") is carried by the outcomes input above and
+      // attached to its group there; it must not also render as a
+      // standalone engine record (one run, one row). Attached rows
+      // (engine rows with facts folded on) stay: they ARE engine
+      // runs, and their outcome attaches to their own group. The
+      // /api/runs read keeps fold rows — there they are the
+      // outcome's only representation.
+      keptRecords = keptRecords.filter((r) => r.system !== "job-outcome");
       keptJobRunRecords = keptRecords;
     } catch (err) {
       storeErrors.jobRunRecords = err instanceof Error ? err.message : String(err);
@@ -1247,7 +1223,6 @@ export async function handleWorkflowRunsRoutes(
     totalMatched: page.totalMatched,
     offset,
     limit,
-    ledgerReadMode,
     ...(Object.keys(storeErrors).length > 0 ? { storeErrors } : {}),
     generatedAt: new Date().toISOString(),
   });

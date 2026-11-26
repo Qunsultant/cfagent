@@ -96,13 +96,16 @@ and are not projections; this contract does not govern their reads.
   authoritative store.
 - A D1 projection read is a cross-instance / analytical read and
   tolerates its path's lag class (R-2).
-- The read names the mode it read under: the resolved
-  `ledgerReadMode` rides the response (`d1-only` / `merged`), so the
-  mode is visible, never silent.
-- A surface in d1-only mode names the families it cannot serve
-  (scans, discovery, screener feed, outcomes, stage transitions are
-  not projected — the list surface names each in `storeErrors`,
-  never a silent empty list).
+- The runs + reports surfaces read D1 only (issue #6103): there is
+  no per-tenant mode and no mode rides the response — one mode,
+  always D1. A read that follows a write in the same user journey
+  sees the row only once the write path's carrier has landed it
+  (R-5).
+- A surface names the families it cannot serve (scans, discovery,
+  screener feed, stage transitions are not projected — the list
+  surface names each in `storeErrors`, never a silent empty list).
+  Job outcomes ARE served, from the facts folded onto D1
+  `job_run_records` (#6103 Q1) — not a projection of the DO list.
 
 ### R-4 — Tenancy: a projection row carries the owning tenant
 
@@ -120,14 +123,17 @@ authoritative store — **unless** the write path's projection carrier
 is synchronous (R-2), in which case the projection has landed before
 the write returns and a projection read sees it.
 
-Consequence: **d1-only mode is enterable only with the synchronous
-(ORM) carrier configured.** A tenant on d1-only with queue-only (or
-sweep-only, or no) carriers reads stale or missing rows after a
-write — the run-detail lookup 404s with no "not yet projected"
-signal (see F-1). Until the F-1 fix lands, d1-only + a non-synchronous
-carrier combination is a known violation of this rule, recorded in
-Appendix A with its follow-up; it is not a grandfathered
-configuration.
+Consequence: **the D1-only read path requires a carrier for every
+tenant.** There is no per-tenant mode anymore (#6103) — every tenant
+reads D1-only — so a tenant with queue-only (or sweep-only, or no)
+carriers reads stale or missing rows after a write; the run-detail
+lookup 404s with no "not yet projected" signal (see F-1). Until the
+F-1 fix lands, D1-only reads + a non-synchronous carrier combination
+is a known violation of this rule, recorded in Appendix A with its
+follow-up; it is not a grandfathered configuration. The list surfaces
+name the gap when no carrier is configured for the tenant
+(`storeErrors.runs`, #6103 Q4) so the missing rows are visible, not
+silent.
 
 ### R-6 — Publication honesty: a failed projection is recorded, never dropped
 
@@ -190,7 +196,9 @@ this ADR. Grounds:
   `1a07d119`). Future audits append dated entries to the ledger;
   they never rewrite it.
 - Five violations found by the audit have follow-up sub-issues under
-  #4935, filed at identification time: #4961 (F-1, d1-only gate),
+  #4935, filed at identification time: #4961 (F-1, carrier-mandatory
+  gate — D1-only reads require a carrier for every tenant; the
+  per-tenant mode it gated is gone, #6103),
   #4962 (F-2, telemetry `ON CONFLICT`), #4963 (F-3, report version
   bump), #4964 (F-4, audit-publication logging), #4965 (F-5,
   chain/schedule tenant). Each fix removes the #4935 pin's exception
@@ -213,9 +221,8 @@ this ADR. Grounds:
   operational property, not statically checkable from source. The
   lag classes are stated in the contract; observing them needs the
   query observability of #4933.
-- **The d1-only gate (R-5 / F-1).** Enforcement is the #4961 fix
-  (a runtime validation in the carrier-config write + read-mode
-  resolution); no static scan can prove a tenant's stored config
+- **The carrier-mandatory gate (R-5 / F-1).** Enforcement is the #4961 fix
+  (a runtime validation in the carrier-config write); no static scan can prove a tenant's stored config
   combination is valid.
 - **Stable-eventId discipline (R-1c / F-10).** The event id is
   constructed at the call site; no scanner can tell whether two

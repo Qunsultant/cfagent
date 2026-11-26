@@ -5,6 +5,14 @@
  * (/api/runs/details) — merged with the DO ledgers on the existing
  * #3121 linkage, deduplicated on exact identity.
  *
+ * Issue #6103 (D1-only): the DO side of that merge is gone — the
+ * routes read the D1 ledgers alone, and the canonical rows arrive
+ * via their projected D1 rows (the #4116 parity fixture's shape:
+ * DO rows written through the canonical write path, projected at
+ * write time, never via the sweep). The route pins below are
+ * rewritten to the D1-only equivalents at the same strength; the
+ * identity / mapping / merge / reader pins are unchanged.
+ *
  * Pinned here:
  *  1. Identity: a D1 record's derived id is stable and unique per
  *     (jobId, started, finished); the two surfaces agree on it.
@@ -14,20 +22,21 @@
  *  3. Mapping: runFromJobRunRecord maps a D1 record to a WorkflowRun
  *     (source job-outcome, family other, honest empty stage list,
  *     lifecycle done for terminal outcomes).
- *  4. Merge: D1 rows survive alongside DO rows; an identical D1 row
+ *  4. Merge: D1 rows survive alongside canonical rows; an identical D1 row
  *     listed twice appears once; a D1 row and a canonical row with
  *     no exact join both survive (no heuristic twin-dropping — the
  *     engine writer stamps no linkage today, so no exact join
  *     exists; see the §15 known limit).
  *  5. Reader: an unbound AGENT_DB is a named error, never a silent
  *     empty list.
- *  6. Routes: /api/runs includes D1 rows under kind=all only;
+ *  6. Routes (#6103, D1-only): /api/runs includes D1 rows under kind=all only;
  *     /api/runs/details finds a D1 row by its derived id and names
  *     its store "job-pipeline"; /workflow-runs lists D1 runs;
- *     an unreadable D1 ledger is named in storeErrors and never
- *     hides the other ledgers.
+ *     with D1 unbound the list is EMPTY and the failure is named in
+ *     storeErrors — there is no DO fallback that renders anything.
  */
 import { describe, it, expect } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 
 import { buildJobRunRecord, type JobRunRecord } from "../src/services/jobRunRecords";
 import {
@@ -46,8 +55,62 @@ import { handleWorkflowRunsRoutes } from "../src/agents/routes/workflowRuns";
 import { MockSqlStorage } from "./mock-sql";
 import {
   ensureScheduledReportsTable,
+  listScheduledReports,
   persistScheduledReportSql,
 } from "../src/services/scheduledReports";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+  ensureJobRunRecordsSchema,
+} from "../src/data/d1JobRunRecordAdapter";
+import { createRunLedgerAdapter, ensureRunLedgerTables } from "../src/data/createRunLedgerPorts";
+import { postRunLedgerBestEffort } from "../src/services/runLedgerProjectionPosting";
+
+/** Minimal D1Database stand-in over node:sqlite (the J1 suite's double). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: { changes: info.changes, last_row_id: info.lastInsertRowid },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+  async batch(statements: any[]) {
+    const results: any[] = [];
+    this.sqlite.exec("BEGIN");
+    try {
+      for (const stmt of statements) results.push(await stmt.run());
+      this.sqlite.exec("COMMIT");
+    } catch (err) {
+      this.sqlite.exec("ROLLBACK");
+      throw err;
+    }
+    return results;
+  }
+}
 
 function d1Record(overrides: Partial<JobRunRecord> = {}): JobRunRecord {
   return buildJobRunRecord({
@@ -230,32 +293,76 @@ describe("listD1JobRunRecords (#3946)", () => {
   });
 });
 
-function reportsCtx(
-  sql: MockSqlStorage,
-  reader?: (limit: number) => Promise<JobRunRecord[]>,
-): ReportsRouteContext {
+/**
+ * Issue #6103 — the D1-only route fixture (the #4116 parity
+ * fixture's shape): the engine's D1 row is recorded in D1 for real,
+ * the canonical row is written through the canonical write path and
+ * projected at write time via postRunLedgerBestEffort using the
+ * sweep's own input mapping. The sweep itself is never run — it
+ * copies existing DO rows into D1, which the replacement ruling
+ * forbids. The tenant's carrier row is set so storeErrors.runs stays
+ * unset. No jobRunRecordReader is injected: the routes read D1 for
+ * real.
+ */
+async function d1Fixture() {
+  const mock = new MockD1Database();
+  const sql = new MockSqlStorage();
+  const jobDb = createD1JobRunRecordDb(mock as never);
+  await ensureJobRunRecordsSchema(jobDb);
+  await new D1JobRunRecordStore(jobDb).record(d1Record());
+  const canonicalId = seedCanonical(sql);
+  const adapter = createRunLedgerAdapter({ AGENT_DB: mock as never })!;
+  await ensureRunLedgerTables(adapter);
+  await adapter.setTenantProjectionCarriers(
+    "primary",
+    { queues: true, orm: true, sweep: true },
+    "merged",
+    Date.now(),
+  );
+  const env = { AGENT_DB: mock as never, IAAA_TENANT_ID: "primary" };
+  const nowMs = Date.now();
+  for (const hit of listScheduledReports(sql as never, { limit: 100 })) {
+    const createdAtMs = Date.parse(hit.createdAt);
+    const posted = await postRunLedgerBestEffort(
+      env,
+      "primary",
+      {
+        ledger: "reports",
+        row: {
+          reportId: hit.id,
+          tenantId: "primary",
+          workspaceId: "primary",
+          runId: hit.runId,
+          generationId: hit.generationId,
+          title: hit.title,
+          source: hit.source,
+          summary: hit.summary,
+          body: hit.body,
+          createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : nowMs,
+          updatedAtMs: Number.isFinite(createdAtMs) ? createdAtMs : nowMs,
+          userLogin: hit.userLogin,
+          bodyR2Key: hit.bodyR2Key,
+        },
+      },
+      nowMs,
+    );
+    expect(posted.projected).toBe(true);
+  }
+  return { mock, sql, env, canonicalId, d1Id: d1JobRunRecordId(d1Record()) };
+}
+
+function d1ReportsCtx(fx: Awaited<ReturnType<typeof d1Fixture>>): ReportsRouteContext {
+  return {
+    ensureTables: () => fx.sql as any,
+    env: fx.env as never,
+  } as ReportsRouteContext;
+}
+
+/** The pre-#6103 ctx: env without AGENT_DB, no reader — D1 unbound. */
+function unboundReportsCtx(sql: MockSqlStorage): ReportsRouteContext {
   return {
     ensureTables: () => sql as any,
     env: {},
-    jobRunRecordReader: reader,
-    getScreenerAgent: () => ({ getHistory: async () => [] }) as any,
-    getScreenerExecutionContext: async () => ({ userLogin: "alice" }),
-    getReportDispatchHitl: () => ({}) as any,
-    hitlPreviewReady: () => true,
-    executeApprovedSend: async () => {},
-    buildResearchEmailBody: (hit: any) => hit.body,
-    buildResearchWebhookBody: (hit: any) => ({ body: hit.body }),
-    reportHitlActions: new Map(),
-    hitlApprovedDispatches: new Map(),
-    hitlDispatchHistory: new Map(),
-    recordHitlDispatchHistory: () => {},
-    watchdogTimerCount: () => 0,
-    lastReportWatchdogSweepCount: () => 0,
-    lastReportWatchdogSweepAt: () => null,
-    startReportWatchdog: () => {},
-    stopReportWatchdog: () => {},
-    persistApproval: () => {},
-    persistDispatchStatus: () => {},
   } as ReportsRouteContext;
 }
 
@@ -273,44 +380,51 @@ function seedCanonical(sql: MockSqlStorage): string {
   });
 }
 
-describe("GET /api/runs merges D1 records (#3946)", () => {
+describe("GET /api/runs merges D1 records (#3946, D1-only #6103)", () => {
   it("includes a D1 row under kind=all, newest-first", async () => {
-    const sql = new MockSqlStorage();
-    const canonicalId = seedCanonical(sql);
+    const fx = await d1Fixture();
     const res = await handleReportsRoutes(
       new Request("https://x/api/runs?kind=all", { headers: { "x-user-login": "alice" } }),
       new URL("https://x/api/runs?kind=all"),
       "/api/runs",
       null,
-      reportsCtx(sql, async () => [d1Record()]),
+      d1ReportsCtx(fx),
     );
     expect(res!.status).toBe(200);
     const data = (await res!.json()) as any;
+    // Issue #6103 (Q5) — no mode rides the response anymore.
+    expect("ledgerReadMode" in data).toBe(false);
     const ids = data.runs.map((r: any) => r.id);
     expect(ids).toContain(d1JobRunRecordId(d1Record()));
-    expect(ids).toContain(canonicalId);
+    expect(ids).toContain(fx.canonicalId);
     expect(ids[0]).toBe(d1JobRunRecordId(d1Record()));
     const d1Row = data.runs.find((r: any) => r.id === d1JobRunRecordId(d1Record()));
     expect(d1Row.source).toBe("job-pipeline");
     expect(d1Row.reportId).toBeNull();
+    // The canonical row arrives via its projected D1 row, not the DO.
+    expect(data.storeErrors?.reports).toBeUndefined();
+    expect(data.storeErrors?.jobRunRecords).toBeUndefined();
   });
 
   it("excludes D1 rows under kind=screener", async () => {
-    const sql = new MockSqlStorage();
-    seedCanonical(sql);
+    const fx = await d1Fixture();
     const res = await handleReportsRoutes(
       new Request("https://x/api/runs?kind=screener", { headers: { "x-user-login": "alice" } }),
       new URL("https://x/api/runs?kind=screener"),
       "/api/runs",
       null,
-      reportsCtx(sql, async () => [d1Record()]),
+      d1ReportsCtx(fx),
     );
     const data = (await res!.json()) as any;
+    // Issue #6103: the canonical row now genuinely renders (via its
+    // projected D1 row) while the D1 row stays excluded — the old
+    // pin passed vacuously on an empty list.
+    expect(data.runs.map((r: any) => r.id)).toEqual([fx.canonicalId]);
     expect(data.runs.map((r: any) => r.id)).not.toContain(d1JobRunRecordId(d1Record()));
     expect(data.runs.every((r: any) => r.kind === "screener")).toBe(true);
   });
 
-  it("names an unbound D1 ledger in storeErrors and still renders the DO ledgers", async () => {
+  it("names an unbound D1 ledger in storeErrors and renders NOTHING — D1-only, no DO fallback (#6103)", async () => {
     const sql = new MockSqlStorage();
     const canonicalId = seedCanonical(sql);
     const res = await handleReportsRoutes(
@@ -318,19 +432,26 @@ describe("GET /api/runs merges D1 records (#3946)", () => {
       new URL("https://x/api/runs?kind=all"),
       "/api/runs",
       null,
-      reportsCtx(sql),
+      unboundReportsCtx(sql),
     );
     expect(res!.status).toBe(200);
     const data = (await res!.json()) as any;
-    expect(data.runs.map((r: any) => r.id)).toContain(canonicalId);
+    // The old premise dies with the merged view: with D1 unbound
+    // the D1 reads fail named and the list is EMPTY — no DO fallback
+    // renders the canonical row (or anything else).
+    expect(data.runs).toEqual([]);
+    expect(data.runs.map((r: any) => r.id)).not.toContain(canonicalId);
     expect(data.storeErrors.jobRunRecords).toContain("AGENT_DB");
+    expect(data.storeErrors.reports).toContain("AgentDB is not bound");
+    expect(data.storeErrors?.scans).toMatch("not projected");
+    expect(data.storeErrors?.discovery).toMatch("not projected");
+    expect(data.storeErrors?.screener).toMatch("not projected");
   });
 });
 
-describe("GET /api/runs/details finds a D1 row (#3946)", () => {
+describe("GET /api/runs/details finds a D1 row (#3946, D1-only #6103)", () => {
   it("returns a detail for the D1 row naming its store", async () => {
-    const sql = new MockSqlStorage();
-    seedCanonical(sql);
+    const fx = await d1Fixture();
     const wanted = d1JobRunRecordId(d1Record());
     const res = await handleReportsRoutes(
       new Request(`https://x/api/runs/details?runId=${encodeURIComponent(wanted)}`, {
@@ -339,7 +460,7 @@ describe("GET /api/runs/details finds a D1 row (#3946)", () => {
       new URL(`https://x/api/runs/details?runId=${encodeURIComponent(wanted)}`),
       "/api/runs/details",
       null,
-      reportsCtx(sql, async () => [d1Record()]),
+      d1ReportsCtx(fx),
     );
     expect(res!.status).toBe(200);
     const data = (await res!.json()) as any;

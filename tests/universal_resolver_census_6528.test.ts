@@ -12,7 +12,7 @@
  *    function — a 6th fails);
  *  - a new definition whose NAME already exists in the baseline at another
  *    file fails as a same-question duplicate;
- *  - the resolver definition total above its baselined 596 fails;
+ *  - the resolver definition total above its baselined 595 fails;
  *  - decreases and vanished rows pass — that is the shrink the programme
  *    wants, and retiring a duplicate means lowering or removing its
  *    baseline entry in the same PR.
@@ -64,8 +64,8 @@
  *   seeds the measured 595 and records the +1 here and in the census seed.
  * - Distinct questions: ≈306, recorded as a RANGE (285–320, central
  *   estimate — `copies-and-overlaps.md` §5: "an estimate, not a recount")
- *   and NEVER asserted exact. Implied copies at the seeded total: 276–311
- *   (596 − 320 … 596 − 285). The lossless check is that every definition
+ *   and NEVER asserted exact. Implied copies at the seeded total: 275–310
+ *   (595 − 320 … 595 − 285). The lossless check is that every definition
  *   maps to a question; per-row question keys are UNMAPPED at seed (the
  *   survey itemizes ≈190 of the long tail, not all 596) — the same-name
  *   duplicate check below is the name-as-question proxy until the #3786
@@ -83,6 +83,12 @@
  * (`sourceOfEnvironmentName`, `sourceOfBrokerBaseUrl`) are not
  * `resolve*`-named and are internal to the universal-resolution
  * module, hence 0 separate resolvers by the §2.1 counting rule.
+ *
+ * Issue #6103 (2026-11-25) lowers the baseline 596 → 595 by removing
+ * ONE row: `resolveLedgerReadMode` (`src/services/runLedgerReads.ts`)
+ * — the resolver is deleted with the merged read path; there is one
+ * D1-only read mode now, so the question it answered no longer exists.
+ * No other row changes.
  *
  * Exclusions (recorded as data, not follow-up notes — #3786 Scope):
  * - Aliases (0 definitions): `resolveTradeEnvironmentFromSettings`
@@ -603,7 +609,6 @@ const BASELINE: Array<[string, string, Kind, number, Disposition]> = [
   ["src/services/researchVenue.ts", "resolveResearchVenue", "standalone", 1, "CANONICAL"],
   ["src/services/runBrokerContext.ts", "resolveRunBrokerContext", "standalone", 1, "CANONICAL"],
   ["src/services/runDetails.ts", "resolveRunDetailMessage", "standalone", 1, "DUPLICATE-NAME"],
-  ["src/services/runLedgerReads.ts", "resolveLedgerReadMode", "standalone", 1, "CANONICAL"],
   ["src/services/scheduleControls.ts", "resolveEffectiveScheduleFiringEnabled", "standalone", 1, "CANONICAL"],
   ["src/services/scheduleControls.ts", "resolveEffectiveScheduleFloor", "standalone", 1, "CANONICAL"],
   ["src/services/scheduleControls.ts", "resolveScheduleControlsView", "standalone", 1, "CANONICAL"],
@@ -1149,9 +1154,9 @@ describe("universal resolver census (#6528 Phase 1)", () => {
   it("the distinct-question count is a range, never an exact number", () => {
     expect(QUESTION_RANGE_LOW).toBeLessThan(QUESTION_CENTRAL_ESTIMATE);
     expect(QUESTION_CENTRAL_ESTIMATE).toBeLessThan(QUESTION_RANGE_HIGH);
-    // Implied copies at the seeded total: 596 − 320 = 276 … 596 − 285 = 311.
-    expect(baselineTotal - QUESTION_RANGE_HIGH).toBe(276);
-    expect(baselineTotal - QUESTION_RANGE_LOW).toBe(311);
+    // Implied copies at the seeded total: 595 − 320 = 275 … 595 − 285 = 310.
+    expect(baselineTotal - QUESTION_RANGE_HIGH).toBe(275);
+    expect(baselineTotal - QUESTION_RANGE_LOW).toBe(310);
   });
 
   it("no test-only or scripts-only resolver is counted as production", () => {
@@ -1210,12 +1215,12 @@ describe("universal resolver census (#6528 Phase 1)", () => {
       expect(count, `${kind} count`).toBeGreaterThan(0);
       expect(DISPOSITIONS.has(disposition), `unknown disposition ${disposition}`).toBe(true);
     }
-    expect(baselineTotal).toBe(596);
+    expect(baselineTotal).toBe(595);
     const byKind = new Map<Kind, number>();
     for (const [, , kind, count] of BASELINE) {
       byKind.set(kind, (byKind.get(kind) ?? 0) + count);
     }
-    expect(byKind.get("standalone")).toBe(565);
+    expect(byKind.get("standalone")).toBe(564);
     expect(byKind.get("class-method")).toBe(18);
     expect(byKind.get("resolver-type")).toBe(9);
     expect(byKind.get("interface-method")).toBe(4);
