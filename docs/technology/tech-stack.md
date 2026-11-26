@@ -56,6 +56,7 @@ already covers the need.
 | Vitest + @cloudflare/vitest-plugin | ^5.0.3 / ^1.4.11 | Tests (incl. `test:pins`, workerd suite); jsdom, @vitest/coverage-v8 |
 | ESLint + typescript-eslint | ^9.39.5 / ^8.72.2 | Lint |
 | pdf-lib, postal-mime, @e965/xlsx, mppx | ^1.17.1 / ^2.7.5 / ^0.20.3 / ^0.13.1 | PDF, MIME, spreadsheet, and document utilities |
+| CNCF agntcy
 
 ## Decided, landing via slices
 
