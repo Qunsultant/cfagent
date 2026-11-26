@@ -35,6 +35,7 @@ import {
 import { jobDefinitionSpec } from "../config/jobDefinitionCatalog";
 import { bindJobDefinitionParams } from "./jobDefinitionParamBinders";
 import { buildJobConfigFromSpec, type JobDefinitionPerStage } from "./jobDefinitionSpecBuilder";
+import { runWithResearchRunId, triggerManualResearch, type PublishEntry } from "./researchTriggers";
 import type { ResearchFeedStageOutput } from "./researchFeedHandoff";
 import type { ResearchEnrichStageOutput } from "./researchEnrichHandoff";
 
@@ -372,6 +373,84 @@ export function registerResearchSteps(
  * `evaluationStore` while ensuring `analyze.ooda` and `evaluate.apply` are
  * always registered in `createPipelineStepRegistry`.
  */
+/**
+ * Issue #6040 — the ONE in-process builder for OODA's six stage bodies.
+ *
+ * OODA is a multi-stage process (feed, enrich, analyze, generate, deliver,
+ * evaluate); the analyze-only seam was the legacy shape. This builder turns
+ * the agent's own handles into the engine's ResearchStepDeps, so the j-stack
+ * owns the sequence, the retries and the stage rows while each stage body runs
+ * in-process — no door, no self-RPC, no literal receipt.
+ */
+export interface AgentResearchStepHandles {
+  /** The per-login research agent (feed, enrich, evaluate). */
+  getResearchAgent?: (userLogin: string) => unknown;
+  /** The publish leg (analyze, generate, deliver) the agent already owns. */
+  runResearchAndPublish: PublishEntry<unknown>;
+}
+
+export function createAgentResearchStepDeps(
+  handles: AgentResearchStepHandles,
+): ResearchStepDeps {
+  const agentFor = (userLogin: string): Record<string, any> | null => {
+    const agent = handles.getResearchAgent?.(userLogin);
+    return (agent as Record<string, any> | null | undefined) ?? null;
+  };
+  const requireStage = (userLogin: string, method: string): Record<string, any> => {
+    const agent = agentFor(userLogin);
+    if (!agent || typeof agent[method] !== "function") {
+      throw new Error(
+        `research_stage_unavailable: the research agent is not configured for ${method}.`,
+      );
+    }
+    return agent;
+  };
+  return {
+    runFeedStage: (input) =>
+      requireStage(input.userLogin, "runFeedStage").runFeedStage({
+        trigger: input.trigger,
+        userLogin: input.userLogin,
+        runId: input.runId,
+        ...(input.brokerId ? { brokerId: input.brokerId } : {}),
+        ...(input.mode ? { mode: input.mode } : {}),
+      }),
+    runEnrichStage: (input) =>
+      requireStage(input.userLogin, "runEnrichStage").runEnrichStage(input.feed, {
+        trigger: input.trigger,
+        userLogin: input.userLogin,
+        runId: input.runId,
+      }),
+    // Issue #5911 — the run id the step already holds is THE id: the pipeline
+    // must not mint a second one.
+    runOodaAnalysis: (ctx) =>
+      runWithResearchRunId(ctx.runId, () =>
+        triggerManualResearch(handles.runResearchAndPublish, ctx.userLogin, {
+          runId: ctx.runId,
+          ...(ctx.brokerId ? { brokerId: ctx.brokerId } : {}),
+          ...(ctx.mode ? { mode: ctx.mode } : {}),
+        }),
+      ) as never,
+    runGenerateStage: (input) =>
+      handles.runResearchAndPublish("manual", input.userLogin, {
+        runId: input.runId,
+        stage: "generate",
+        report: input.report,
+      }) as never,
+    runDeliverStage: (input) =>
+      handles.runResearchAndPublish("manual", input.userLogin, {
+        runId: input.runId,
+        stage: "deliver",
+        report: input.report,
+        publication: input.publication,
+      }) as never,
+    runEvaluateStage: async (ctx) => {
+      const agent = agentFor(ctx.userLogin);
+      if (!agent || typeof agent.evaluateRun !== "function") return null;
+      return (await agent.evaluateRun(ctx.runId, ctx.userLogin)) as never;
+    },
+  };
+}
+
 export function createDefaultResearchStepDeps(
   overrides: Partial<ResearchStepDeps> & { allowTestStub?: boolean } = {},
 ): ResearchStepDeps {

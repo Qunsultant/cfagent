@@ -6,7 +6,7 @@
  * screening/validation/report logic between them.
  */
 
-import type { TriggerSource } from "./researchPipeline";
+import type { ResearchReport, TriggerSource } from "./researchPipeline";
 import type { ResearchFeedStageOutput } from "./researchFeedHandoff";
 import type { ResearchEnrichStageOutput } from "./researchEnrichHandoff";
 
@@ -42,6 +42,14 @@ export interface ResearchRunSelection {
   enrich?: ResearchEnrichStageOutput;
   /** Issue #6065 — analyze stops at the report; generate/deliver own publication. */
   stage?: "analyze" | "generate" | "deliver";
+  /**
+   * Issue #6040 — the payloads the analyze/generate/deliver legs actually
+   * pass: the report being published and its publication options. The type
+   * omitted both while the route passed them untyped, so the publish entry's
+   * real contract was wider than the type it declared.
+   */
+  report?: ResearchReport;
+  publication?: unknown;
 }
 
 export type PublishEntry<R> = (
