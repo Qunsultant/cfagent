@@ -730,6 +730,7 @@ export async function handleEtradeOptionsRoutes(
           dataAgent,
           storage: ctx.agentCtx?.storage as unknown as OptionsStageStorage | undefined,
           getSql: ctx.agentCtx?.storage?.sql ? () => ctx.agentCtx.storage.sql : undefined,
+          env: ctx.env,
           queue: ctx.env.SCREENER_EVENTS ?? null,
         });
         const discoverPanelDurationMs = Date.now() - t0;
@@ -757,7 +758,7 @@ export async function handleEtradeOptionsRoutes(
         const strategyArtifacts = await ctx.getScreenerAgent(userLogin).generateAndStoreStrategyReport(strategyReportInput);
         const artifactLinks = strategyReportArtifactLinks(strategyArtifacts);
         // Slice 1: stamp tenant provider/broker into provenance (fail-open etrade/etrade).
-        recordStrategyScreenRun(ctx.getOrm(), {
+        await recordStrategyScreenRun(ctx.getOrm(), {
           ...strategyArtifacts,
           ...optionsFeedProviderStamp(await resolveTenantProviders(ctx.env)),
           userLogin,
@@ -786,7 +787,9 @@ export async function handleEtradeOptionsRoutes(
           submittedVia: `ui — POST ${path} (options-strategy-panel)`,
           generationDurationMs: Date.now() - t1,
           discoverPanelDurationMs,
-        });
+        },
+        // Issue #6101 — the strategy outcome folds onto D1.
+        { env: ctx.env, userLogin });
         if (isBestTrade) {
           return Response.json({ bestTrade: result.bestTrade, evaluations: result.legacy?.evaluations, nameLedger: result.legacy?.nameLedger, ...common, ...artifactLinks });
         }

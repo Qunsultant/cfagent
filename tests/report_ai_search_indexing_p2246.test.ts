@@ -65,7 +65,7 @@ vi.mock("../src/actors/thinkAdapter", () => ({
   },
 }));
 
-import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 import {
   runAiSearchIndexUpload,
   runAiSearchPaths,
@@ -232,30 +232,34 @@ describe("C. pipeline hook at the store seams (#2246)", () => {
   }
 
   it("flag OFF -> store succeeds, ZERO uploads (provably inert)", async () => {
-    const sql = new MockSqlStorage();
+    const mock = new MockD1Database();
     const { uploads, binding } = fakeNamespace();
     const env = {
+      AGENT_DB: mock as unknown as never,
       AI_SEARCH: binding,
       AI_SEARCH_INSTANCE: "cfagent-kb",
       // Phase 3 (#6550): the flag must be explicitly OFF — an absent
       // env now resolves to the file value (ON).
       [FLAG]: "0",
     } as any;
-    const stored = storeReportAtGeneration(sql, reportInput(), env);
+    // #6101 step 8: the seam is async over D1 now — (input, env),
+    // with AGENT_DB bound on the env.
+    const stored = await storeReportAtGeneration(reportInput(), env);
     expect(stored?.reportId).toBeTruthy();
     await flush();
     expect(uploads).toHaveLength(0);
   });
 
   it("flag ON + configured -> exactly one upload with document id + metadata", async () => {
-    const sql = new MockSqlStorage();
+    const mock = new MockD1Database();
     const { uploads, binding } = fakeNamespace();
     const env = {
+      AGENT_DB: mock as unknown as never,
       AI_SEARCH: binding,
       AI_SEARCH_INSTANCE: "cfagent-kb",
       [FLAG]: "1",
     } as any;
-    const stored = storeReportAtGeneration(sql, reportInput(), env);
+    const stored = await storeReportAtGeneration(reportInput(), env);
     expect(stored?.reportId).toBeTruthy();
     await flush();
     expect(uploads).toHaveLength(1);
@@ -273,13 +277,13 @@ describe("C. pipeline hook at the store seams (#2246)", () => {
   });
 
   it("flag ON + unconfigured -> store succeeds, degraded outcome recorded with stable code", async () => {
-    const sql = new MockSqlStorage();
+    const mock = new MockD1Database();
     // #3515 S3: the failure now travels as a structured
     // report_ai_search.index_failed event (level warn) on the console-info
     // JSON fallback, not a console.warn line.
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
-    const env = { [FLAG]: "true" } as any; // no AI_SEARCH binding at all
-    const stored = storeReportAtGeneration(sql, reportInput(), env);
+    const env = { AGENT_DB: mock as unknown as never, [FLAG]: "true" } as any; // no AI_SEARCH binding at all
+    const stored = await storeReportAtGeneration(reportInput(), env);
     expect(stored?.reportId).toBeTruthy();
     await flush();
     const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
@@ -318,7 +322,7 @@ describe("C. pipeline hook at the store seams (#2246)", () => {
   });
 
   it("flag ON + upload throws -> store succeeds, failure recorded as upload_failed", async () => {
-    const sql = new MockSqlStorage();
+    const mock = new MockD1Database();
     // #3515 S3: the failure now travels as a structured
     // report_ai_search.index_failed event (level warn) on the console-info
     // JSON fallback, not a console.warn line. (The throw is caught inside
@@ -327,11 +331,12 @@ describe("C. pipeline hook at the store seams (#2246)", () => {
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     const { binding } = fakeNamespace({ failUpload: true });
     const env = {
+      AGENT_DB: mock as unknown as never,
       AI_SEARCH: binding,
       AI_SEARCH_INSTANCE: "cfagent-kb",
       [FLAG]: "on",
     } as any;
-    const stored = storeReportAtGeneration(sql, reportInput(), env);
+    const stored = await storeReportAtGeneration(reportInput(), env);
     expect(stored?.reportId).toBeTruthy();
     await flush();
     const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
@@ -366,14 +371,16 @@ describe("C. pipeline hook at the store seams (#2246)", () => {
   });
 
   it("WithR2 seam, flag ON -> exactly one upload", async () => {
-    const sql = new MockSqlStorage();
+    const mock = new MockD1Database();
     const { uploads, binding } = fakeNamespace();
     const env = {
+      AGENT_DB: mock as unknown as never,
       AI_SEARCH: binding,
       AI_SEARCH_INSTANCE: "cfagent-kb",
       [FLAG]: "1",
     } as any;
-    const stored = await storeReportAtGenerationWithR2(sql, env, reportInput());
+    // #6101 step 8: WithR2 arg order is (env, input) now.
+    const stored = await storeReportAtGenerationWithR2(env, reportInput());
     expect(stored?.reportId).toBeTruthy();
     await flush();
     expect(uploads).toHaveLength(1);
@@ -381,16 +388,17 @@ describe("C. pipeline hook at the store seams (#2246)", () => {
   });
 
   it("redelivery re-uploads the SAME document id (idempotent upsert)", async () => {
-    const sql = new MockSqlStorage();
+    const mock = new MockD1Database();
     const { uploads, binding } = fakeNamespace();
     const env = {
+      AGENT_DB: mock as unknown as never,
       AI_SEARCH: binding,
       AI_SEARCH_INSTANCE: "cfagent-kb",
       [FLAG]: "1",
     } as any;
-    const first = storeReportAtGeneration(sql, reportInput(), env);
+    const first = await storeReportAtGeneration(reportInput(), env);
     await flush();
-    const second = storeReportAtGeneration(sql, reportInput(), env);
+    const second = await storeReportAtGeneration(reportInput(), env);
     expect(second?.reportId).toBe(first?.reportId);
     expect(second?.created).toBe(false);
     await flush();
@@ -404,15 +412,15 @@ describe("C. pipeline hook at the store seams (#2246)", () => {
   });
 
   it("retention rows are never uploaded", async () => {
-    const sql = new MockSqlStorage();
+    const mock = new MockD1Database();
     const { uploads, binding } = fakeNamespace();
     const env = {
+      AGENT_DB: mock as unknown as never,
       AI_SEARCH: binding,
       AI_SEARCH_INSTANCE: "cfagent-kb",
       [FLAG]: "1",
     } as any;
-    const stored = storeReportAtGeneration(
-      sql,
+    const stored = await storeReportAtGeneration(
       reportInput({ source: "retention", generationId: "gen-2246-ret" }),
       env
     );

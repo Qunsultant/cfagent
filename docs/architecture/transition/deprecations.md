@@ -33,6 +33,26 @@ journal is the retry record; the blob seam refuses by name
 (`OPTIONS_CHAIN_REPORTS_BUCKET_UNBOUND`) when `REPORTS_BUCKET` is
 unbound, rather than silently dropping bytes to legacy DO storage.
 
+## 2026-11-26 — #6101 deprecates the run-ledger projector, DO adapters, seed, and sweep in place (gate (i))
+
+- Files (9 src + 2 test, all frozen stubs — no implementation, no callers, no exports):
+  - `src/data/runLedgerProjection.ts` — the shared projector (#4116, #6099)
+  - `src/services/runLedgerProjectionHooks.ts` — the best-effort projection hooks
+  - `src/services/runLedgerProjectionPosting.ts` — the ORM carrier post
+  - `src/services/projectionCarriers.ts` — the tenant carrier-config read
+  - `src/workflows/runLedgerQueueTransport.ts` — the queue carrier
+  - `src/data/doSqliteJobRunRecordAdapter.ts` — the DO run-record adapter
+  - `src/data/doSqliteJobStageEventAdapter.ts` — the DO stage-event adapter
+  - `src/agents/orchestrator/runLedgerReconcile.ts` — the sweep + its route
+  - `src/agents/orchestrator/canonicalReportSeed.ts` — the canonical-report seeder
+  - `tests/run_ledger_projection_4116.test.ts` — skipped placeholders (titles preserved)
+  - `tests/options_run_recorder_two_ledgers_4069.test.ts` — skipped placeholders (titles preserved)
+- Date: 2026-11-26
+- Reason: Issue #6101 consolidates the run-ledger family into D1: every writer goes to D1 directly, so the projector, the twin mechanism, the sweep, the DO adapters, and the seed have no writers left. The slice's design deleted these files, but Policy Gate (i) forbids deletion; the owner ruled (2026-11-26, #6101 comment 7205042294) to rework to deprecate-in-place instead of exempting the gate. The files return as frozen stubs; the actual deletion follows in a follow-up. (The canonical §22 form is the `.deprecated.ts` rename; the in-place form is used here because a rename cannot satisfy gate (i) for these files — stub content shares under 20% with the deleted implementations, so git would not pair them as renames and the deletions would still fail the gate.)
+- Replacement: run-ledger writes — `src/data/createJobRunRecordPorts.ts` (`recordLedgerRunD1`), on `src/data/d1JobRunRecordAdapter.ts` (`D1JobRunRecordStore`); stage events — `src/data/d1JobStageEventAdapter.ts` (`createD1JobStageEventStore`); reports — `src/data/d1AuditReportAdapter.ts` (`recordReport`); the seed route answers 410 Gone (`reports-seed-retired-6101`).
+- Consumers at deprecation: none in live code — every importer was re-pointed at the D1 writers in #6101 steps 2–9; the two test files are skipped placeholders with no live assertions.
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice. The frozen DO tables themselves drop in #6627.
+
 ## 2026-11-25 — #6040 retires the Copilot research door (one dispatch)
 
 - File: `src/agents/orchestrator/meshResearchDoor.ts` → `src/agents/orchestrator/meshResearchDoor.deprecated.ts`

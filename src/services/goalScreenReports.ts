@@ -11,12 +11,13 @@
  * is recorded per format (FAILURE_REPORT_PDF_GENERATION) without failing the run — the
  * #1278 (R5) failure contract, applied to goal-screen artifacts.
  */
+import { createJobRunRecordAdapter } from "../data/createJobRunRecordPorts";
+import { resolveIaaaTenant } from "../security/iaaaGithubEndToEnd";
+
 
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import * as XLSX from "@e965/xlsx";
 import type { GoalDrivenScreenResult } from "./goalDrivenScreen";
-import { recordJobOutcome } from "./jobOutcomes";
-import { projectJobOutcomeBestEffort } from "./runLedgerProjectionHooks";
 import type { Env } from "../types";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import type { SqlStorage } from "../orm";
@@ -183,34 +184,40 @@ export async function recordGoalRunOutcome(
   run: GoalRunOutcomeRecord,
   project?: { env: Partial<Env>; userLogin?: string | null },
 ): Promise<void> {
-  if (!sql) return;
+  // Issue #6101 — `sql` is kept for call compatibility only; the
+  // outcome no longer touches the DO. The fold runs when the
+  // caller passes `project` (its env).
+  void sql;
   try {
-    recordJobOutcome(sql, {
-      id: run.id,
-      kind: "goal",
-      trigger: run.trigger,
-      status: run.status,
-      scanned: run.scanned,
-      matched: run.matched,
-      codedError: run.error,
-      reportUrl: run.reportUrl,
-      pdfKey: run.pdfKey,
-      xlsxKey: run.xlsxKey,
-      csvKey: run.csvKey,
-      origin: run.origin ?? "goal-screen",
-      createdAt: run.createdAt,
-    });
-    // Issue #6006 — when the caller passes `project` (its env +
-    // owning login), the outcome facts also fold into the one run
-    // source (D1) through the shared projector; best-effort, never
-    // fails the run.
+    // Issue #6101 — when the caller passes `project` (its env),
+    // the outcome folds directly onto D1 (no DO row, no
+    // projection); best-effort, never fails the run. Without a
+    // project env there is no D1 door, and the outcome is not
+    // recorded anywhere — the DO sink is gone.
     if (project?.env) {
-      await projectJobOutcomeBestEffort({
-        env: project.env,
-        sql,
-        outcomeId: run.id,
-        userLogin: project.userLogin ?? null,
-      });
+      const ledgerStore = createJobRunRecordAdapter(project.env);
+      if (!ledgerStore) {
+        throw new Error("[run-ledger] D1 run-ledger binding unbound (AGENT_DB) (#6101).");
+      }
+      await ledgerStore.foldJobOutcome(
+        {
+          id: run.id,
+          kind: "goal",
+          trigger: run.trigger,
+          status: run.status,
+          scanned: run.scanned,
+          matched: run.matched,
+          codedError: run.error,
+          reportUrl: run.reportUrl,
+          pdfKey: run.pdfKey,
+          xlsxKey: run.xlsxKey,
+          csvKey: run.csvKey,
+          origin: run.origin ?? "goal-screen",
+          createdAt: run.createdAt,
+        },
+        resolveIaaaTenant(project.env),
+        Date.now(),
+      );
     }
   } catch (err) {
     structuredLog.warn("goal_screen.outcome_write_failed", {

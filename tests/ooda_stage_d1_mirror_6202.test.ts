@@ -9,12 +9,14 @@
  *  - 6202-P02 the migration is the table's single declaration: it creates
  *    `job_stage_events` with the DO column set plus `tenant_id`, and the
  *    unique `(run_id, stage_id)` index the upsert targets;
- *  - 6202-P03 the engine mirrors every DO row best-effort — a mirror failure
- *    is logged, never fatal to the run;
- *  - 6202-P04 a read served from D1 alone answers the same stage shape when
- *    the DO has nothing for the run.
+ *  - 6202-P03 the engine writes every terminal row to the D1 writer
+ *    best-effort — a writer failure is logged, never fatal to the run;
+ *  - 6202-P04 a read served from D1 alone answers the same stage shape.
+ * (#6101 step 7: the mirror IS the writer now — the DO leg and the
+ * `stageEventsMirror` dep are deleted. P03's tests now drive the D1
+ * writer directly; P04's test is unchanged, it already read D1 alone.)
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createD1JobStageEventStore,
   ensureJobStageEventsSchema,
@@ -67,8 +69,14 @@ describe("6202-P01 the D1 store implements the same port", () => {
     const d1 = new MockD1Database();
     const store = createD1JobStageEventStore(d1 as never);
     expect(await store.record(row())).toBe(true);
-    // The same (run_id, stage_id) again is an update, not a second row.
-    expect(await store.record(row({ stageStatus: "failed", failedUnitCount: 1 }))).toBe(true);
+    // The same event again is a deduped no-op, not a second row.
+    expect(await store.record(row())).toBe(false);
+    // A newer publication of the same stage is an update, not a second row.
+    expect(
+      await store.record(
+        row({ eventKey: "r-1:job:0:terminal:2", stageStatus: "failed", failedUnitCount: 1 }),
+      ),
+    ).toBe(true);
 
     const rows = await store.listByRun("r-1");
     expect(rows).toHaveLength(1);
@@ -133,11 +141,10 @@ describe("6202-P02 the migration is the table's single declaration", () => {
   });
 });
 
-describe("6202-P03 the engine mirrors every DO row", () => {
-  it("writes the same rows to the D1 mirror", async () => {
+describe("6202-P03 the engine writes every terminal row to the D1 writer", () => {
+  it("writes the same rows to the D1 writer", async () => {
     const stores = createInMemoryJobPipelineStores();
     const runRecorder = jobRunRecorderFromStore(new InMemoryJobRunRecordStore());
-    const stageEvents = createInMemoryJobStageEventStore();
     const d1 = new MockD1Database();
     const steps = new JobStepRegistry();
     steps.register("ok", async () => ({ output: { v: 1 }, descriptor: "result/ok" }));
@@ -148,8 +155,7 @@ describe("6202-P03 the engine mirrors every DO row", () => {
       steps,
       invocation: "sync",
       newRunId: () => "r-6202",
-      stageEvents,
-      stageEventsMirror: createD1JobStageEventStore(d1 as never),
+      stageEvents: createD1JobStageEventStore(d1 as never),
     });
     await control.defineJob({
       jobId: "research:r-6202",
@@ -165,16 +171,14 @@ describe("6202-P03 the engine mirrors every DO row", () => {
     });
     await control.runJob("research:r-6202", { trigger: "manual" });
 
-    const mirrored = await createD1JobStageEventStore(d1 as never).listByRun("r-6202");
-    expect(mirrored.map((r) => r.stageId).sort()).toEqual(["enrich", "feed"]);
-    expect(mirrored.every((r) => r.action === "terminal")).toBe(true);
-    expect((await stageEvents.listByRun("r-6202")).length).toBe(2);
+    const written = await createD1JobStageEventStore(d1 as never).listByRun("r-6202");
+    expect(written.map((r) => r.stageId).sort()).toEqual(["enrich", "feed"]);
+    expect(written.every((r) => r.action === "terminal")).toBe(true);
   });
 
-  it("logs a mirror failure and still leaves the DO rows", async () => {
+  it("logs a writer failure and still settles the run", async () => {
     const stores = createInMemoryJobPipelineStores();
     const runRecorder = jobRunRecorderFromStore(new InMemoryJobRunRecordStore());
-    const stageEvents = createInMemoryJobStageEventStore();
     const steps = new JobStepRegistry();
     steps.register("ok", async () => ({ output: { v: 1 } }));
     const control = new JobPipelineControl({
@@ -184,8 +188,7 @@ describe("6202-P03 the engine mirrors every DO row", () => {
       steps,
       invocation: "sync",
       newRunId: () => "r-6202b",
-      stageEvents,
-      stageEventsMirror: {
+      stageEvents: {
         record: async () => {
           throw new Error("d1 down");
         },
@@ -201,14 +204,30 @@ describe("6202-P03 the engine mirrors every DO row", () => {
         children: [{ kind: "feed", steps: [{ step: "ok" }] }],
       },
     });
-    const settled = await control.runJob("research:r-6202b", { trigger: "manual" });
-    expect(settled.runId).toBe("r-6202b");
-    expect((await stageEvents.listByRun("r-6202b")).length).toBe(1);
+    // #3515 S3 batch 7: the warn is a structured event on the
+    // console-info JSON fallback, not a console.error line.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      const settled = await control.runJob("research:r-6202b", { trigger: "manual" });
+      expect(settled.runId).toBe("r-6202b");
+      const failed = infoSpy.mock.calls
+        .map((c) => {
+          try {
+            return JSON.parse(String(c[0]));
+          } catch {
+            return null;
+          }
+        })
+        .filter((e) => e !== null && e.operation === "jobPipeline.stage_row_write_failed");
+      expect(failed.length).toBeGreaterThan(0);
+    } finally {
+      infoSpy.mockRestore();
+    }
   });
 });
 
 describe("6202-P04 a D1-only read answers the same shape", () => {
-  it("falls back to the mirror when the DO has nothing for the run", async () => {
+  it("reads the D1 rows for the run", async () => {
     const d1 = new MockD1Database();
     await createD1JobStageEventStore(d1 as never).record(
       row({ runId: "r-d1", eventKey: "r-d1:job:0:terminal", claimKey: "r-d1::job:0", resultRef: "research/r-d1/feed" }),

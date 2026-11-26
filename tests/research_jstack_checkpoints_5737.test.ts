@@ -99,10 +99,14 @@ describe("Issue #5737 / #5597 — OODA research runs on J-stack with durable SQL
     ]);
   });
 
-  it("resolveResearchEngineAdapters mirrors run records to D1 when both sql and d1 are present", async () => {
+  it("resolveResearchEngineAdapters records run records to D1 only when both sql and d1 are present", async () => {
     const sqlExec = vi.fn(() => ({ toArray: () => [], one: () => null, raw: () => [], columnNames: [], rowsRead: 0, rowsWritten: 0 }));
     const d1Run = vi.fn(async () => ({ success: true, meta: {} }));
-    const d1Bind = vi.fn(() => ({ run: d1Run, all: vi.fn(async () => ({ results: [] })), first: vi.fn(async () => null) }));
+    // The D1 store's prune runs a fielded select, which drizzle
+    // serves through the statement's raw() — the mock needs it
+    // (the old two-legged test never noticed: its D1 mirror call
+    // swallowed the missing-method error as "best-effort").
+    const d1Bind = vi.fn(() => ({ run: d1Run, all: vi.fn(async () => ({ results: [] })), first: vi.fn(async () => null), raw: vi.fn(async () => []) }));
     const d1Prepare = vi.fn(() => ({ bind: d1Bind, run: d1Run }));
 
     const adapters = resolveResearchEngineAdapters({
@@ -117,17 +121,17 @@ describe("Issue #5737 / #5597 — OODA research runs on J-stack with durable SQL
     await adapters.runRecorder.recordRun({
       system: "job-pipeline",
       jobId: "research:test-1",
-      runId: "test-1",
-      label: "Research test-1",
       operation: "research.run",
       triggeredBy: "manual",
       outcome: "success",
       started: "2026-11-19T11:00:00.000Z",
       finished: "2026-11-19T11:00:01.000Z",
-      durationMs: 1000,
     });
 
-    expect(sqlExec).toHaveBeenCalled();
+    // Issue #6101 — the DO leg is gone: the run record goes to D1
+    // only, and the DO SQLite handle is never written for it (the
+    // pipeline stores still live there; the run recorder does not).
+    expect(sqlExec).not.toHaveBeenCalled();
     expect(d1Prepare).toHaveBeenCalled();
   });
 });

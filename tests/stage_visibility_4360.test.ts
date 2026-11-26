@@ -11,13 +11,13 @@
  *  - 4360-P03 the consumer persists every `job.stage.*` envelope into the
  *    stage store, deduplicated so a re-delivered publication is ignored.
  *  - 4360-P04 a store failure is a `retry`, never a silent ack-and-drop.
- *  - 4360-P05 the DO-SQLite store keeps one row per publication and lists a
- *    run's events in recorded order.
+ *  - 4360-P05 the D1 store dedups a re-delivery (same eventKey) and
+ *    keeps one row per stage, latest wins (#6101 step 7: the DO
+ *    adapter is deleted; the D1 writer is the store now).
  *  - 4360-P06 a started event with no terminal event is visible in the store
  *    (in-flight visibility), and a failed unit records its error.
  */
 import { describe, expect, it } from "vitest";
-import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,8 +39,8 @@ import {
 } from "../src/messaging/jobPipelineEventsConsumer";
 import { stageEventFromEnvelope } from "../src/services/jobStageEvents";
 import { createInMemoryJobStageEventStore } from "../src/data/inMemoryJobStageEventAdapter";
-import { createDoSqliteJobStageEventStore } from "../src/data/doSqliteJobStageEventAdapter";
-import type { SqlStorage } from "../src/orm";
+import { createD1JobStageEventStore } from "../src/data/d1JobStageEventAdapter";
+import { MockD1Database } from "./mock-d1";
 
 const T0 = Date.parse("2026-11-13T12:00:00.000Z");
 
@@ -230,25 +230,11 @@ describe("4360-P04 a store failure retries", () => {
   });
 });
 
-describe("4360-P05 the DO-SQLite store keeps one row per publication", () => {
-  function sqlDouble(): SqlStorage {
-    const sqlite = new DatabaseSync(":memory:");
-    return {
-      exec: (query: string, ...params: unknown[]) => {
-        const stmt = sqlite.prepare(query);
-        if (/^\s*(SELECT|PRAGMA)/i.test(query)) return stmt.all(...(params as never[])) as never;
-        stmt.run(...(params as never[]));
-        return [] as never;
-      },
-    } as unknown as SqlStorage;
-  }
-
-  it("dedups on the claim key + action + instant and lists in order", async () => {
-    const store = createDoSqliteJobStageEventStore(sqlDouble());
-    const started = stageEventFromEnvelope(
-      stageEvent({ action: "started", startedAt: "2026-11-13T12:00:01.000Z" }),
-    )!;
-    const completed = stageEventFromEnvelope(
+describe("4360-P05 the D1 store dedups a re-delivery and keeps one row per stage", () => {
+  it("a re-delivered terminal row is a no-op; a newer terminal row overwrites in place", async () => {
+    const d1 = new MockD1Database();
+    const store = createD1JobStageEventStore(d1 as never);
+    const terminal = stageEventFromEnvelope(
       stageEvent({
         action: "completed",
         at: "2026-11-13T12:00:03.000Z",
@@ -256,13 +242,22 @@ describe("4360-P05 the DO-SQLite store keeps one row per publication", () => {
         endedAt: "2026-11-13T12:00:03.000Z",
       }),
     )!;
-    expect(await store.record(started)).toBe(true);
-    expect(await store.record(started)).toBe(false);
-    expect(await store.record(completed)).toBe(true);
+    expect(await store.record(terminal)).toBe(true);
+    expect(await store.record(terminal)).toBe(false);
+    expect(await store.listByRun("run-1")).toHaveLength(1);
+    // A newer terminal row for the same stage overwrites in place
+    // (one row per stage, latest wins) — still exactly one row.
+    const newer = {
+      ...terminal,
+      eventKey: `${terminal.eventKey}:2`,
+      detail: "second pass",
+      endedAt: "2026-11-13T12:00:04.000Z",
+    };
+    expect(await store.record(newer)).toBe(true);
     const rows = await store.listByRun("run-1");
-    expect(rows.map((r) => r.action)).toEqual(["started", "completed"]);
-    expect(rows[0].startedAt).toBe("2026-11-13T12:00:01.000Z");
-    expect(rows[1].endedAt).toBe("2026-11-13T12:00:03.000Z");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].detail).toBe("second pass");
+    expect(rows[0].endedAt).toBe("2026-11-13T12:00:04.000Z");
   });
 });
 

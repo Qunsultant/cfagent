@@ -72,7 +72,7 @@ flowchart TD
 
 | Dimension | Subject areas it touches | How it touches the data model |
 |---|---|---|
-| 1. DOs | All | Every subject area has a home DO (see §3.1). The DO's SQLite is authoritative for execution state; D1 is the projection. The SessionStore DO is the only DO whose data is KV-shaped (`kv_store`), not table-shaped. |
+| 1. DOs | All | Every subject area has a home DO (see §3.1). The DO's SQLite is authoritative for execution state; D1 is the projection — except the D1-native substrate families and the run-ledger family, which are D1-authoritative (§2.3). The SessionStore DO is the only DO whose data is KV-shaped (`kv_store`), not table-shaped. |
 | 2. Agents | SA-1, SA-2, SA-5, SA-6, SA-7, SA-8 | Each agent owns the stores of its subject area on its own DO (OrchestratorAgent: reports/jobs/audit; ScreenerAgent: screens; ResearchAgent: research; ScheduledAgent: schedules/chains; TradingAgent: trades; PaymentsAgent: payments; ReportAssetAgent: assets). Three agents (Browser, AiSearch, Sandbox) have no durable store; TickerAgent writes the ticker-push record on its own DO — see §5 H-13. |
 | 3. APIs (HTTP routes) | All | 81 route files under `src/agents/routes/`; every read/write goes through a route handler that receives a storage handle (`ctx.storage.sql` / `getStorageSql()`) and builds ports from it. The exceptions are the direct-SQL route sites listed in §3.5. |
 | 4. MCP | SA-1, SA-2, SA-6, SA-7, SA-8 | ~142 tool registrations / 133 distinct tool names. Queueing is an allowlist (`SYNCHRONOUS_MCP_TOOLS`): anything not listed gets an async-job receipt instead of a result. Trading tools are synchronous by design; `run_stock_screen` gets a workflow run record; `run_options_strategy_screen` does not (§5). |
@@ -115,21 +115,21 @@ flowchart LR
 
 ## 2. Logical view
 
-Conventions: **A** = authoritative store (DO SQLite, unless marked D1-native). **P** = projection (D1 read model). **T** = tenant-scoped (key named). **N** = natural key / idempotency key. Cardinality is stated only where the code or an ADR states it; otherwise the relationship is named without a ratio.
+Conventions: **A** = authoritative store (DO SQLite, unless marked D1-native). **P** = projection (D1 read model). **T** = tenant-scoped (key named). **N** = natural key / idempotency key. Cardinality is stated only where the code or an ADR states it; otherwise the relationship is named without a ratio. The run-ledger family (job run records, canonical reports, stage events, audit events) is **A** D1 since #6101 (steps 7–8) and #6102 — the DO tables are frozen pre-cutover history, not the authority; a run exists in the ledger only if written after cutover. Enforced REFERENCES still wait on the #6427 master tables and #6113 S1: the ID columns below are plain nullable columns, and the relationships in §2.2 are logical until then.
 
 ### 2.1 Core entities
 
 | Entity | Key / natural key | Attributes (logical) | Store | Tenancy |
 |---|---|---|---|---|
-| Canonical report | `id` (PK); unique `(user_login, generation_id)`; **N** `(tenantId, reportId, version)` on the projection | title, source, summary, body (or R2 body key), run id, generation id, owner, fanout outcome, created/updated | **A** DO `mas_reports` (OrchestratorAgent); **P** D1 `agent_reports` | **T** `user_login` (DO); `tenant_id` + nullable `user_login` (D1) |
-| Report version | `(reportId, version)` | content hash/pointer, projected-at | **P** D1 `agent_reports` (versioned rows) | **T** `tenant_id` |
+| Canonical report | `id` (PK); unique `(user_login, generation_id)`; **N** `(tenantId, reportId, version)` on the D1 table | title, source, summary, body (or R2 body key), run id, generation id, owner, fanout outcome, created/updated | **A** D1 `agent_reports` (since #6101 step 8); DO `mas_reports` frozen pre-cutover history (KEEP, never copied to D1) | **T** `tenant_id` + nullable `user_login` (D1); `user_login` (frozen DO) |
+| Report version | `(reportId, version)` | content hash/pointer, projected-at | **A** D1 `agent_reports` (versioned rows) | **T** `tenant_id` |
 | Report confirmation (HITL) | `id` | payload, verdict, actor, decided-at | **A** DO `mas_report_confirmations` | **T** by instance (per-login DO) |
 | Report asset | `id` / R2 key (`screener:*` → `stocks/*`, `options/*`) | kind, bytes pointer, owner, created-at | **A** R2 `REPORTS_BUCKET`; metadata **UNVERIFIED** (ReportAssetAgent is KV-only — see §5) | **T** per-login agent instance |
-| Async job | `jobId`; **N** `jobId` + `updatedAt` stale guard | status, stage, result/error, created/updated, owner | **A** DO `mas_async_jobs`; **P** D1 `agent_async_jobs` | **T** `tenant_id` (D1); instance (DO) |
-| Job run record | `job_id` (alone — no tenant key; see §5) | definition, instance, stage events, outcome, started/finished | **A** DO + **P** D1 `job_run_records` (dual-homed) | **N** none — tenant-blind |
+| Async job | `jobId`; **N** `jobId` + `updatedAt` stale guard | status, stage, result/error, created/updated, owner | **A** DO `mas_async_jobs` (submission record); D1 `agent_async_jobs` FROZEN at cutover (pre-cutover projected rows only; retires with F5 — #6101) | **T** `tenant_id` (D1); instance (DO) |
+| Job run record | `job_id`; identity columns `tenant_id` / `platform_id` / `user_id` / `session_id` / `correlation_id` / `trace_id` (all nullable, NULL pre-cutover) | definition, instance, stage events, outcome, started/finished | **A** D1 `job_run_records` (since #6101); DO `job_run_records` frozen pre-cutover history (DROP in #6627) | **T** `tenant_id` (D1, nullable); pre-cutover rows carry no tenant key |
 | Job pipeline definition / instance / artifact | `job_id` (alone) | stages, inputs, artifacts, status | **A** DO + **P** D1 (dual-homed) | **N** none — tenant-blind |
 | Stage dataset (feed / enriched / analyzed / generated / delivery) | `(job_id, stage)` | dataset rows, stage status | **A** DO + **P** D1 `job_*_datasets` (dual-homed) | **T** D1 side carries `tenant_id` (per drizzle); DO side by instance |
-| Audit event (DO chain) | `id`; chain link `previous_event_hash` → `event_hash` | session, type, agent, payload, created-at | **A** DO `mas_events` (hash-chained; SHA-256 over canonical row) | **N** none — session-scoped only; tenancy by instance construction |
+| Audit event (DO chain) | `id`; chain link `previous_event_hash` → `event_hash` | session, type, agent, payload, created-at | **A** D1 `mas_events` (since #6102; hash-chained; SHA-256 over canonical row); DO `mas_events` frozen pre-cutover history | **N** none — session-scoped only; tenancy by instance construction |
 | Audit event (D1 projection) | **N** `<tenantId>:<eventId>` | kind, subject, payload, projected-at | **P** D1 `agent_chain_audit` | **T** `tenant_id` |
 | Audit chain (D1) | `(tenant_id, sequence)`; `prevHash` → `entryHash` | entry, policy, pruned-at | **A** D1 `agent_audit_chain` (D1-native substrate) | **T** `tenant_id` |
 | IAAA audit log entry | **N** `seq` (1-based chain position, dense) | actor, action, payload, chained hash | **A** SessionStore DO `iaaa_audit_events` (append-only table, one row per event; flag-OFF legacy segments in `kv_store` under `iaaa-audit:` keys retained), cap 22,000 events | **T** by bucket key discipline, not by column |
@@ -145,16 +145,16 @@ Conventions: **A** = authoritative store (DO SQLite, unless marked D1-native). *
 | Unified schedule / goal | `id` | kind, cadence, payload, owner, state | **A** DO `unified_schedules` (SQL) **and** ScheduledAgent KV `"goals"` array (dual store — see §5) | **T** by instance; KV side by key |
 | Screener preset / strategy profile | `id` | definition, owner, version | **A** DO `mas_screener_presets` / `mas_strategy_profiles` | **T** by instance |
 | Setting | `(owner, key)` | value, scope | **A** DO `mas_settings` | **T** by instance |
-| Tenant | `tenant_id` (PK) | settings, channels, projection carriers, read mode | **P** D1 `agent_tenant_settings` / `agent_tenant_channels` / `agent_tenant_projection_carriers` | **T** itself |
+| Tenant | `tenant_id` (PK) | settings, channels, read mode | **P** D1 `agent_tenant_settings` / `agent_tenant_channels` (`agent_tenant_projection_carriers` dropped by migration 0093, #6101) | **T** itself |
 | User profile / session / token | `id` / session id / key hash | login, provider subject, binding, expiry, hash (never plaintext) | **A** SessionStore DO `kv_store` (`sessions`, `service_tokens`, `api_keys` buckets) | **T** by key discipline |
 | Product / bundle / referral / ad | `id` | price, entitlement, attribution, quota | **A** D1 `agent_products`, `agent_product_bundles`, `agent_referral_*`, `agent_ads` (+ DO `mas_ads`, `mas_referrals` mirrors) | **T** `tenant_id` (D1); DO mirrors by instance |
 | Corpus document | `report:`-prefixed id | text, embedding pointer, source | **A** AI Search namespace `screener-search`; vectors in Vectorize `vector-memory` | **T** **UNVERIFIED** (indexing gated off by default) |
 
 ### 2.2 Relationships and cardinality
 
-- Report 1:N report versions (projection only; the DO holds the current row, D1 holds the version history).
-- Job 1:N stage events; job 1:N stage datasets (one per stage); chain 1:N transitions (versioned status rows); schedule 1:N ticks; goal 1:N firings.
-- Tenant 1:N almost everything on the D1 side (by `tenant_id`); tenant 1:1 settings/channels/carriers rows (PK `tenant_id`).
+- Report 1:N report versions (D1 only since #6101 step 8; the frozen DO holds the pre-cutover current row, D1 holds the version history).
+- Job 1:N stage events (D1 `job_stage_events` is the writer since #6101 step 7); job 1:N stage datasets (one per stage); chain 1:N transitions (versioned status rows); schedule 1:N ticks; goal 1:N firings.
+- Tenant 1:N almost everything on the D1 side (by `tenant_id`); tenant 1:1 settings/channels rows (PK `tenant_id`).
 - Audit event N:1 chain (each event links to exactly one predecessor; the chain is append-only, genesis boundary skips pre-chain rows).
 - Transaction 1:1 payment draft (same row, status transition); transaction 1:N gateway attempts is **UNVERIFIED** (no attempt table was found).
 - Report 1:1 R2 blob (row↔body pair, R2 put precedes the row insert per the #2347 contract; a row never claims a body it does not have).
@@ -255,7 +255,7 @@ erDiagram
         string id PK
         string status
     }
-    CANONICAL_REPORT ||--o{ REPORT_VERSION : "has (projection only)"
+    CANONICAL_REPORT ||--o{ REPORT_VERSION : "has (D1 version history)"
     CANONICAL_REPORT ||--|| REPORT_BLOB : "row to body pair"
     JOB_RUN_RECORD ||--o{ STAGE_EVENT : "emits"
     JOB_RUN_RECORD ||--o{ STAGE_DATASET : "produces"
@@ -272,12 +272,14 @@ erDiagram
 
 ### 2.3 Authoritative vs projection (ADR 0033 R-3, R-5)
 
-- The DO is authoritative for execution state; D1 is the projection/read model — except the D1-native substrate families (trace, proposal ledger, fleet registry, audit chain), which are D1-authoritative and are not projections.
+- The DO is authoritative for execution state; D1 is the projection/read model — except the D1-native substrate families (trace, proposal ledger, fleet registry, audit chain) and the run-ledger family (job run records, canonical reports, stage events, audit events — D1-authoritative since #6101/#6102; the DO tables are frozen pre-cutover history), which are D1-authoritative and are not projections.
 - A read that must reflect a just-completed write reads the authoritative store — unless the write path's projection carrier is synchronous, in which case the projection has landed before the write returns.
 - The runs + reports surfaces read D1 only (#6103): there is no
   per-tenant mode and no mode rides the response. Job outcomes are
   served from the facts folded onto D1 `job_run_records`, not from a
-  projection of the DO list; stage transitions are not projected.
+  projection of the DO list; stage events are written to D1
+  `job_stage_events` directly (the writer since #6101 step 7), not
+  projected.
 - Lag classes (ADR 0033 R-2): synchronous (ORM carrier, awaited `projectAfterTransition`, shard-job projection at run completion), asynchronous (queue carrier, retry then DLQ), operator (sweep/reconcile, unbounded lag until invoked). A projection that has not landed is missing, not evidence the row does not exist.
 
 ### 2.4 Tenancy marking (summary)
@@ -296,7 +298,7 @@ Measured on fresh `main` 2026-11-17. Catalogue totals (recounted from definition
 
 | DO (binding / class) | Tables it owns (SQLite) | Notes |
 |---|---|---|
-| OrchestratorAgent (`ORCHESTRATOR_AGENT`) | `mas_messages`, `mas_events`, `mas_memory`, `mas_async_jobs`, `mas_referrals`, `mas_ads`, `mas_reports`, `mas_report_confirmations`, `mas_screener_presets`, `mas_policy_verdicts`, `mas_settings`, `mas_transactions`, `mas_trades`, `mas_watchlists`, `mas_options_chain_cache`, `mas_categories`, `mas_external_ads`, `webhook_replay_nonces`, `mas_promotions`, plus autopilot/stock-copilot activity tables | The shared host for the `mas_*` families; `DatabaseORM(this.ctx.storage.sql)`; D1 run-ledger projection source |
+| OrchestratorAgent (`ORCHESTRATOR_AGENT`) | `mas_messages`, `mas_events`, `mas_memory`, `mas_async_jobs`, `mas_referrals`, `mas_ads`, `mas_reports`, `mas_report_confirmations`, `mas_screener_presets`, `mas_policy_verdicts`, `mas_settings`, `mas_transactions`, `mas_trades`, `mas_watchlists`, `mas_options_chain_cache`, `mas_categories`, `mas_external_ads`, `webhook_replay_nonces`, `mas_promotions`, plus autopilot/stock-copilot activity tables | The shared host for the `mas_*` families; `DatabaseORM(this.ctx.storage.sql)`; run-ledger tables (`mas_reports`, `mas_events`) frozen at cutover (#6101/#6102) — no longer a projection source |
 | ScreenerAgent (`SCREENER_AGENT`) | ORM tables (own instance), `ScreenerTaskLedger`, provider configs, owner key | Durable task record per run |
 | ResearchAgent (`RESEARCH_AGENT`) | Research store/config/task ledger; latest report in KV | Report PDFs via R2 |
 | ScheduledAgent (`SCHEDULED_AGENT`) | `unified_schedules` (SQL) + KV `"goals"` / `"tickHistory"` (cap 50) / `"jobRunRecords"` (capped) | Dual store — see §5 |
@@ -313,7 +315,7 @@ Measured on fresh `main` 2026-11-17. Catalogue totals (recounted from definition
 
 - 67 migrations (`MIGRATION_0001`–`MIGRATION_0067`, `src/data/migrationRunner.ts`; runner-owned `_migrations` table, deliberately not catalogued; marker-last, idempotent, no multi-statement transaction — D1 `db.transaction()` is non-atomic, pinned by `tests/d1_transaction_pin_4937.test.ts`).
 - 101 tables in `d1Catalogue.ts`; 84 `sqliteTable` definitions in `drizzleSchema.ts` (19 catalogue tables have no Drizzle object — see §5).
-- Families: `agent_*` commercial/billing/marketplace (~60 tables), `agent_async_jobs` / `agent_reports` / `agent_chains` / `agent_synthesized_schedules` / `agent_shard_jobs` / `agent_chain_audit` (run-ledger projections), `agent_audit_chain` (D1 chain), `agent_trace_records` / `agent_proposals` / `agent_work_item_events` / `agent_fleet_registry` (D1-native substrate), `agent_tenant_*` (tenancy), `job_pipeline_*` / `job_run_records` / `job_*_datasets` (dual-homed with DO), `resource_*` (telemetry rollups), `agent_thesis_realizations` (telemetry).
+- Families: `agent_*` commercial/billing/marketplace (~60 tables), `agent_reports` (D1-authoritative since #6101), `agent_async_jobs` (frozen projection, retires with F5), `agent_chains` / `agent_synthesized_schedules` / `agent_shard_jobs` / `agent_chain_audit` (run-ledger projections), `agent_audit_chain` (D1 chain), `agent_trace_records` / `agent_proposals` / `agent_work_item_events` / `agent_fleet_registry` (D1-native substrate), `agent_tenant_*` (tenancy), `job_pipeline_*` / `job_*_datasets` (dual-homed with DO), `job_run_records` (D1-authoritative since #6101; DO table frozen, DROP in #6627), `resource_*` (telemetry rollups), `agent_thesis_realizations` (telemetry).
 - D1 access: Drizzle via the D1 DML catalogue (64 runtime entries) + `d1*Adapter.ts` (55 files). Retry policy `withD1Retry` (max 3 attempts, 100/200ms backoff, allowlist classification; #4930; 24 direct-builder-call files / 30 inserts NOT yet wired — tracked #5011).
 
 ### 3.3 KV, R2, Vectorize, AI Search, Analytics Engine
@@ -339,11 +341,11 @@ flowchart TD
         OSC["OptionsScannerMCP — own storage via ORM"]
     end
     subgraph D1["D1 (AGENT_DB) — projection + D1-native substrate (101 tables)"]
-        PROJ["Run-ledger projections: agent_async_jobs, agent_reports, agent_chains, agent_synthesized_schedules, agent_shard_jobs, agent_chain_audit"]
-        DUAL["Dual-homed: job_pipeline_*, job_run_records, job_*_datasets"]
+        PROJ["Run-ledger D1 tables: agent_reports (authoritative), agent_async_jobs (frozen), agent_chains, agent_synthesized_schedules, agent_shard_jobs, agent_chain_audit (projections)"]
+        DUAL["Dual-homed: job_pipeline_*, job_*_datasets (job_run_records D1-authoritative since #6101)"]
         NAT["D1-native substrate: agent_audit_chain, agent_trace_records, agent_proposals, agent_work_item_events, agent_fleet_registry"]
         COMM["Commercial / billing / marketplace: agent_products, agent_bundles, agent_referral_*, agent_ads (about 60 tables)"]
-        TEN["Tenancy: agent_tenant_settings, agent_tenant_channels, agent_tenant_projection_carriers"]
+        TEN["Tenancy: agent_tenant_settings, agent_tenant_channels"]
         TEL["Telemetry: agent_thesis_realizations, resource_sql_ops, resource_daily_rollups"]
     end
     subgraph EXT["Object / search stores"]
@@ -372,7 +374,7 @@ flowchart TD
 
 - **Append-only audit table:** the IAAA audit log is the `iaaa_audit_events` table in the same SessionStore DO SQLite (one row per event; append = tail point-read + COUNT(*) cap check + one row insert; #3251 O1, decided 2026-11-18). The flag-OFF legacy segments (JSON arrays in `kv_store` under `iaaa-audit:` keys, live ≤2,000 + ≤10 archive segments of 2,000 = 22,000 cap) are retained; migration explodes them into rows, byte-identical per event. Hitting the cap fails visibly (`AUDIT_STORE_FULL`), never deletes evidence.
 - **Projection lag classes:** the logical model says "D1 mirrors DO"; physically D1 lags by carrier class (synchronous / asynchronous / operator) and a missing row is not evidence of absence (ADR 0033 R-2).
-- **Dual-homed job tables:** `job_pipeline_*`, `job_run_records`, `job_*_datasets` exist in both D1 and DO SQLite with live adapters on both sides; the stated rule is "D1 is a projection, DO is authoritative" (`wrangler.jsonc:60-62`), but no single-writer enforcement exists beyond the cross-store pin suite — see §5.
+- **Dual-homed job tables:** `job_pipeline_*`, `job_*_datasets` exist in both D1 and DO SQLite with live adapters on both sides; the stated rule is "D1 is a projection, DO is authoritative" (`wrangler.jsonc:60-62`), but no single-writer enforcement exists beyond the cross-store pin suite — see §5. `job_run_records` left the dual-homed set in #6101: D1 is authoritative in both residencies, the DO adapter is deleted, and the DO table is frozen (DROP in #6627).
 - **Cross-plane tables:** `mas_feed_datasets` (DDL in the remainder catalogue, DML in D1) and `mas_index_lists` (DDL in DO, DML in both D1 and DO) have no named owning plane.
 - **Direct-SQL sites outside the governed path** (allow-listed, not removed): 27 above-layer storage-exec sites (`tests/global_dd_census_2356.test.ts:116-145` — learnings 7, cancelPreviewStore 5, ladderStateStore 4, orchestratorMigration 3, schedules 3, receiptSurface 2, screenerResearch 2, cfAgentsAdapter 1); 228 inline DO DML statements remaining (`tests/do_dml_mechanism_mix_4385.test.ts`); the ORM browse SELECT stays inline by recorded decision (17 facade exec sites, `src/data/ormFacade.ts:551-560`); whole-table dumps in `orchestratorMigration.ts:220-291` and `schedules.ts:1830-1835`; raw `sql.exec` in `maintenance.ts:111` and `screenerResearch.ts:1178-1186`; stores built straight from `env.AGENT_DB` in `agenticPayments.ts:5087`; generic table-read MCP tools `list_database_tables` / `query_table_data`.
 
@@ -394,7 +396,7 @@ flowchart TD
 ### SA-1 Jobs and runs
 
 - **Entities:** job definition, job instance, job run record, async job, stage event, workflow run, shard job, stage dataset (feed/enriched/analyzed/generated/delivery).
-- **Store home:** DO SQLite per host (OrchestratorAgent `mas_async_jobs`; ScreenerAgent task ledger; ScheduledAgent job records) + D1 projections (`agent_async_jobs`, `job_run_records`, `job_pipeline_*`, `job_*_datasets` — dual-homed, see §3.5).
+- **Store home:** D1 `job_run_records` (authoritative since #6101 — all run records, including scheduled-agent firings via the ledger post) + DO SQLite per host (OrchestratorAgent `mas_async_jobs` submission record; ScreenerAgent task ledger) + D1 projections (`agent_shard_jobs`, `job_pipeline_*`, `job_*_datasets` — dual-homed, see §3.5).
 - **Owning agent/service:** `JobPipelineControl` engine (`src/services/jobPipelineEngine.ts`), `JobPipelineWorkflow` host, `ScheduledTasksService`, async-job ports.
 - **Readers/writers:** chat/MCP (`run_*_job`, `get_async_job`, `get_job_status`), workflow-runs UI, scheduled firer, queue carrier, sweep/reconcile (operator only).
 - **Integrity rules:** DO-first dual-write ordering (ADR 0033 R-7); async-job projection is an atomic conditional upsert (`ON CONFLICT DO UPDATE … WHERE updatedAt < bound`); reconcile is operator-only, never boot/deploy/tick; no cross-store atomicity is claimed (decided non-goal).
@@ -402,15 +404,15 @@ flowchart TD
 ### SA-2 Reports
 
 - **Entities:** canonical report, report version, report confirmation (HITL), report asset, semantic index entry.
-- **Store home:** DO `mas_reports` (OrchestratorAgent, UNIQUE `(user_login, generation_id)`) + D1 `agent_reports` (versioned projection) + R2 blobs (`REPORTS_BUCKET`) + AI Search `screener-search` index (gated off by default) + Vectorize `vector-memory`.
+- **Store home:** D1 `agent_reports` (authoritative since #6101 step 8; versioned rows) + DO `mas_reports` frozen pre-cutover history (OrchestratorAgent, UNIQUE `(user_login, generation_id)`) + R2 blobs (`REPORTS_BUCKET`) + AI Search `screener-search` index (gated off by default) + Vectorize `vector-memory`.
 - **Owning agent/service:** `scheduledReports.ts` (seam/ensure door), `DoSqliteCanonicalReportStore`, `ReportAssetAgent` (assets, KV-only), `ResearchAgent` (publish).
 - **Readers/writers:** reports routes (`/api/reports`, replay, semantic search), scheduled firer, D1 read mode (`d1-only`/`merged`), replay reads persisted data with no live re-fetch.
-- **Integrity rules:** row↔R2-body pair per #2347 (R2 put first); generation id is a tenant-local idempotency key; #4507 dedupe guard (see §3.4); version bump is read-then-write — concurrent carriers can silently drop a version (tracked #4963, F-3).
+- **Integrity rules:** row↔R2-body pair per #2347 (R2 put first); generation id is a tenant-local idempotency key; #4507 dedupe guard (see §3.4); version bump is read-then-write — the concurrent-carrier race tracked in #4963 died with the carrier in #6101 (the issue awaits a closure ruling).
 
 ### SA-3 Audit and security
 
-- **Entities:** DO audit event (hash-chained), D1 audit event (projection), D1 audit chain, IAAA audit log entry, audit policy/action, retention prune.
-- **Store home:** DO `mas_events` (OrchestratorAgent) + D1 `agent_chain_audit` / `agent_audit_chain` + SessionStore DO `iaaa_audit_events` (append-only table; flag-OFF legacy segments in `kv_store` under `iaaa-audit:` keys retained), 22,000 cap.
+- **Entities:** audit event (hash-chained, D1 `mas_events` since #6102), D1 audit event (projection), D1 audit chain, IAAA audit log entry, audit policy/action, retention prune.
+- **Store home:** D1 `mas_events` (since #6102; DO table frozen pre-cutover history) + D1 `agent_chain_audit` / `agent_audit_chain` + SessionStore DO `iaaa_audit_events` (append-only table; flag-OFF legacy segments in `kv_store` under `iaaa-audit:` keys retained), 22,000 cap.
 - **Owning agent/service:** `auditChain.ts` (SHA-256 chain), `ChainedAuditRepository` (writer), `iaaaAuditStore.ts` (SessionStore `audit-append` op), `auditTamperAlert.ts`.
 - **Readers/writers:** audit routes (`/api/audit`), retention route (the one live verifier path), reconcile paths, admin audit funnel.
 - **Integrity rules:** hash chain over canonical rows; `recordBlockingAudit` has no try/catch (consequential actions must not report success when the audit write failed); cap reached fails visibly (`AUDIT_STORE_FULL`); the direct verifier `verifyStoredAuditChain` has NO production caller (tracked #2437) — its twin `verifyStoredAuditChainAndAlert` is live on exactly one retention path; the D1 prune has no production caller (see §5); append substrate is the `iaaa_audit_events` table (#3251 O1, decided 2026-11-18).
@@ -497,7 +499,7 @@ Severity: **High** = data can be lost, duplicated, or misreported silently, or m
 | D-2 | **Resolved by #5025.** The 8 `doCatalogue.ts` `CREATE TABLE` entries with leading whitespace/newline inside template literals (`mas_agent_workspace_files`, `mas_async_jobs`, `mas_autopilot`, `mas_policy_verdicts`, `mas_report_confirmations`, `mas_run_aliases`, `mas_runs`, `mas_screener_presets`) are identified and documented in `doCatalogue.ts` header; SQL text kept untouched so pin tests remain green. | Low | `src/data/schemaComponent/doCatalogue.ts`; pin: `tests/catalogue_headers_5025.test.ts` | #5025 |
 | D-3 | **Resolved by #5035.** Verified and pinned: all 101 D1 tables in `D1_CATALOGUE_ENTRIES` have corresponding `sqliteTable` definitions in `src/data/drizzleSchema.ts` (104 `sqliteTable` objects total); zero untyped D1 tables remain. Pinned by `tests/d1_drizzle_coverage_5035.test.ts`. | Low | `src/data/drizzleSchema.ts`; `src/data/schemaComponent/d1Catalogue.ts`; pin: `tests/d1_drizzle_coverage_5035.test.ts` | #5035 |
 | D-4 | **Resolved by #5036.** Recorded owning planes: `mas_feed_datasets` is **D1-owned** (`d1FeedDatasetAdapter.ts` production, DDL in `remainderCatalogue.ts`); `mas_index_lists` is **D1-owned** for deployment-global reads/writes (`d1IndexListAdapter.ts`), with `doSqliteIndexListAdapter.ts` retained as fallback when `AGENT_DB` is unbound. Pinned by `tests/cross_plane_ownership_5036.test.ts`. | Medium | `src/data/feedDatasetPorts.ts`; `src/data/indexListPorts.ts`; pin: `tests/cross_plane_ownership_5036.test.ts` | #5036 |
-| D-5 | **Resolved by #5036.** Single-writer ownership declared for the 8 dual-homed job tables (`job_pipeline_*`, `job_run_records`, `job_*_datasets`): DO SQLite is authoritative in host residency (`doSqlite*Adapter.ts`); D1 (`d1*Adapter.ts`) is the workflow-residency / projection plane. Pinned by `tests/cross_plane_ownership_5036.test.ts` and `tests/cross_store_consistency_pin_4935.test.ts`. | Medium | `src/data/schemaComponent/d1Catalogue.ts`; `doCatalogue.ts`; pin: `tests/cross_plane_ownership_5036.test.ts` | #5036 |
+| D-5 | **Resolved by #5036. Amended by #6101:** `job_run_records` left the dual-homed set — D1 is authoritative in both residencies now (the DO adapter is deleted, the DO table is frozen, DROP in #6627); the remaining 7 tables keep the declared ownership below. Single-writer ownership declared for the 8 dual-homed job tables (`job_pipeline_*`, `job_run_records`, `job_*_datasets`): DO SQLite is authoritative in host residency (`doSqlite*Adapter.ts`); D1 (`d1*Adapter.ts`) is the workflow-residency / projection plane. Pinned by `tests/cross_plane_ownership_5036.test.ts` and `tests/cross_store_consistency_pin_4935.test.ts`. | Medium | `src/data/schemaComponent/d1Catalogue.ts`; `doCatalogue.ts`; pin: `tests/cross_plane_ownership_5036.test.ts` | #5036 |
 | D-6 | **Resolved by #5034.** `mas_learnings` (`learningsStorePorts.ts` + `doSqliteLearningsAdapter.ts`), `mas_cancel_previews` (`cancelPreviewPorts.ts` + `doSqliteCancelPreviewAdapter.ts`), `mas_ladder_states` (`ladderStatePorts.ts` + `doSqliteLadderStateAdapter.ts`), and `mas_promotions` active-check read (`promotionsReadAdapter.ts`) now reside behind data-layer ports/adapters; retired all 18 sites from `STORAGE_ALLOW_LIST` in `tests/global_dd_census_2356.test.ts`. | Medium | `src/data/learningsStorePorts.ts`; `src/data/cancelPreviewPorts.ts`; `src/data/ladderStatePorts.ts`; `src/data/promotionsReadAdapter.ts`; pin: `tests/global_dd_census_2356.test.ts` | #5034 |
 | D-7 | **Resolved by #5033 (P6e tranche 1).** Migrated `mas_autopilot` (`src/data/doSqliteAutopilotStateAdapter.ts`, 2 statements) into `DO_DML_CATALOGUE_ENTRIES` (`81 → 83` entries; remaining inline count pinned at `248`: `120 write + 128 read`). Scoped next family: `mas_comparison_ledger` (`doSqliteComparisonLedgerAdapter.ts`, 4 statements). | Medium | `src/data/doSqliteAutopilotStateAdapter.ts`; `src/data/schemaComponent/doDmlEntries.ts`; pin: `tests/do_dml_mechanism_mix_4385.test.ts` | #5033 |
 | D-8 | ORM browse SELECT stays inline by recorded decision + the facade carries 17 exec sites — already tracked. | — | `src/data/ormFacade.ts:551-560`; `tests/orm_dml_catalogue_4386.test.ts:48` | Already tracked: #4751 |
@@ -510,7 +512,7 @@ Severity: **High** = data can be lost, duplicated, or misreported silently, or m
 | D-15 | **Resolved by #5044.** Recorded decision: `applyDoSchemaMigrations` (`src/data/doSchemaMigrations.ts`) stays opt-in for the 6 adapters requiring ordered versioned migrations/rollback (`DO_MANAGED_MIGRATION_ADAPTERS`), while remaining `doSqlite*Adapter.ts` adapters intentionally use idempotent `ensureSchema` catalogued in `doCatalogue.ts`/`remainderCatalogue.ts`. Pinned by `tests/migration_consolidation_5044.test.ts`. | Medium | `src/data/doSchemaMigrations.ts`; pin: `tests/migration_consolidation_5044.test.ts` | #5044 |
 | H-1 | **Resolved by #5042.** `#2577`'s unified run record was originally un-wired on the `#2581` MCP door (`registry.ts:1569`), then wired by `#4066` (threading `pipelineStorage` + `engineSql` into `runOptionsStrategyAction`) and `#4469` (threading `env` for the workflow host), so `run_options_strategy_screen` creates a durable engine run record (`strategy-screen:<runId>`) addressable by `options_copilot_stage_control`. Pinned by `tests/options_strategy_run_record_5042.test.ts`. | Medium | `src/agents/orchestrator/meshOptionsStrategyDoor.ts`; `src/agents/registry.ts`; pin: `tests/options_strategy_run_record_5042.test.ts` | #5042 |
 | H-2 | **Resolved by #5042.** Both `run_options_strategy_screen` (MCP/chat door) and NLQ (`options_opportunities`) dispatch to `runOptionsStrategyAction` (`src/agents/nlqOptionsStrategy.ts`) with the same durable engine storage/env wiring (`pipelineStorage`, `engineSql`, `env`). Pinned by `tests/options_strategy_run_record_5042.test.ts`. | Medium | `src/agents/orchestrator/meshOptionsStrategyDoor.ts`; `src/agents/nlqOptionsStrategy.ts`; pin: `tests/options_strategy_run_record_5042.test.ts` | #5042 |
-| H-3 | **Resolved by #5040.** Canonical store is DO `mas_reports` (`scheduledReports.ts` / `DoSqliteCanonicalReportStore`); D1 `agent_reports` is the projected read replica (D1-only reads, #6103). Pinned by `tests/one_store_per_family_5040.test.ts`. | Medium | `src/services/scheduledReports.ts`; `src/agents/orchestrator.ts`; pin: `tests/one_store_per_family_5040.test.ts` | #5040 |
+| H-3 | **Resolved by #5040. Amended by #6101 step 8:** the canonical store is D1 `agent_reports` now; DO `mas_reports` is frozen pre-cutover history. The one-store-per-family rule still holds — one store, D1. Pinned by `tests/one_store_per_family_5040.test.ts`. | Medium | `src/services/scheduledReports.ts`; `src/agents/orchestrator.ts`; pin: `tests/one_store_per_family_5040.test.ts` | #5040 |
 | H-4 | **Resolved by #5040.** Canonical store is DO `unified_schedules` (`ScheduleStore`, `#3121`); `ScheduledAgent` KV `"goals"` / `"tickHistory"` are internal goal-adapter state surfaced under `ScheduleStore` / `/api/ledger/runs`. Pinned by `tests/one_store_per_family_5040.test.ts`. | Medium | `src/services/scheduleSystems.ts`; `src/agents/scheduled-agent.ts`; pin: `tests/one_store_per_family_5040.test.ts` | #5040 |
 | H-5 | **Resolved by #5040.** Canonical payment ledger is DO `mas_transactions` (`OrchestratorAgent`); `PaymentsAgent` KV `payments` array is retired (`#896`), and D1 `agent_native_ledger_rows` is the native ledger projection. Pinned by `tests/one_store_per_family_5040.test.ts`. | Medium | `src/agents/payments-agent.ts`; `src/payments/ledger.ts`; pin: `tests/one_store_per_family_5040.test.ts` | #5040 |
 | H-6 | **Resolved by #5040.** Canonical PDF blob store is `reportBlobStore.ts` (R2 `REPORTS_BUCKET` primary, DO storage fallback), referenced from `mas_reports`. Pinned by `tests/one_store_per_family_5040.test.ts`. | Medium | `src/agents/report-asset-agent.ts`; `src/services/reportBlobStore.ts`; pin: `tests/one_store_per_family_5040.test.ts` | #5040 |

@@ -55,6 +55,10 @@
  * - mas_reports — KEEP. One row per report generation; the rows ARE the
  *   user-visible retained run history surfaced by the reports UI
  *   (#125/#126 programme), so pruning is a product decision, not hygiene.
+ *   Issue #6101 (step 8): the live home is D1 agent_reports now — new
+ *   generations write there, and the DO rows are frozen pre-cutover
+ *   history (no new writes, never copied to D1); they stay as history
+ *   under this KEEP rule.
  *   Issue #338 note: report bodies may live in R2 behind the row's
  *   body_r2_key pointer, so IF a product decision ever enables pruning,
  *   rows must be deleted through deleteCanonicalReport
@@ -83,12 +87,26 @@
  *   reads the newest 50 and the writer point-reads by id, so older rows have
  *   no reader; the table had no recorded decision before #2294 and its
  *   unindexed list scan is what exhausted the DO rows-read cap (#2280).
+ *   Issue #6101 (step 10): mas_job_outcomes_meta is the prune's guard
+ *   row (pruned_at) — one row, kept with the table. The prune drains
+ *   the frozen table; the DROP rides follow-up #6627 with it.
+ * - job_run_records (DO) — FROZEN at cutover, DROP in follow-up
+ *   #6627 (issue #6101, step 10; Q5). No age-out prune exists for
+ *   this table and none is added: the drain IS the drop. New runs
+ *   write to D1 job_run_records only; pre-cutover DO rows stay as
+ *   history, unreadable through the app, never copied to D1.
+ * - job_stage_events (DO) — FROZEN at cutover, DROP in follow-up
+ *   #6627 (issue #6101, steps 7/10; Q5). Same rule as
+ *   job_run_records: D1 job_stage_events is the writer now, and
+ *   the DO table drains by the drop, not by pruning.
  * - mas_async_jobs — PRUNED at source (existing): terminal rows older
  *   than 30d plus a 500-row terminal cap per session, on job submit
  *   (OrchestratorAgent.submitAsyncJob).
  * - mas_report_confirmations — PARTIAL (existing): pending rows are swept
  *   at their TTL on create; decided rows are kept as the HITL decision
- *   record (one small row per human decision).
+ *   record (one small row per human decision). Issue #6101 (step 10):
+ *   unchanged — confirmations stay DO; the read half still joins
+ *   the D1 report row (step 8), the confirmation half is untouched.
  * - mas_autopilot / mas_settings — KEEP. Per-key state tables; bounded
  *   by the fixed key set.
  * - mas_opportunity_scans / mas_discovery_runs — PRUNED at source
@@ -130,28 +148,29 @@
  *   pruning them would destroy exactly the history the audit
  *   read reasons about. The DO remains authoritative; these
  *   rows are never the sole record of anything.
- * - agent_reports (AgentDB projection, slice 3, issue #1688) —
- *   KEEP, mirroring the mas_reports discipline it projects
- *   (mas_reports itself is KEEP: one row per report
- *   generation). Canonical rows are the durable report
+ * - agent_reports (AgentDB, slice 3, issue #1688) —
+ *   KEEP. One row per report generation; the live home since
+ *   #6101 step 8 (the DO mas_reports table is frozen pre-cutover
+ *   history — it is no longer the authority this table mirrors).
+ *   Canonical rows are the durable report
  *   record; deletion happens only via deleteCanonicalReport.
  *   KEEP means no purge exists for this table; the retention
  *   slice (slice 6, issue #1701) enforces only the BOUNDED
  *   table (agent_shard_jobs).
  * - agent_async_jobs (AgentDB projection of mas_async_jobs,
- *   issue #4116, migration 0059) — KEEP, mirroring the
- *   mas_async_jobs discipline it projects. One row per async
- *   job, keyed on the job id; the projection is an idempotent
- *   upsert (a newer write lands, a stale write never
- *   overwrites), so pruning the projection would destroy the
- *   D1-only Workflow Runs read's job rows while the DO rows
- *   live on. The DO remains authoritative.
- * - agent_tenant_projection_carriers (tenant-scoped carrier
- *   config, issue #4116, migration 0059) — KEEP. One row per
- *   tenant (queues / ORM / sweep flags + readMode); the row
- *   IS the tenant's projection configuration, and deleting it
- *   would silently flip the tenant back to the merged view
- *   (unconfigured = merged). No purge exists for this table.
+ *   issue #4116, migration 0059) — FROZEN at cutover, retires
+ *   with F5 (issue #6101). One row per async job, keyed on the
+ *   job id; the projection is an idempotent upsert (a newer
+ *   write lands, a stale write never overwrites). No new rows
+ *   land after cutover (the projector is deleted); the frozen
+ *   rows are the Workflow Runs `jobs` list's pre-cutover input
+ *   only. The DO mas_async_jobs table remains the submission
+ *   record — it is not a projection source anymore.
+ * - agent_tenant_projection_carriers — DROPPED by migration 0093
+ *   (issue #6101). The table held one row per tenant (queues /
+ *   ORM / sweep flags + readMode); the carrier mechanism died
+ *   with the projector, so the KEEP rule recorded here died with
+ *   it — there is nothing left to retain.
  * - agent_governance (AgentDB projection, slice 0, issue #1548) —
  *   KEEP, decided up front per R8 (line added by slice 6,
  *   issue #1701, which found it missing). Halt transition
@@ -196,6 +215,10 @@
  *   via its stub leg, shared_orchestrator via the reconcile
  *   route) — a pass on one instance alone would misstate tenant
  *   totals, so no pass prunes one side alone.
+ * - mas_runs / mas_run_aliases / job_*_datasets — UNCHANGED by
+ *   #6101 (step 10). These are the FS sub-issues' tables, not the
+ *   run-ledger move's; their retention decisions ride those
+ *   sub-issues, not this slice.
  */
 
 import type { DatabaseORM } from "../orm";
@@ -633,7 +656,7 @@ export async function runStorageRetention(
       });
     } else {
     const runId = newRunId();
-    orm.storeCanonicalReport({
+    await orm.storeCanonicalReport({
       runId,
       generationId: generationId(runId),
       title: `Nightly storage retention — ${windowDays}d window`,

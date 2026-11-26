@@ -285,7 +285,7 @@ export async function runPanelComparison(args: {
             },
           },
         },
-        engineStores: optionsEngineStoresFromSql(storageSql),
+        engineStores: optionsEngineStoresFromSql(storageSql, args.env),
       },
       () => runProductionComparison({ ...args.coreArgs, runId }),
     );

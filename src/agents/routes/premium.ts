@@ -515,7 +515,7 @@ export async function handlePremiumRoutes(
           // call, so a fresh canonical id is behavior-identical, and
           // the run↔generation link rides the shared run body.
           const runId = newRunId();
-          ctx.getOrm().storeCanonicalReport({
+          await ctx.getOrm().storeCanonicalReport({
             runId,
             generationId: generationId(runId),
             title: `Options scan — ${symbols || "universe"} (${filter?.contractType || "BOTH"})`,
@@ -631,7 +631,7 @@ export async function handlePremiumRoutes(
           const timestamp = new Date().toISOString();
           const reportJson = JSON.stringify(report ?? {});
           const generationId = await sha256Hex(reportJson);
-          ctx.getOrm().storeCanonicalReport({
+          await ctx.getOrm().storeCanonicalReport({
             runId: generationId,
             generationId,
             title: `Market research — ${symbol}`,

@@ -1,10 +1,42 @@
 import { describe, expect, it, vi } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 import { createInMemoryJobPipelineStores } from "../src/data/inMemoryJobPipelineAdapter";
-import { InMemoryJobRunRecordStore } from "../src/data/inMemoryJobRunRecordAdapter";
+
+/** Minimal D1Database stand-in over node:sqlite (the #6101 suite's double). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: { changes: info.changes, last_row_id: info.lastInsertRowid },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+}
 
 const sharedStores = createInMemoryJobPipelineStores();
-const sharedRunStore = new InMemoryJobRunRecordStore();
-
 vi.mock("../src/data/createJobPipelinePorts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/data/createJobPipelinePorts")>();
   return {
@@ -13,12 +45,6 @@ vi.mock("../src/data/createJobPipelinePorts", async (importOriginal) => {
   };
 });
 
-vi.mock("../src/data/doSqliteJobRunRecordAdapter", () => ({
-  SqlJobRunRecordStore: vi.fn(function () {
-    return sharedRunStore;
-  }),
-}));
-
 import {
   DefinePipelineChainCommand,
   RunResearchJobCommand,
@@ -26,10 +52,15 @@ import {
 
 describe("Issue #5288 — Wire define_pipeline_chain onto shared durable stores & addressable execution", () => {
   it("defines a chain addressable by run_research_job across invocations via shared durable stores", async () => {
+    // Issue #6101 — the research engine's run recorder is D1-only
+    // and fail-closed: without a bound AGENT_DB the run cannot be
+    // recorded and the run fails by name. The harness binds a mock
+    // D1, as production always does.
+    const d1 = new MockD1Database() as unknown as D1Database;
     const ctx = {
       actingLogin: () => "alice",
       audit: () => {},
-      env: {},
+      env: { AGENT_DB: d1 },
       orm: {},
     } as any;
 

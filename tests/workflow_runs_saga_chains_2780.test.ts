@@ -17,8 +17,6 @@ import {
   handleWorkflowRunsRoutes,
 } from "../src/agents/routes/workflowRuns";
 import { sagaWorkflowRunsLink } from "../src/client/GoalScreenPanel";
-import { postRunLedgerBestEffort } from "../src/services/runLedgerProjectionPosting";
-import { createAsyncJobPorts } from "../src/data/createAsyncJobPorts";
 import { createRunLedgerAdapter, ensureRunLedgerTables } from "../src/data/createRunLedgerPorts";
 
 /** Minimal D1Database stand-in over node:sqlite (the #4116 parity file's double). */
@@ -68,73 +66,67 @@ class MockD1Database {
 }
 
 /**
- * Issue #6103 (D1-only reads) — the "other run" in the saga audit
+ * Issue #6101 (D1-first) — the "other run" in the saga audit
  * failure test below used to be a DO-seeded job the route read
- * directly. The route now reads the projected D1 async jobs alone,
- * so the DO job is projected into D1 at write time via
- * postRunLedgerBestEffort — the ORM-carrier path, using the
- * sweep's own async_jobs input mapping from
- * src/agents/orchestrator/runLedgerReconcile.ts — never via the
- * sweep itself (it copies existing DO rows, which the replacement
- * ruling forbids). The route is called with env { AGENT_DB,
- * IAAA_TENANT_ID: "primary" } and a configured carrier row, so
- * storeErrors.runs stays unset. The saga audit stub and its
- * assertions stay exactly as they were.
+ * directly. The route now reads the FROZEN D1 agent_async_jobs
+ * table alone (the #6099 projector is deleted), so the job is
+ * written DIRECTLY into D1 by seedD1Job below — no DO row, no
+ * projection, no carrier row. The route is called with env
+ * { AGENT_DB, IAAA_TENANT_ID: "primary" }; storeErrors.jobs
+ * names the freeze. The saga audit stub and its assertions stay
+ * exactly as they were.
  */
 async function setupD1() {
   const mock = new MockD1Database();
   const adapter = createRunLedgerAdapter({ AGENT_DB: mock as never })!;
   await ensureRunLedgerTables(adapter);
-  await adapter.setTenantProjectionCarriers(
-    "primary",
-    { queues: true, orm: true, sweep: true },
-    "merged",
-    Date.now(),
-  );
   const env = { AGENT_DB: mock as never, IAAA_TENANT_ID: "primary" };
   return { mock, env };
 }
 
-async function projectJobs(
-  env: { AGENT_DB: unknown; IAAA_TENANT_ID: string },
-  sql: MockSqlStorage,
-  sessionId = "session-1",
-): Promise<void> {
-  const nowMs = Date.now();
-  for (const row of createAsyncJobPorts(sql as never).read.workflowRunRows(sessionId, 100)) {
-    const posted = await postRunLedgerBestEffort(env as never, "primary", {
-      ledger: "async_jobs",
-      row: {
-        jobId: row.job_id,
-        sessionId,
-        tenantId: "primary",
-        status: row.status,
-        capability: row.capability,
-        displayName: row.display_name,
-        payloadJson: row.payload_json ?? "{}",
-        resultJson: row.result_json,
-        responseStatus: null,
-        error: row.error,
-        errorCode: row.error_code,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-        startedAt: row.started_at,
-        completedAt: row.completed_at,
-        parentJobId: row.parent_job_id,
-        jobKind: row.job_kind,
-        channel: row.channel,
-        notBefore: row.not_before,
-        stage: row.stage,
-        chainId: row.chain_id,
-        stuckAlertedAt: row.stuck_alerted_at,
-        trigger: row.trigger,
-        triggeredBy: row.triggered_by,
-        scheduleId: row.schedule_id,
-        lastActivityAt: row.last_activity_at,
-      },
-    }, nowMs);
-    expect(posted.projected).toBe(true);
-  }
+/** The frozen-jobs entry every seeded read names (#6101). */
+const FROZEN_JOBS = "frozen at the #6101 cutover";
+
+const D1_JOB_COLUMNS =
+  "job_id, tenant_id, session_id, capability, display_name, status, payload_json, result_json, response_status, error, error_code, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at, trigger, triggered_by, schedule_id, last_activity_at, projected_at_ms";
+const D1_JOB_PLACEHOLDERS = Array.from({ length: 27 }, () => "?").join(", ");
+
+/**
+ * Issue #6101 — write one job DIRECTLY into the frozen D1
+ * agent_async_jobs table (the pre-cutover projected row shape).
+ */
+function seedD1Job(mock: MockD1Database): void {
+  mock.sqlite.prepare(
+    `INSERT INTO agent_async_jobs (${D1_JOB_COLUMNS}) VALUES (${D1_JOB_PLACEHOLDERS})`,
+  ).run(
+    "job-1",
+    "primary",
+    "session-1",
+    "http.request",
+    "Stock screen",
+    "completed",
+    JSON.stringify({ method: "POST", pathAndQuery: "/etrade/screen" }),
+    null,
+    null,
+    null,
+    null,
+    "2026-11-02T02:00:00.000Z",
+    "2026-11-02T02:00:00.000Z",
+    "2026-11-02T02:00:00.000Z",
+    "2026-11-02T02:01:00.000Z",
+    null,
+    "main",
+    null,
+    null,
+    "generate",
+    "chain-1",
+    null,
+    null,
+    null,
+    null,
+    null,
+    Date.now(),
+  );
 }
 
 type AuditRow = Record<string, unknown>;
@@ -417,39 +409,19 @@ describe("handleWorkflowRunsRoutes saga merge", () => {
   });
 
   it("names a saga audit failure in storeErrors without hiding other runs", async () => {
-    const { env } = await setupD1();
-    const { ctx, sql } = handlerCtx({
+    const { mock, env } = await setupD1();
+    const { ctx } = handlerCtx({
       sagaAuditStub: fakeAuditStub(new Error("audit boom")),
       env,
     });
-    sql.exec(
-      "INSERT INTO mas_async_jobs (job_id, session_id, capability, display_name, status, payload_json, result_json, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      "job-1",
-      "session-1",
-      "http.request",
-      "Stock screen",
-      "completed",
-      JSON.stringify({ method: "POST", pathAndQuery: "/etrade/screen" }),
-      null,
-      null,
-      "2026-11-02T02:00:00.000Z",
-      "2026-11-02T02:00:00.000Z",
-      "2026-11-02T02:00:00.000Z",
-      "2026-11-02T02:01:00.000Z",
-      null,
-      "main",
-      null,
-      null,
-      "generate",
-      "chain-1",
-    );
-    // Issue #6103 — the "other run" is a D1-projected job now, not
-    // a DO row the route reads directly.
-    await projectJobs(env, sql);
+    // Issue #6101 — the "other run" is a frozen D1 job now,
+    // written directly into agent_async_jobs (no DO row, no
+    // projection).
+    seedD1Job(mock);
     const res = await handleWorkflowRunsRoutes(getRequest(), new URL("https://agent.internal/api/workflow-runs"), "/api/workflow-runs", "session-1", ctx);
     const body = (await res!.json()) as { runs: Array<{ id: string }>; storeErrors?: Record<string, string> };
     expect(body.storeErrors?.saga).toContain("audit boom");
-    expect(body.storeErrors?.jobs).toBeUndefined();
+    expect(body.storeErrors?.jobs).toMatch(FROZEN_JOBS);
     expect(body.storeErrors?.runs).toBeUndefined();
     expect(body.runs.map((r) => r.id)).toContain("chain-1");
     expect(body.runs.map((r) => r.id)).not.toContain("saga-A");

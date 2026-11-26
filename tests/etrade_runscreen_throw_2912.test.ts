@@ -27,6 +27,7 @@ import { persistScreenerReportCanonical, type ReportDispatchContext } from "../s
 import { listScheduledReports } from "../src/services/scheduledReports";
 import { runSummaryFromReport } from "../src/services/runSummaries";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 
 function routeCtx(
   events: string[],
@@ -127,8 +128,10 @@ describe("E*TRADE runScreen throw (#2912)", () => {
 
   it("persisting the same failed result twice yields exactly one canonical row", async () => {
     const sql = new MockSqlStorage() as never;
+    const mock = new MockD1Database();
+    const env = { AGENT_DB: mock as unknown as never };
     const ctx = {
-      env: {},
+      env,
       ensureTables: () => sql,
       getOrm: () => {
         throw new Error("screener persist must not use the ORM");
@@ -138,15 +141,17 @@ describe("E*TRADE runScreen throw (#2912)", () => {
     } as unknown as ReportDispatchContext;
     await persistScreenerReportCanonical(ctx, { ...FAILED });
     await persistScreenerReportCanonical(ctx, { ...FAILED });
-    const hits = listScheduledReports(sql as never, { userLogin: "alice" });
+    const hits = await listScheduledReports(env, { userLogin: "alice" });
     expect(hits).toHaveLength(1);
     expect(hits[0].runId).toBe("screener:2026-11-03T12:00:00.000Z");
   });
 
   it("the stored failed row reads back as a failed Reports row with the error", async () => {
     const sql = new MockSqlStorage() as never;
+    const mock = new MockD1Database();
+    const env = { AGENT_DB: mock as unknown as never };
     const ctx = {
-      env: {},
+      env,
       ensureTables: () => sql,
       getOrm: () => {
         throw new Error("screener persist must not use the ORM");
@@ -155,7 +160,7 @@ describe("E*TRADE runScreen throw (#2912)", () => {
       reportConfirmationTtlMs: 86_400_000,
     } as unknown as ReportDispatchContext;
     await persistScreenerReportCanonical(ctx, { ...FAILED });
-    const hits = listScheduledReports(sql as never, { userLogin: "alice" });
+    const hits = await listScheduledReports(env, { userLogin: "alice" });
     expect(hits).toHaveLength(1);
     const summary = runSummaryFromReport(hits[0]);
     expect(summary.status).toBe("failed");
