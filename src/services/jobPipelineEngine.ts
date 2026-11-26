@@ -1428,6 +1428,27 @@ export class JobPipelineControl {
    *    `replay_definition_version_unresolved`.
    */
   async replayRun(jobId: string, runId: string): Promise<JobDispatchResult> {
+    const { original, definition } = await this.pastRunDefinition(jobId, runId);
+    // The original's trigger is the replay's trigger; its schedule and
+    // async-job links belong to that dispatch, so they are NOT copied —
+    // a replay is the operator's new run, not a second firing.
+    return this.dispatchResolved(definition, {
+      trigger: normalizeJobRunTrigger(original.trigger),
+      kind: "replay",
+      originRunId: runId,
+    });
+  }
+
+  /**
+   * The past-run resolution `replayRun` and `replayStage` share: the
+   * retained run record, and the definition version that run executed.
+   * One resolution, so a whole-run replay and a stage replay cannot
+   * disagree about which configuration is being reproduced.
+   */
+  private async pastRunDefinition(
+    jobId: string,
+    runId: string,
+  ): Promise<{ original: JobRunRecord; definition: JobDefinition }> {
     const history = await this.deps.runRecorder.listRuns(jobId);
     const original = history.find((record) => record.workflowId === runId);
     if (!original) {
@@ -1452,14 +1473,7 @@ export class JobPipelineControl {
         `Run "${runId}" of job "${jobId}" recorded definition version ${original.definitionVersion}, which is no longer resolvable; refusing rather than replaying a different configuration.`,
       );
     }
-    // The original's trigger is the replay's trigger; its schedule and
-    // async-job links belong to that dispatch, so they are NOT copied —
-    // a replay is the operator's new run, not a second firing.
-    return this.dispatchResolved(definition, {
-      trigger: normalizeJobRunTrigger(original.trigger),
-      kind: "replay",
-      originRunId: runId,
-    });
+    return { original, definition };
   }
 
   /**
@@ -1477,7 +1491,7 @@ export class JobPipelineControl {
    */
   private async dispatchResolved(
     definition: JobDefinition,
-    opts: { trigger?: JobRunTrigger; kind?: JobRunKind; originRunId?: string | null; scopePath?: string; scheduleId?: string; asyncJobId?: string; workflowInstanceId?: string; provenance?: JobRunProvenance | null },
+    opts: { trigger?: JobRunTrigger; kind?: JobRunKind; originRunId?: string | null; scopePath?: string; scheduleId?: string; asyncJobId?: string; workflowInstanceId?: string; provenance?: JobRunProvenance | null; input?: unknown; stageOnly?: boolean },
   ): Promise<JobDispatchResult> {
     const jobId = definition.jobId;
     let runId: string;
@@ -1519,6 +1533,10 @@ export class JobPipelineControl {
         provenance: opts.provenance ?? null,
         resuming: false,
         runInstanceKey: null,
+        // Issue #6400 — a stage replay hands the named stage its RECORDED
+        // input and executes that stage alone (see replayStage).
+        input: opts.input,
+        stageOnly: opts.stageOnly,
       });
     }
     this.inflight.set(runId, completion);
@@ -1554,7 +1572,7 @@ export class JobPipelineControl {
    */
   private async dispatchPerRun(
     definition: JobDefinition,
-    opts: { trigger?: JobRunTrigger; kind?: JobRunKind; originRunId?: string | null; scopePath?: string; scheduleId?: string; asyncJobId?: string; workflowInstanceId?: string; provenance?: JobRunProvenance | null },
+    opts: { trigger?: JobRunTrigger; kind?: JobRunKind; originRunId?: string | null; scopePath?: string; scheduleId?: string; asyncJobId?: string; workflowInstanceId?: string; provenance?: JobRunProvenance | null; input?: unknown; stageOnly?: boolean },
   ): Promise<{ runId: string; completion: Promise<JobRunOutcome> }> {
     const jobId = definition.jobId;
     const runId = this.newRunId();
@@ -1603,6 +1621,10 @@ export class JobPipelineControl {
       provenance: opts.provenance ?? null,
       resuming: false,
       runInstanceKey: runKey,
+      // Issue #6400 — a stage replay in run-per-row mode narrows the same
+      // way: the named stage's recorded input, that stage alone.
+      input: opts.input,
+      stageOnly: opts.stageOnly,
     });
     return { runId, completion };
   }
@@ -2313,6 +2335,66 @@ export class JobPipelineControl {
   }
 
   /**
+   * Issue #6400 (owner decision 2026-11-26: "a new op") — replay ONE stage
+   * of a PAST run.
+   *
+   * `replayRun` reproduces a whole past run; `rerunStage` re-executes a
+   * stage of the CURRENT run. This is the third op: the named stage of a
+   * settled run executes again as its OWN new run, on that run's recorded
+   * definition version, from that stage's recorded input.
+   *
+   * What "one stage" is, stated rather than implied. A stage is a node's
+   * OWN work; its children are the stages that run AFTER it, which is why
+   * executing the node the way a run does would execute the rest of the
+   * chain too. A replay therefore requires a stage that owns no
+   * downstream stage: a node with children is a composite (a chain root,
+   * or a sub-job), and it is refused by name with the stages that can be
+   * replayed instead. `replayRun` is the operation for a composite.
+   *
+   * The downstream rule, stated rather than implied: stages AFTER the
+   * replayed one do NOT re-execute. A replay is that stage's work,
+   * reproduced; continuing the tree would make the new run's outputs a
+   * mixture of old and new work.
+   *
+   * The run is `kind: "replay"` linked to the original by origin, and its
+   * descriptor names the replayed stage — so the recorder and the Workflow
+   * Runs view show a stage replay as what it is.
+   */
+  async replayStage(
+    jobId: string,
+    runId: string,
+    nodePath: string,
+  ): Promise<JobDispatchResult> {
+    const { original, definition } = await this.pastRunDefinition(jobId, runId);
+    const node = this.nodeAtPath(definition.root, nodePath);
+    const downstream = node.children ?? [];
+    if (downstream.length > 0) {
+      const stages = downstream
+        .map(
+          (child, index) =>
+            `${jobStageId(childPath(nodePath, index))} (${child.kind})`,
+        )
+        .join(", ");
+      throw new JobPipelineError(
+        "replay_stage_composite",
+        `Stage "${jobStageId(nodePath)}" of job "${jobId}" is not one stage: it owns downstream stages ${stages}. A replay reproduces exactly one stage, so name one of those, or replay run "${runId}" whole.`,
+      );
+    }
+    // The stage's recorded input is the past run's hand-off — the same
+    // fail-closed read a re-run of that stage resolves, addressed to the
+    // ORIGINAL run's artifacts (stageInput's runId argument).
+    const input = await this.stageInput(definition, runId, nodePath);
+    return this.dispatchResolved(definition, {
+      trigger: normalizeJobRunTrigger(original.trigger),
+      kind: "replay",
+      originRunId: runId,
+      scopePath: nodePath,
+      input,
+      stageOnly: true,
+    });
+  }
+
+  /**
    * Issue #5279 — answer a LIVE question about a run, not a stored one.
    *
    * `getJob` reads persisted views; a run in flight looks like whatever was
@@ -2511,12 +2593,14 @@ export class JobPipelineControl {
   }
 
   /**
-   * The persisted input a stage consumes: its parent stage's
-   * hand-off artifact in this run. The root stage consumes the
-   * run input (null). Fail-closed (#3069): a missing hand-off
-   * refuses — input is never fabricated. In-memory processing
-   * keeps hand-offs in a dead run context, so stage actions on
-   * such jobs refuse by name.
+   * The persisted input a stage consumes: the hand-off its predecessor
+   * wrote in this run. The root stage consumes the run input (null).
+   * Fail-closed (#3069): a missing hand-off refuses — input is never
+   * fabricated. In-memory processing keeps hand-offs in a dead run
+   * context, so stage actions on such jobs refuse by name.
+   *
+   * `stageHandoffKey` owns which artifact that is, so run / re-run /
+   * resume / replay all feed a stage what the run fed it.
    */
   private async stageInput(
     definition: JobDefinition,
@@ -2532,15 +2616,43 @@ export class JobPipelineControl {
     }
     const input = await this.deps.stores.artifacts.getArtifact(
       runId,
-      `${keyPart(parentPath(nodePath))}/stage-output`,
+      this.stageHandoffKey(definition, nodePath),
     );
     if (input === null) {
       throw new JobPipelineError(
         "stage_input_missing",
-        `Stage "${jobStageId(nodePath)}" of job "${definition.jobId}" has no persisted input in run ${runId}: its parent stage's hand-off is absent. Refusing rather than fabricating input.`,
+        `Stage "${jobStageId(nodePath)}" of job "${definition.jobId}" has no persisted input in run ${runId}: its predecessor's hand-off is absent. Refusing rather than fabricating input.`,
       );
     }
     return input;
+  }
+
+  /**
+   * The artifact key of the hand-off a stage consumed, matching the
+   * engine's own wiring in `execNode`: sequential children chain, so
+   * child i>0 consumes child i-1's stage output; a first child — and
+   * every child of a parallel parent, whose children all receive the
+   * parent's output — consumes the parent's. One rule, read by every
+   * stage-addressing operation, so a stage action never feeds a stage a
+   * different input than the run did.
+   */
+  private stageHandoffKey(
+    definition: JobDefinition,
+    nodePath: string,
+  ): string {
+    const segments = pathSegments(nodePath);
+    const index = segments[segments.length - 1];
+    const parent = parentPath(nodePath);
+    if (index === 0) return `${keyPart(parent)}/stage-output`;
+    const parentNode = this.nodeAtPath(definition.root, parent);
+    const parentMode = resolveExecutionMode({
+      ...definition.config.executionMode,
+      ...(parentNode.executionMode ?? {}),
+    });
+    if (parentMode.concurrency === "parallel") {
+      return `${keyPart(parent)}/stage-output`;
+    }
+    return `${keyPart(childPath(parent, index - 1))}/stage-output`;
   }
 
   /**
@@ -3582,6 +3694,14 @@ export class JobPipelineControl {
        * where the run uses the job's management row.
        */
       runInstanceKey: string | null;
+      /**
+       * Issue #6400 — a stage replay's two narrowing values: the input the
+       * past run handed the stage, and whether the run executes ONLY that
+       * stage (its downstream children detached). Absent on every ordinary
+       * dispatch, so the shared tail behaves exactly as before.
+       */
+      input?: unknown;
+      stageOnly?: boolean;
     },
   ): Promise<JobRunOutcome> {
     const { publisher } = this.deps;
@@ -3688,7 +3808,15 @@ export class JobPipelineControl {
     if (!opts.resuming) await this.persistLedger(ctx);
 
     try {
-      const scopeNode = this.nodeAtPath(definition.root, opts.scopePath);
+      const scoped = this.nodeAtPath(definition.root, opts.scopePath);
+      // Issue #6400 — a stage replay executes ONE stage: the named node's
+      // own work, with its downstream children detached. replayStage
+      // refuses a composite by name, so this detach is the backstop that
+      // keeps "one stage" true even for a definition that grew children
+      // after the past run.
+      const scopeNode = opts.stageOnly
+        ? { ...scoped, children: undefined }
+        : scoped;
       // #3992 PR-4: a feed job's whole execution tree is bounded
       // by the resolved feed execution deadline. The race covers
       // ONLY this await — instance setup above and the terminal
@@ -3700,7 +3828,12 @@ export class JobPipelineControl {
       // run's own stores — never through this run's terminal
       // path — so the settled outcome cannot flip. Non-feed jobs
       // execute exactly as before.
-      const execution = this.execNode(ctx, scopeNode, opts.scopePath, null);
+      const execution = this.execNode(
+        ctx,
+        scopeNode,
+        opts.scopePath,
+        opts.input ?? null,
+      );
       if (runDeadlineMs !== undefined) {
         await withFeedDeadline(
           execution,
@@ -3711,8 +3844,15 @@ export class JobPipelineControl {
         await execution;
       }
       instance = await this.requireRunInstance(jobId, opts.runInstanceKey);
+      // Issue #6400 — a stage replay's descriptor names the replayed stage
+      // and the run it came from: the record carries the origin link at
+      // stage granularity, in the field the Workflow Runs view already
+      // reads (no new column).
       const descriptor =
-        `run ${opts.runId}: ${ctx.stepExecutions} step executions, ${ctx.artifactKeys.length} artifacts` +
+        (opts.stageOnly
+          ? `replay of ${jobStageId(opts.scopePath)} from run ${opts.originRunId ?? opts.runId}: `
+          : `run ${opts.runId}: `) +
+        `${ctx.stepExecutions} step executions, ${ctx.artifactKeys.length} artifacts` +
         (ctx.notes.length > 0 ? `; ${ctx.notes.join("; ")}` : "");
       instance = { ...instance, state: "completed", desiredState: "none", checkpoint: null };
       await this.setInstance(instance);

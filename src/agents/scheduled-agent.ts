@@ -192,6 +192,7 @@ import { resolveRunNowTrigger } from "../services/jobPipelineEngine";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { normalizeJobRunTrigger } from "../data/jobRunRecordPorts";
 import { buildJobStatusReport, resolveSubJob } from "../services/jobStageStatus";
+import { isJobStageId, jobStageNodePath } from "../workflows/stageRunnerPorts";
 import type { JobStageEventRecord } from "../data/jobStageEventPorts";
 import { resolveWorkflowRunsStageReadLimit } from "../config/workflowRunsStageRead";
 import { assertExecutionModeSupported, resolveExecutionMode } from "../services/jobPipelineConfig";
@@ -1610,20 +1611,41 @@ export class ScheduledAgent extends PortThink {
    * it shares `createScheduledAgentPipelineControl` with every other
    * control verb, so the operator identity and store residency are the
    * same as stage control.
+   *
+   * Issue #6400 — the SAME seam, narrowed to one stage by `opts.stage`
+   * (the engine's `replayStage`): that stage's own work becomes its own new
+   * run. The stage is addressed by its stage id (`job:2` — the id the runs
+   * view and the stage tools show) or by the node path itself. Both are
+   * self-describing, so neither is resolved against TODAY's definition
+   * vocabulary: the replay executes the RECORDED version's tree, and a
+   * name resolved against a newer tree could point at a different stage.
    */
   async replayPipelineRun(
     jobId: string,
     runId: string,
-    opts?: { userLogin?: string },
-  ): Promise<{ jobId: string; replayedRunId: string; runId: string; state: string }> {
+    opts?: { userLogin?: string; stage?: string },
+  ): Promise<{
+    jobId: string;
+    replayedRunId: string;
+    runId: string;
+    state: string;
+    stage?: string;
+  }> {
     const ctx = this.pipelineContext();
     const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
-    const dispatch = await control.replayRun(jobId, runId);
+    const nodePath =
+      opts?.stage && isJobStageId(opts.stage)
+        ? jobStageNodePath(opts.stage)
+        : opts?.stage;
+    const dispatch = nodePath
+      ? await control.replayStage(jobId, runId, nodePath)
+      : await control.replayRun(jobId, runId);
     return {
       jobId,
       replayedRunId: runId,
       runId: dispatch.runId,
       state: dispatch.state,
+      ...(opts?.stage ? { stage: opts.stage } : {}),
     };
   }
 

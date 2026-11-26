@@ -368,13 +368,20 @@ export interface ScheduledAgentDoorStub {
    */
   /**
    * Issue #4467 — replay one past run as a new run of its recorded
-   * definition version.
+   * definition version. Issue #6400 — `opts.stage` narrows the replay to
+   * ONE stage of that run (a stage id or node path; a composite refuses).
    */
   replayPipelineRun(
     jobId: string,
     runId: string,
-    opts?: { userLogin?: string },
-  ): Promise<{ jobId: string; replayedRunId: string; runId: string; state: string }>;
+    opts?: { userLogin?: string; stage?: string },
+  ): Promise<{
+    jobId: string;
+    replayedRunId: string;
+    runId: string;
+    state: string;
+    stage?: string;
+  }>;
   controlPipelineStage(
     jobId: string,
     stage: string,
@@ -449,8 +456,8 @@ export function jobStatusRouteContext(
     readJobStatus: (jobId) => getPipelineJobStatusViaDoor(env, jobId),
     controlJobStage: (jobId, stage, operation) =>
       controlPipelineStageViaDoor(env, actingLogin, jobId, stage, operation),
-    replayJobRun: (jobId, runId) =>
-      replayPipelineRunViaDoor(env, actingLogin, jobId, runId),
+    replayJobRun: (jobId, runId, stage) =>
+      replayPipelineRunViaDoor(env, actingLogin, jobId, runId, stage),
   };
 }
 
@@ -1388,10 +1395,19 @@ export async function replayPipelineRunViaDoor(
   actingLogin: string | undefined | null,
   jobId: string,
   runId: string,
-): Promise<{ jobId: string; replayedRunId: string; runId: string; state: string }> {
+  stage?: string | null,
+): Promise<{
+  jobId: string;
+  replayedRunId: string;
+  runId: string;
+  state: string;
+  stage?: string;
+}> {
   const login = requireActingLogin(actingLogin);
   return getScheduledAgentDoor(env).replayPipelineRun(jobId, runId, {
     userLogin: login,
+    // Issue #6400 — one stage of that past run; absent means the whole run.
+    ...(stage ? { stage } : {}),
   });
 }
 
