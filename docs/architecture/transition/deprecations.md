@@ -33,6 +33,15 @@ journal is the retry record; the blob seam refuses by name
 (`OPTIONS_CHAIN_REPORTS_BUCKET_UNBOUND`) when `REPORTS_BUCKET` is
 unbound, rather than silently dropping bytes to legacy DO storage.
 
+## 2026-11-25 — #6040 retires the Copilot research door (one dispatch)
+
+- File: `src/agents/orchestrator/meshResearchDoor.ts` → `src/agents/orchestrator/meshResearchDoor.deprecated.ts`
+- Date: 2026-11-25
+- Reason: Issue #6040 (sub of #5973). The door was the #5123 Copilot path for `research:<runId>`, but no production module imported it and its deterministic `execute` returned a literal `{mode: "deterministic"}` — a dispatched run that ran nothing, so the audit trail reported a run that never happened. The Copilot surface is the `run_research_job` MCP command, which now dispatches through `dispatchResearchEngineRun` with a real six-stage target; keeping a second door beside it would leave two dispatch paths for one event, one of them hollow.
+- Replacement: `dispatchResearchEngineRun` (`src/workflows/researchScreenEngine.ts`) with a `ResearchDispatchTarget`, driven by the `run_research_job` command (`src/mcps/openaimp/researchJobCommands.ts`); per-stage control is `executeResearchStageControl` over `(runId, stageId)`.
+- Consumers at deprecation: none in live code — the only importers were three tests (`tests/research_agentic_5123.test.ts`, `tests/research_door_mcp_durable_5286.test.ts`, `tests/research_real_deps_5287.test.ts`), repointed to the deprecated path in the same slice and still running.
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice. The HITL #277 deliver gate (`evaluateResearchDeliverHitlGate`) stays frozen here until a production deliver-stage gate supersedes it.
+
 ## 2026-11-22 — #6165 retires the second grant surface (one admin-creation path)
 
 - Routes: `POST /api/iaaa/role-grants/grant` and `POST /api/iaaa/role-grants/revoke` (`src/server/routes/auth.ts`)

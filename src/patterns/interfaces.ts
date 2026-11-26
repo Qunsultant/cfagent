@@ -212,6 +212,17 @@ export interface McpToolContext {
    * recorded break in the registry spine), never fabricated.
    */
   traceparent?: () => string | undefined;
+  /**
+   * #6040 — the real research dispatch target (six stage bodies plus the
+   * whole-run execute) when the host already holds the agent's research
+   * handles. Production `/mcp` contexts leave it unset: `run_research_job`
+   * then resolves the orchestrator door from `env`. A host that can supply
+   * neither refuses with `research_dispatch_unavailable` — a dispatch that
+   * cannot execute never answers success. Test harnesses set it to drive the
+   * command without a Durable Object binding (the `meshScreenDoorSeams`
+   * discipline).
+   */
+  researchDispatch?: import("../workflows/researchScreenEngine").ResearchDispatchTarget;
   audit: (type: string, agent: any, payload: Record<string, unknown>) => void;
   facade?: IMcpSystemFacade;
   submitJob?: (job: AsyncJobSubmission) => Promise<{

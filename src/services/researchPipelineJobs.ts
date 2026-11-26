@@ -35,7 +35,7 @@ import {
 import { jobDefinitionSpec } from "../config/jobDefinitionCatalog";
 import { bindJobDefinitionParams } from "./jobDefinitionParamBinders";
 import { buildJobConfigFromSpec, type JobDefinitionPerStage } from "./jobDefinitionSpecBuilder";
-import { runWithResearchRunId, triggerManualResearch, type PublishEntry } from "./researchTriggers";
+import { runWithResearchRunId, type PublishEntry } from "./researchTriggers";
 import type { ResearchFeedStageOutput } from "./researchFeedHandoff";
 import type { ResearchEnrichStageOutput } from "./researchEnrichHandoff";
 
@@ -368,12 +368,6 @@ export function registerResearchSteps(
 }
 
 /**
- * Default production `ResearchStepDeps` factory (#5237) for host and workflow
- * residencies. Allows overriding `runOodaAnalysis`, `runEvaluateStage`, or
- * `evaluationStore` while ensuring `analyze.ooda` and `evaluate.apply` are
- * always registered in `createPipelineStepRegistry`.
- */
-/**
  * Issue #6040 — the ONE in-process builder for OODA's six stage bodies.
  *
  * OODA is a multi-stage process (feed, enrich, analyze, generate, deliver,
@@ -421,13 +415,19 @@ export function createAgentResearchStepDeps(
         runId: input.runId,
       }),
     // Issue #5911 — the run id the step already holds is THE id: the pipeline
-    // must not mint a second one.
+    // must not mint a second one. Issue #6040 — the analyze leg carries the
+    // run's own trigger and the persisted feed/enrich outputs the step handed
+    // it, so a scheduled run is not published as manual and the analyze stage
+    // consumes the engine's stage outputs instead of re-fetching them.
     runOodaAnalysis: (ctx) =>
       runWithResearchRunId(ctx.runId, () =>
-        triggerManualResearch(handles.runResearchAndPublish, ctx.userLogin, {
+        handles.runResearchAndPublish(ctx.trigger, ctx.userLogin, {
           runId: ctx.runId,
           ...(ctx.brokerId ? { brokerId: ctx.brokerId } : {}),
           ...(ctx.mode ? { mode: ctx.mode } : {}),
+          ...(ctx.feed ? { feed: ctx.feed } : {}),
+          ...(ctx.enrich ? { enrich: ctx.enrich } : {}),
+          ...(ctx.deferPublication ? { stage: "analyze" as const } : {}),
         }),
       ) as never,
     runGenerateStage: (input) =>
@@ -451,6 +451,12 @@ export function createAgentResearchStepDeps(
   };
 }
 
+/**
+ * Default production `ResearchStepDeps` factory (#5237) for host and workflow
+ * residencies. Allows overriding `runOodaAnalysis`, `runEvaluateStage`, or
+ * `evaluationStore` while ensuring `analyze.ooda` and `evaluate.apply` are
+ * always registered in `createPipelineStepRegistry`.
+ */
 export function createDefaultResearchStepDeps(
   overrides: Partial<ResearchStepDeps> & { allowTestStub?: boolean } = {},
 ): ResearchStepDeps {

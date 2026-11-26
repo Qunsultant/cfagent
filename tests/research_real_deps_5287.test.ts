@@ -7,7 +7,7 @@ import {
   createDefaultResearchStepDeps,
 } from "../src/services/researchPipelineJobs";
 import { createPipelineStepRegistry } from "../src/services/enrichPipelineJobs";
-import { executeAgentComposedResearchViaDoor } from "../src/agents/orchestrator/meshResearchDoor";
+import { executeAgentComposedResearchViaDoor } from "../src/agents/orchestrator/meshResearchDoor.deprecated";
 import {
   dispatchResearchEngineRun,
   executeResearchStageControl,

@@ -109,9 +109,9 @@ Legend: **✓** works · **◐** present but hollow · **✗** absent.
 |---|---|---|---|---|---|
 | **UX** (OODA page) | ✓ `Run research now` | ✓ | ✓ | ✗ | ◐ free-text broker/mode, filters only; no stage modes; guard-window copy hardcoded |
 | **Chat** | ✗ no OODA entry in the chat job catalogue; only `Ask about results` (a read prompt) | ✗ | ✗ | ✗ | ✗ |
-| **Copilot** (mesh door) | ✗ **dead code** — `meshResearchDoor` imported only by tests; the deterministic `execute` returns a literal | ✗ | ✗ | ✗ | ✗ |
+| **Copilot** (mesh door) | ✗ **retired** (#6040) — `meshResearchDoor.deprecated.ts`; the Copilot surface is `run_research_job` | ✗ | ✗ | ✗ | ✗ |
 | **API** | ✓ `POST /research/run`, `/research/scheduled-tick` | ✓ | ✓ | ✗ | ◐ `brokerId`/`mode` accepted, **unvalidated**; no stage modes |
-| **MCP** | ◐ `run_research_job` returns `{dispatched: true, …}` from a stub execute | ◐ status only in production | ✓ | ✗ | ✗ |
+| **MCP** | ✓ `run_research_job` dispatches through the one service and returns `{runId, jobId, stages}` (#6040) | ◐ status only in production | ✓ | ✗ | ✗ |
 | **Webhooks** | ✗ ingress accepts only `followup.report\|deliver\|notify` | ✗ | ✗ | ✗ | ✗ |
 | **Scheduled** | ◐ tick rider POSTs the run every 30 min | ✗ | ✗ | ✗ | ✗ platform default only |
 
