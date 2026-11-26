@@ -17,8 +17,8 @@
  * needs a goalKind or scenarioId and runPipelineJobSchedule needs a
  * pipeline job id — neither has a catalogue default, so neither can
  * be quick-created; goal operations are created as goals (addGoal,
- * not the create route); derived duties are system-derived, not
- * stored; internal callbacks are allow-list-rejected. Listing those
+ * not the create route); system duties are platform-owned, not
+ * quick-created; internal callbacks are allow-list-rejected. Listing those
  * would post guaranteed failures.
  *
  * Why strategy discovery is listed but blocked: a discovery schedule

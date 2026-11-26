@@ -286,7 +286,7 @@ const ACCOUNT_SCOPED = [
   "collectivhistory",
 ];
 
-/** The row name: a stage-schedule names its workflow + stage, a ticker-push row names the live feed, not the firing callback. */
+/** The row name: a stage-schedule names its workflow + stage; the ticker-push feed names the feed, not the firing callback. */
 export function scheduleDisplayName(s: ScheduleItem): string {
   if (s.kind === "workflow-stage" && s.jobId) {
     return s.stageId ? `${s.jobId} · ${s.stageId}` : s.jobId;
@@ -300,28 +300,18 @@ export function scheduleDisplayName(s: ScheduleItem): string {
 }
 
 /**
- * Issue #5891 — the six derived rows Delete cannot remove (they
- * re-derive from code), keyed by the same literal ids the cadence
- * column already reads below. A row Delete cannot remove reports
- * its refusal here so the button can be disabled with the reason —
- * the owner's rule is no new button: Delete either deletes or is
- * disabled with the reason. The sentences are the server's own
- * refusal sentences, so the button and the route never disagree.
+ * Issue #6503 step 14 — the Delete block for a schedule row, kept
+ * private to this panel (the old exported helper bundled it with
+ * the derived world, which is gone). The two live
+ * branches mirror the server's own refusals in
+ * `deleteUnifiedSchedule`, so the button and the route never
+ * disagree: a goal deletes through the goals surface, and any other
+ * non-managed kind names itself. Every other stored row deletes —
+ * the six system duties included, now that they are stored records.
+ * The owner's rule is no new button: Delete either deletes or is
+ * disabled with the reason.
  */
-const DERIVED_SCHEDULE_IDS = new Set([
-  "token-renewal",
-  "retention",
-  "nightly-research",
-  "sweep-stale-ledger-tasks",
-  "sweep-stale-async-jobs",
-  "schedule-watchdog",
-]);
-
-/** The reason Delete cannot remove this row, or null when it can. */
-export function deleteRefusalReason(s: ScheduleItem): string | null {
-  if (DERIVED_SCHEDULE_IDS.has(s.id)) {
-    return `Schedule '${s.id}' is a derived record with no alarm to delete.`;
-  }
+function deleteBlockReason(s: ScheduleItem): string | null {
   if (s.kind === "goal") {
     return "Goal schedules delete through the goals surface (/api/schedule/goals/:id), not the SDK schedule routes.";
   }
@@ -329,8 +319,7 @@ export function deleteRefusalReason(s: ScheduleItem): string | null {
     s.kind !== undefined &&
     s.kind !== "screen" &&
     s.kind !== "workflow-stage" &&
-    s.kind !== "internal" &&
-    s.kind !== "ticker-push"
+    s.kind !== "internal"
   ) {
     return `Schedule kind '${s.kind}' cannot be deleted.`;
   }
@@ -339,35 +328,32 @@ export function deleteRefusalReason(s: ScheduleItem): string | null {
 
 /**
  * Issue #5893 — the rows of a list that come back on their own after
- * an empty, by class. Derived rows re-derive from code on the next
- * list (the six ids above, or any row the server stamps source
- * `derived`); declared tasks re-arm on the next Think reconcile
- * (source `declared-task`); built-in goals re-seed when the store is
- * empty, except goals the owner removed (kind `goal`, or source
- * `seeded`). Each id lands in exactly one bucket. Everything else —
- * user-created, agent-created, pipeline, workflow, ticker-push,
- * system, unknown rows — goes and stays gone.
+ * an empty, by class. Declared tasks re-arm on the next Think
+ * reconcile (source `declared-task`); built-in goals re-seed when
+ * the store is empty, except goals the owner removed (kind `goal`,
+ * or source `seeded`). Each id lands in exactly one bucket.
+ * Everything else — user-created, agent-created, pipeline,
+ * workflow, system, unknown rows — goes and stays gone. There is
+ * no derived bucket any more (#6503 step 14): no server row
+ * carries source `derived`, so a row stamped that way (legacy data)
+ * is not a comeback class either.
  */
-export interface EmptyListComeback {
-  derived: string[];
+export interface ReturningRows {
   declaredTasks: string[];
   seededGoals: string[];
 }
 
-export function emptyListComeback(schedules: ScheduleItem[]): EmptyListComeback {
-  const derived: string[] = [];
+export function returningRows(schedules: ScheduleItem[]): ReturningRows {
   const declaredTasks: string[] = [];
   const seededGoals: string[] = [];
   for (const s of schedules) {
-    if (DERIVED_SCHEDULE_IDS.has(s.id) || scheduleSourceKindOf(s) === "derived") {
-      derived.push(s.id);
-    } else if (scheduleSourceKindOf(s) === "declared-task") {
+    if (scheduleSourceKindOf(s) === "declared-task") {
       declaredTasks.push(s.id);
     } else if (s.kind === "goal" || scheduleSourceKindOf(s) === "seeded") {
       seededGoals.push(s.id);
     }
   }
-  return { derived, declaredTasks, seededGoals };
+  return { declaredTasks, seededGoals };
 }
 
 /** The verified outcome of one Empty-the-list run, for the result notice. */
@@ -390,7 +376,7 @@ export interface EmptyListResult {
  * /api/schedule/builtin-goals — the config read, owner-removed goals
  * subtracted, never a client copy); the Track 1 labels come from
  * `track1RecreatePlan()`; the comeback classes reuse #5893's
- * `emptyListComeback`. Gone-for-good is every current row the reset
+ * `returningRows`. Gone-for-good is every current row the reset
  * neither re-plants nor expects back on its own — including a goal
  * row the server no longer seeds (owner-removed, or user-created).
  */
@@ -401,8 +387,6 @@ export interface ResetNeededSet {
   removedGoals: string[];
   /** Track 1 labels the reset will re-create. */
   track1: string[];
-  /** Derived rows that come back on their own (re-derived from code). */
-  derived: string[];
   /** Declared tasks that re-arm on the next Think reconcile. */
   declaredTasks: string[];
   /** Current rows that go and stay gone. */
@@ -438,14 +422,13 @@ export function resetNeededSet(
       );
     }
   }
-  const comeback = emptyListComeback(schedules);
+  const comeback = returningRows(schedules);
   const seeded = new Set(seedableGoals.map((goal) => goal.id));
-  const backOnOwn = new Set([...comeback.derived, ...comeback.declaredTasks]);
+  const backOnOwn = new Set([...comeback.declaredTasks]);
   return {
     seededGoals: seedableGoals.map((goal) => goal.id),
     removedGoals: [...removedGoalIds],
     track1: track1Plan.map((item) => item.label),
-    derived: comeback.derived,
     declaredTasks: comeback.declaredTasks,
     goneForGood: schedules
       .filter((s) => !backOnOwn.has(s.id) && !seeded.has(s.id))
@@ -475,7 +458,7 @@ export interface ResetToDefaultsResult {
   unexpectedRemaining: string[];
 }
 
-/** Last-event rendering for a derived row (never a fabricated time). */
+/** Last-event rendering for a system row (never a fabricated time). */
 function formatLastEvent(lastAt?: string): string {
   if (!lastAt) return "never";
   const ms = Date.parse(lastAt);
@@ -575,6 +558,16 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
   const [detailError, setDetailError] = useState<string | null>(null);
 
   const envHeaders = activeEnv ? { "x-environment": activeEnv } : undefined;
+
+  // Issue #6503 step 14 — the feed is not a schedule. The list the
+  // server returns carries the ticker-push feed row alongside the
+  // stored schedules, and this panel splits them here: every
+  // schedule surface below (table, counts, filters, bulk, empty,
+  // reset) reads `scheduleRows`, and the feed renders in its own
+  // card. A row the server stamps kind `ticker-push` is a feed row
+  // even when its id differs, so the split is on kind, not id.
+  const feedRows = schedules.filter((s) => s.kind === "ticker-push");
+  const scheduleRows = schedules.filter((s) => s.kind !== "ticker-push");
 
   const fetchSchedules = useCallback(async () => {
     setLoading(true);
@@ -785,15 +778,19 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
       const fresh = (await listSchedules(envHeaders)) as unknown as ScheduleItem[];
       setSchedules(fresh);
       setRefreshSignal((n) => n + 1);
-      const comeback = emptyListComeback(fresh);
-      const expected = new Set([...comeback.derived, ...comeback.declaredTasks, ...comeback.seededGoals]);
+      // Issue #6503 step 14 — verify schedules only: the feed row
+      // is not a schedule and the wipe does not touch it, so it is
+      // neither remaining nor unexpected here.
+      const freshSchedules = fresh.filter((s) => s.kind !== "ticker-push");
+      const comeback = returningRows(freshSchedules);
+      const expected = new Set([...comeback.declaredTasks, ...comeback.seededGoals]);
       setEmptyResult({
         cancelled: cancelResult.cancelled,
         pausedDeleted,
         failed: cancelResult.failed,
         ...(clearError !== undefined ? { clearError } : {}),
-        remaining: fresh.map((s) => s.id),
-        unexpectedRemaining: fresh.filter((s) => !expected.has(s.id)).map((s) => s.id),
+        remaining: freshSchedules.map((s) => s.id),
+        unexpectedRemaining: freshSchedules.filter((s) => !expected.has(s.id)).map((s) => s.id),
       });
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
@@ -823,7 +820,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
         listBuiltinGoals(),
       ]);
       const track1 = track1RecreatePlan();
-      const needed = resetNeededSet(schedules, builtin.goals, builtin.removedBuiltinGoalIds, track1);
+      const needed = resetNeededSet(scheduleRows, builtin.goals, builtin.removedBuiltinGoalIds, track1);
       setResetPreview({ cancel, clear, builtin, track1, needed });
       setResetModalOpen(true);
     } catch (err) {
@@ -856,7 +853,10 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
       const fresh = (await listSchedules(envHeaders)) as unknown as ScheduleItem[];
       setSchedules(fresh);
       setRefreshSignal((n) => n + 1);
-      const freshIds = new Set(fresh.map((s) => s.id));
+      // Issue #6503 step 14 — verify schedules only: the feed row
+      // is not a schedule and the wipe does not touch it.
+      const freshSchedules = fresh.filter((s) => s.kind !== "ticker-push");
+      const freshIds = new Set(freshSchedules.map((s) => s.id));
       const plantedGoalIds = seeded
         .filter((r) => r.status === "added" || r.status === "skipped")
         .map((r) => r.id);
@@ -866,7 +866,6 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
       const planted = [...plantedGoalIds, ...plantedTrack1Ids];
       const expected = new Set([
         ...planted,
-        ...preview.needed.derived,
         ...preview.needed.declaredTasks,
       ]);
       setResetResult({
@@ -876,7 +875,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
         ...(clearError !== undefined ? { clearError } : {}),
         seeded,
         track1,
-        remaining: fresh.map((s) => s.id),
+        remaining: freshSchedules.map((s) => s.id),
         missingPlanted: planted.filter((id) => !freshIds.has(id)),
         pendingDeclared: preview.needed.declaredTasks.filter((id) => !freshIds.has(id)),
         unexpectedRemaining: fresh.filter((s) => !expected.has(s.id)).map((s) => s.id),
@@ -946,8 +945,9 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
   // the screening callbacks included. The options manager keeps its form,
   // latest runs and audit trail, and its Edit flow is reached through the
   // row's Edit control (an edit request), so dropping its embedded list loses
-  // nothing.
-  const allSchedules = schedules;
+  // nothing. The feed is not in this list: it renders in its own card above
+  // the table (issue #6503 step 14).
+  const allSchedules = scheduleRows;
 
   // Filter by the active kind (issue #4329 S2): "all" is the unfiltered list.
   const filtered = allSchedules.filter(
@@ -961,10 +961,10 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
   );
   // Issue #5889 — the source filter composes with kind and status. "cron"
   // is a timing slice, not a source: every cron-timed row, whatever its
-  // source (it overlaps Derived by design — each row still carries
-  // exactly one source). The per-agent and per-workflow views name only
-  // the values the loaded rows carry; a selected value that stops
-  // existing (a refresh dropped its last row) falls back to all.
+  // source — each row still carries exactly one source. The per-agent
+  // and per-workflow views name only the values the loaded rows carry;
+  // a selected value that stops existing (a refresh dropped its last
+  // row) falls back to all.
   const sourceFiltered = statusFiltered.filter((s) => {
     if (sourceFilter === "all") return true;
     if (sourceFilter === "cron") return s.type === "cron";
@@ -1082,18 +1082,6 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
             <Badge tone="neutral" size="xs">
               System
             </Badge>
-            {/* Issue #3121 #4237 — a ticker-push row carries its feed
-                health: a stopped push reads as a missed push, an
-                idle feed (no listeners) as Idle, never as missed. */}
-            {s.kind === "ticker-push" ? (
-              <Badge
-                tone={s.health === "stale" ? "warning" : s.health === "idle" ? "neutral" : "success"}
-                size="xs"
-                dot
-              >
-                {s.health === "stale" ? "Missed push" : s.health === "idle" ? "Idle" : "Healthy"}
-              </Badge>
-            ) : null}
             {/* Issue #3122 — agent-created schedules carry an Agent
                 badge (provenance origin agent on the payload); user-
                 and system-created rows show no badge. */}
@@ -1150,9 +1138,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
         <Stack gap="0-5">
           <strong className="ui-meta">{genericCadence(s)}</strong>
           <span className="ui-meta">
-            {s.kind === "ticker-push"
-              ? `Last push: ${formatLastEvent(s.lastPushAt)}`
-              : s.id === "token-renewal"
+            {s.id === "token-renewal"
                 ? `Last renewal: ${formatLastEvent(s.lastRunAt)}${s.lastRunOutcome ? ` (${s.lastRunOutcome})` : ""}`
                 : s.id === "retention"
                   ? `Last pass: ${formatLastEvent(s.lastRunAt)}${s.lastRunOutcome ? ` (${s.lastRunOutcome})` : ""}${s.lastRunDetail ? ` — ${s.lastRunDetail}` : ""}`
@@ -1259,7 +1245,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
         // Issue #5891 — Delete either deletes or is disabled with
         // the reason (no new button); the title carries the reason,
         // the Trigger Now disabled+title precedent.
-        const deleteRefusal = deleteRefusalReason(s);
+        const deleteRefusal = deleteBlockReason(s);
         return (
           // Issue #4389 — ONE button set, one vocabulary, for every kind: Edit ·
           // Details · Trigger Now · Pause/Resume · Delete. Edit opens the row's
@@ -1416,18 +1402,9 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
             do: the removal sentence renders only for a row Delete
             can actually remove. A refused row names its refusal
             (unreachable in practice — its Delete is disabled — but
-            the modal must never promise removal for it); ticker-push
-            keeps its #4389 feed note and promises no removal. */}
-        {deleteTarget !== null && deleteRefusalReason(deleteTarget) !== null ? (
-          <p>{deleteRefusalReason(deleteTarget)}</p>
-        ) : deleteTarget?.kind === "ticker-push" ? (
-          // Issue #4389 — the live feed has no stored definition to remove: its
-          // record is the feed's own state, so deleting it stops the push for
-          // every connected client (Resume brings it back).
-          <p>
-            The live feed has no stored definition to remove: deleting it stops the push for
-            every connected client, and <strong>Resume</strong> brings it back.
-          </p>
+            the modal must never promise removal for it). */}
+        {deleteTarget !== null && deleteBlockReason(deleteTarget) !== null ? (
+          <p>{deleteBlockReason(deleteTarget)}</p>
         ) : (
           <p>
             <code>{deleteTarget?.callback}</code> (<code>{deleteTarget?.id}</code>) is removed from
@@ -1497,13 +1474,8 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
               </p>
             )}
             {(() => {
-              const comeback = emptyListComeback(schedules);
+              const comeback = returningRows(scheduleRows);
               const lines: string[] = [];
-              if (comeback.derived.length > 0) {
-                lines.push(
-                  `${comeback.derived.length} derived row(s) will come back on their own — they are derived from code and re-appear on the next list: ${comeback.derived.join(", ")}.`,
-                );
-              }
               if (comeback.declaredTasks.length > 0) {
                 lines.push(
                   `${comeback.declaredTasks.length} declared task(s) will re-arm on the next Think reconcile: ${comeback.declaredTasks.join(", ")}.`,
@@ -1567,13 +1539,6 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
               {resetPreview.needed.track1.length} Track 1 screen(s) will be re-created:{" "}
               {resetPreview.needed.track1.join(", ")}.
             </p>
-            {resetPreview.needed.derived.length > 0 && (
-              <p>
-                {resetPreview.needed.derived.length} derived row(s) will come back on their own
-                — they are derived from code and re-appear on the next list:{" "}
-                {resetPreview.needed.derived.join(", ")}.
-              </p>
-            )}
             {resetPreview.needed.declaredTasks.length > 0 && (
               <p>
                 {resetPreview.needed.declaredTasks.length} declared task(s) will re-arm on the
@@ -1630,10 +1595,10 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
           />
         )}
         {/* Issue #5889 — the source dimension beside the kinds and the
-            status; the three compose (Options + Derived + Active). The
+            status; the three compose (Options + System + Active). The
             vocabulary is configuration, like the kinds. Cron is a
             timing slice, not a source: every cron-timed row, whatever
-            its source — it overlaps Derived by design. */}
+            its source. */}
         <PillGroup
           options={resolveScheduleSourceFilters().map((id) => ({
             id,
@@ -1641,7 +1606,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
             ...(id === "cron"
               ? {
                   tooltip:
-                    "Rows armed on a cron expression — a timing slice, overlapping Derived by design; each row still carries one source",
+                    "Rows armed on a cron expression — a timing slice, not a source; each row still carries one source",
                 }
               : {}),
           }))}
@@ -1849,7 +1814,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
             <p>
               {emptyResult.remaining.length} row(s) remain: {emptyResult.remaining.join(", ")}.
               {emptyResult.unexpectedRemaining.length === 0
-                ? " They came back on their own — derived rows re-derive from code, declared tasks re-arm on the next Think reconcile, built-in goals re-seed when the store is empty."
+                ? " They came back on their own — declared tasks re-arm on the next Think reconcile, built-in goals re-seed when the store is empty."
                 : ` Of those, ${emptyResult.unexpectedRemaining.length} row(s) were not expected to come back: ${emptyResult.unexpectedRemaining.join(", ")}.`}
             </p>
           )}
@@ -1971,6 +1936,94 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
           editRequest={editRequest ?? undefined}
         />
       )}
+
+      {/* Issue #6503 step 14 — the ticker push is a feed, not a
+          schedule: its record lives in the TickerAgent's own store,
+          and its controls run through the feed's own routes (the
+          schedule-control wrappers with id `ticker-push` — the route
+          dispatches them to the agent's typed RPC). It renders here,
+          in its own card, never as a schedule row: no Delete
+          (pausing stops the push; Resume brings it back), no bulk
+          scope, no source filter. */}
+      {feedRows.map((feed) => (
+        <Card key={feed.id} id="ticker-feed-card">
+          <header>
+            <CardHeader
+              title={
+                <>
+                  {scheduleDisplayName(feed)}
+                  <Badge tone="accent" size="xs">Feed</Badge>
+                  {/* Issue #3121 #4237 — the feed's health: a stopped
+                      push reads as a missed push, an idle feed (no
+                      listeners) as Idle, never as missed. */}
+                  <Badge
+                    tone={feed.health === "stale" ? "warning" : feed.health === "idle" ? "neutral" : "success"}
+                    size="xs"
+                    dot
+                  >
+                    {feed.health === "stale" ? "Missed push" : feed.health === "idle" ? "Idle" : "Healthy"}
+                  </Badge>
+                  <Badge tone={feed.paused ? "warning" : "success"} size="xs" dot>
+                    {feed.paused ? "Paused" : "Active"}
+                  </Badge>
+                  <span className="ui-meta">A feed, not a schedule — its record lives in the ticker agent</span>
+                </>
+              }
+            />
+          </header>
+          <Stack gap="1">
+            <span className="ui-meta">
+              {genericCadence(feed)} · Last push: {formatLastEvent(feed.lastPushAt)}
+            </span>
+            <Flex gap="1" align="center" wrap>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setCadenceError(null);
+                  setCadenceTarget(feed);
+                }}
+                title="Edit this feed's interval"
+              >
+                Edit
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setDetailsTarget(feed);
+                  void readDetails(feed);
+                }}
+                title="Open every stored detail for this feed"
+              >
+                Details
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                tone="subtle"
+                size="sm"
+                disabled={!!feed.paused}
+                onClick={() => handleTriggerNow(feed)}
+                title={feed.paused ? "Resume before triggering" : "Push to the connected clients now"}
+              >
+                Trigger Now
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => handlePauseResume(feed)}
+                title={feed.paused ? "Resume feed" : "Pause feed"}
+              >
+                {feed.paused ? "Resume" : "Pause"}
+              </Button>
+            </Flex>
+          </Stack>
+        </Card>
+      ))}
 
       {loading && schedules.length === 0 ? (
         <p className="ui-meta">Loading schedules…</p>

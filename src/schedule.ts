@@ -7,6 +7,8 @@
  * except goals whose operation is "social.publish", which it executes
  * through the social goal executor instead (issue #1077 Phase 5b).
  */
+import { DEFAULT_SCHEDULE_DUE_GUARD_MS } from "./config/scheduleDueGuard";
+
 
 export interface ScheduledGoal {
   id: string;
@@ -282,9 +284,26 @@ export function isSubDailyInterval(seconds: number): boolean {
  * 23h guard caps every schedule at one firing per day; with it the
  * guard is per-tick — the schedule fires when its most recent
  * scheduled tick is after its last run, and not twice in one tick.
+ *
+ * Issue #6503 (G3) — `paused` is the schedule's stored state at
+ * the call site: a paused row (state "paused", or a goal with
+ * enabled=false) is never due, no matter how due its cron is. The
+ * due-check is the single choke point, so the state is enforced
+ * here as well as at the call sites that skip paused rows first —
+ * a firing path that reaches isDue with a paused row still answers
+ * false instead of firing on timing alone.
  */
 export interface IsDueOptions {
   subDailyOptIn?: boolean;
+  paused?: boolean;
+  /**
+   * Issue #6503 step 13 — the anti-double-fire guard window in
+   * milliseconds, resolved from the managed setting
+   * `schedule.dueGuardMs` (managed > env > default 23h). Absent
+   * (or non-positive / non-finite) → the default 23h guard, exactly
+   * as before: no firing within 23 hours of the last run.
+   */
+  dueGuardMs?: number;
 }
 
 /**
@@ -309,7 +328,15 @@ function dueGuardPassed(
     if (prevTick === undefined) return false;
     return last < prevTick;
   }
-  return now.getTime() - last >= 23 * 60 * 60 * 1000;
+  // Issue #6503 step 13 — the guard window is externalized
+  // (`schedule.dueGuardMs`); absent or invalid → the 23h default.
+  const guardMs =
+    typeof opts?.dueGuardMs === "number" &&
+    Number.isFinite(opts.dueGuardMs) &&
+    opts.dueGuardMs > 0
+      ? opts.dueGuardMs
+      : DEFAULT_SCHEDULE_DUE_GUARD_MS;
+  return now.getTime() - last >= guardMs;
 }
 
 /**
@@ -335,6 +362,10 @@ export function isDue(
   timeZone?: string,
   opts?: IsDueOptions,
 ): boolean {
+  // Issue #6503 (G3) — a paused row is never due. The guard is
+  // first, before any timing read: a paused schedule has no
+  // expected tick at all, so the cron match below must not run.
+  if (opts?.paused === true) return false;
   if (timeZone === undefined) {
     const fields = cron.trim().split(/\s+/);
     if (fields.length !== 5) return false;

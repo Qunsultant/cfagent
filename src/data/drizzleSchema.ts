@@ -3,10 +3,13 @@
  * the data foundation layer.
  *
  * This schema MAPS tables; it does not create them. DDL authority
- * lives in exactly one migration file per table
- * (src/data/migrationRunner.ts, migrations 0001–0066); a test pins that
- * this mapping and that DDL agree on columns. If they ever drift,
- * the migration file wins and this mapping is fixed to match.
+ * lives in the D1 catalogue (`src/data/schemaComponent/d1Catalogue.ts`,
+ * one entry per statement; the migration runner assembles each
+ * migration's sql from its codes) — the old "one migration file per
+ * table, migrations 0001–0066" note predates the catalogue delegation
+ * (#4282 P1). A test pins that this mapping and that DDL agree on
+ * columns. If they ever drift, the DDL wins and this mapping is fixed
+ * to match.
  */
 import {
   integer,
@@ -99,6 +102,33 @@ export const agentSynthesizedSchedules = sqliteTable(
     provenanceSourceVersion: text("provenance_source_version").notNull(),
   },
 );
+
+/**
+ * Issue #6503 — the one unified schedule store, now D1-resident.
+ * Column names match migration 0092 exactly; the test pins the two
+ * together. The table mirrors the DO `unified_schedules` table
+ * column-for-column (no rows are copied — D1 starts empty,
+ * NO-COPY owner direction 2026-11-25). `definition_json` / `provenance_json` are JSON text;
+ * `alarm_id` is the live SDK alarm on the DO alarm plane (alarms
+ * are the firing mechanism, not data); `paused_at` is set when a
+ * record is paused. `state` carries the port's lifecycle
+ * (active / paused / deleted) — the D1 `deleted` state is the
+ * tombstone for the consolidation's delete path.
+ */
+export const unifiedSchedules = sqliteTable("unified_schedules", {
+  id: text("id").primaryKey(),
+  kind: text("kind").notNull(),
+  state: text("state").notNull(),
+  callback: text("callback"),
+  operation: text("operation"),
+  definitionJson: text("definition_json").notNull(),
+  ownerLogin: text("owner_login"),
+  provenanceJson: text("provenance_json"),
+  alarmId: text("alarm_id"),
+  pausedAt: text("paused_at"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
 
 /**
  * Issue #1688: agent_chain_audit projection table. Grain: one

@@ -3,14 +3,17 @@
  *
  * Every row in the Schedules home carries exactly one source: where
  * the row came from and which job it is. The kinds below are the
- * sources the issue enumerates (seeded, derived, declared task,
+ * sources the issue enumerates (seeded, declared task,
  * sweep/watchdog alarm, user-created, pipeline job, worker duty,
  * workflow, cron), plus the kinds a row needs to be honestly
  * attributable at all: ticker-push (the live feed's own row, not a
  * #4238–#4242 due-check record), agent-created (an agent acting for
  * a tenant, #3122), system (a system-armed row with a named reason),
  * and unknown (a legacy row whose creation was never recorded —
- * "not recorded", never a fabricated source).
+ * "not recorded", never a fabricated source). There is no `derived`
+ * kind any more (#6503 step 14): no server row carries that source
+ * — `resolveScheduleSource` never stamps it — so a legacy row that
+ * still names it reads as Unknown.
  *
  * The vocabulary is configuration, in the same idiom as the list's
  * kind filters (`src/config/scheduleListModes.ts`): the page reads
@@ -25,10 +28,10 @@
  *
  * The "cron" button is NOT a source kind: it is a timing slice over
  * the one list — every row armed on a cron expression, whatever its
- * source (issue caveat (b): the Cron view largely overlaps Derived,
- * because the #4238–#4242 due-check records are cron-timed). Each
- * row still carries exactly one source, so nothing is
- * double-counted; the Cron view just selects by timing instead.
+ * source (the #4238–#4242 system records are cron-timed, so the
+ * slice largely overlaps them). Each row still carries exactly one
+ * source, so nothing is double-counted; the Cron view just selects
+ * by timing instead.
  *
  * The per-agent and per-workflow views are dynamic, not configured:
  * their values are the agents and workflows the loaded rows
@@ -63,7 +66,6 @@ export interface ScheduleSource {
 /** The source kinds a schedule row can carry. */
 export const SCHEDULE_SOURCE_KIND_IDS = [
   "seeded",
-  "derived",
   "declared-task",
   "sweep-alarm",
   "user-created",
@@ -90,7 +92,6 @@ export type ScheduleSourceFilter =
 
 export const SCHEDULE_SOURCE_KIND_LABELS: Record<ScheduleSourceKind, string> = {
   seeded: "Seeded",
-  derived: "Derived",
   "declared-task": "Declared task",
   "sweep-alarm": "Sweep alarm",
   "user-created": "User-created",

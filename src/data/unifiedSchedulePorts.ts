@@ -12,7 +12,7 @@
  *
  * Placement follows ADR D-0 (the paused-schedule precedent, issue
  * #2337): a record lives in the same Durable Object as the
- * mechanism it belongs to. The table is therefore instantiated in
+ * mechanism it belongs to. The table was therefore instantiated in
  * the owning DO — OrchestratorAgent instances host screen,
  * followup, and worker-duty records; ScheduledAgent hosts goal
  * records — behind this one port, one schema, and one adapter
@@ -22,6 +22,19 @@
  * tables stay a projection, not the live store; `mas_async_jobs`
  * stays the async-job execution record and `mas_job_outcomes` the
  * outcome sink (recorded scoping decisions, #3123).
+ *
+ * SUPERSEDED for this store (issue #6503, owner direction
+ * 2026-11-25, D1 ONLY): the unified schedule store lives in D1,
+ * not in either DO — both DOs read and write the same D1 rows
+ * behind this one port. The D-0 placement above no longer governs
+ * schedule data; the alarm plane stays Durable Object alarms (the
+ * SDK arms the alarm; the D1 row carries the alarmId). The DO
+ * adapter below is retained but unused after the cutover (no file
+ * deletion, gate i): no live call site reads or writes the DO
+ * tables, and no rows are copied — D1 starts empty (NO-COPY owner
+ * direction 2026-11-25); the DO rows are left untouched.
+ * Fail-closed on an unbound AGENT_DB (owner decision
+ * 2026-11-25): no DO fallback, ever.
  *
  * Pause is a record state, not a copy: pausing flips `state` to
  * paused and cancels the SDK alarm; resuming flips it back and
@@ -34,8 +47,12 @@
  *
  * This module carries the record types, the table name, the
  * kind/state vocabularies, and the store interfaces ONLY
- * (ADR 0002 R1/R2). Adapters: doSqliteUnifiedScheduleAdapter.ts
- * (production — sync class + async port adapter, DO SQLite),
+ * (ADR 0002 R1/R2). Adapters: d1UnifiedScheduleAdapter.ts
+ * (production — the live store, D1 via Drizzle),
+ * doSqliteUnifiedScheduleAdapter.ts (legacy, retained unused —
+ * sync class + async port adapter, DO SQLite; no live use after
+ * #6503 — the DO tables are never read or written, their rows
+ * left untouched),
  * inMemoryUnifiedScheduleAdapter.ts (test double). Factory:
  * createUnifiedSchedulePorts.ts.
  *
@@ -186,7 +203,12 @@ export interface ScheduleStore {
   clearPaused(): Promise<number>;
 }
 
-/** The synchronous twin (DO SQLite is sync; routes use this). */
+/**
+ * The synchronous twin (DO SQLite is sync). Live call sites are
+ * async over D1 (#6503); the sync surface is retained but unused
+ * after the cutover (no file deletion, gate i) — no live call site
+ * may use it; the DO tables are never read or written.
+ */
 export interface SyncScheduleStore {
   save(record: UnifiedScheduleRecord): void;
   get(id: string): UnifiedScheduleRecord | undefined;

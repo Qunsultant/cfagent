@@ -6,7 +6,12 @@
  * the minimum schedule interval (the floor — no arm may fire more
  * often; default monthly (2,592,000s), fail-closed), the firing kill-switch (OFF
  * halts every scheduled firing at the one choke point; manual triggers
- * are never halted), and the armed-schedule inventory (callback +
+ * are never halted), the start-paused control (new schedules start
+ * paused unless an operator configures otherwise; default paused),
+ * the firing-rate alert thresholds (firings per window; default 120 /
+ * 60 minutes), the missed-schedule grace (minutes past an expected
+ * tick before the watchdog flags a missed fire; default 60, 0
+ * disables), and the armed-schedule inventory (callback +
  * interval/cron + owner + state). The firing-rate line shows the
  * firings in the alert window against the configured threshold; the
  * alert itself is an emitted observation (`schedule.firing_rate_exceeded`)
@@ -76,6 +81,9 @@ export function ScheduleControlsPanel({ initialView = null }: ScheduleControlsPa
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [floorDraft, setFloorDraft] = useState<string>("");
+  const [rateThresholdDraft, setRateThresholdDraft] = useState<string>("");
+  const [rateWindowDraft, setRateWindowDraft] = useState<string>("");
+  const [graceDraft, setGraceDraft] = useState<string>("");
 
   useEffect(() => {
     if (initialView !== null) return;
@@ -86,6 +94,9 @@ export function ScheduleControlsPanel({ initialView = null }: ScheduleControlsPa
         if (!cancelled) {
           setView(loaded);
           setFloorDraft(String(loaded.minIntervalSeconds));
+          setRateThresholdDraft(String(loaded.firingRate.threshold));
+          setRateWindowDraft(String(loaded.firingRate.windowMinutes));
+          setGraceDraft(String(loaded.missedScheduleGraceMinutes));
           setError(null);
         }
       })
@@ -101,7 +112,17 @@ export function ScheduleControlsPanel({ initialView = null }: ScheduleControlsPa
   }, [initialView]);
 
   const postControls = useCallback(
-    async (key: string, patch: { minIntervalSeconds?: number | null; firingEnabled?: boolean | null }) => {
+    async (
+      key: string,
+      patch: {
+        minIntervalSeconds?: number | null;
+        firingEnabled?: boolean | null;
+        startPaused?: boolean | null;
+        firingRateAlertThreshold?: number | null;
+        firingRateAlertWindowMinutes?: number | null;
+        missedScheduleGraceMinutes?: number | null;
+      },
+    ) => {
       setBusy(key);
       setError(null);
       try {
@@ -120,6 +141,9 @@ export function ScheduleControlsPanel({ initialView = null }: ScheduleControlsPa
         }
         setView(body);
         setFloorDraft(String(body.minIntervalSeconds));
+        setRateThresholdDraft(String(body.firingRate.threshold));
+        setRateWindowDraft(String(body.firingRate.windowMinutes));
+        setGraceDraft(String(body.missedScheduleGraceMinutes));
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
@@ -143,6 +167,13 @@ export function ScheduleControlsPanel({ initialView = null }: ScheduleControlsPa
   const canToggle = view.canToggle;
   const floorInvalid =
     floorDraft.trim() !== "" && (!/^\d+$/.test(floorDraft.trim()) || Number(floorDraft.trim()) <= 0);
+  const rateThresholdInvalid =
+    rateThresholdDraft.trim() !== "" && !/^\d+$/.test(rateThresholdDraft.trim());
+  const rateWindowInvalid =
+    rateWindowDraft.trim() !== "" &&
+    (!/^\d+$/.test(rateWindowDraft.trim()) || Number(rateWindowDraft.trim()) <= 0);
+  const graceInvalid =
+    graceDraft.trim() !== "" && !/^\d+(\.\d+)?$/.test(graceDraft.trim());
 
   return (
     <div>
@@ -150,9 +181,12 @@ export function ScheduleControlsPanel({ initialView = null }: ScheduleControlsPa
         title="Runaway controls"
         meta={
           <span className="ui-meta-sm">
-            The floor, the firing kill-switch, and the armed inventory — the
+            The floor, the firing kill-switch, the start-paused control, the
+            firing-rate alert thresholds, the missed-schedule grace, and the armed inventory — the
             stop for a runaway alarm loop. Managed here; the env carrier
-            (AGENT_SCHEDULE_MIN_INTERVAL_SECONDS / SCHEDULE_FIRING_ENABLED)
+            (AGENT_SCHEDULE_MIN_INTERVAL_SECONDS / SCHEDULE_FIRING_ENABLED /
+            AGENT_SCHEDULE_START_PAUSED / SCHEDULE_FIRING_RATE_ALERT_THRESHOLD /
+            SCHEDULE_FIRING_RATE_ALERT_WINDOW_MINUTES / MISSED_SCHEDULE_GRACE_MINUTES)
             only applies when no managed value is set.
           </span>
         }
@@ -251,17 +285,167 @@ export function ScheduleControlsPanel({ initialView = null }: ScheduleControlsPa
           </Button>
         </Flex>
         <Flex justify="between" align="center" gap="2">
+          <Stack gap="1">
+            <div>
+              New schedules start paused{" "}
+              <span className="ui-meta-sm">schedule.startPaused</span>
+            </div>
+            <div className="ui-meta-sm">
+              {view.startPaused
+                ? `New schedules start paused — from ${SOURCE_LABEL[view.startPausedSource] ?? view.startPausedSource}.`
+                : "New schedules start active — they run on their next schedule."}
+              {view.managedStartPaused !== null && ` Managed ${view.managedStartPaused ? "paused" : "active"}`}
+              {view.envStartPaused !== null && `, env ${view.envStartPaused ? "paused" : "active"}`}
+              {`, default ${view.defaultStartPaused ? "paused" : "active"}`}. A paused
+              schedule never fires until an operator resumes it.
+            </div>
+          </Stack>
+          <Badge tone={view.startPaused ? "success" : "danger"} dot>
+            {view.startPaused ? "Paused" : "Active"}
+          </Badge>
+          <Button
+            variant="secondary"
+            size="sm"
+            tone={view.startPaused ? "solid" : "subtle"}
+            aria-pressed={view.startPaused}
+            disabled={!canToggle || busy === "startPaused"}
+            onClick={() => void postControls("startPaused", { startPaused: !view.startPaused })}
+          >
+            {view.startPaused ? "Start active" : "Start paused"}
+          </Button>
+        </Flex>
+        <Flex justify="between" align="center" gap="2">
           <Stack gap="1" className="ui-grow">
             <div>Firing rate</div>
             <div className="ui-meta-sm">
               {view.firingRate.count} firings in the last {view.firingRate.windowMinutes} minutes
-              {" "}(alert threshold {view.firingRate.threshold}).
+              {" "}(alert threshold {view.firingRate.threshold} — from{" "}
+              {SOURCE_LABEL[view.firingRate.thresholdSource] ?? view.firingRate.thresholdSource}).
             </div>
           </Stack>
           <Badge tone={view.firingRate.exceeded ? "danger" : "success"} dot>
             {view.firingRate.exceeded ? "Rate exceeded" : "Within rate"}
           </Badge>
         </Flex>
+        {canToggle && (
+          <Flex align="end" gap="2">
+            <TextInput
+              label="Alert threshold (firings, 0 disables)"
+              value={rateThresholdDraft}
+              inputMode="numeric"
+              disabled={busy === "rate"}
+              onChange={(event) => setRateThresholdDraft(event.target.value)}
+              aria-invalid={rateThresholdInvalid}
+            />
+            <TextInput
+              label="Alert window (minutes)"
+              value={rateWindowDraft}
+              inputMode="numeric"
+              disabled={busy === "rate"}
+              onChange={(event) => setRateWindowDraft(event.target.value)}
+              aria-invalid={rateWindowInvalid}
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={
+                busy === "rate" ||
+                rateThresholdInvalid ||
+                rateWindowInvalid ||
+                rateThresholdDraft.trim() === "" ||
+                rateWindowDraft.trim() === ""
+              }
+              onClick={() =>
+                void postControls("rate", {
+                  firingRateAlertThreshold: Number(rateThresholdDraft.trim()),
+                  firingRateAlertWindowMinutes: Number(rateWindowDraft.trim()),
+                })
+              }
+            >
+              Set rate alert
+            </Button>
+            {(view.firingRate.managedThreshold !== null ||
+              view.firingRate.managedWindowMinutes !== null) && (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={busy === "rate"}
+                onClick={() =>
+                  void postControls("rate", {
+                    firingRateAlertThreshold: null,
+                    firingRateAlertWindowMinutes: null,
+                  })
+                }
+              >
+                Clear managed rate
+              </Button>
+            )}
+          </Flex>
+        )}
+        {rateThresholdInvalid && (
+          <Notice tone="warning" title="Invalid threshold">
+            The alert threshold is a whole number of firings; 0 disables the alert.
+          </Notice>
+        )}
+        {rateWindowInvalid && (
+          <Notice tone="warning" title="Invalid window">
+            The alert window is a whole number of minutes greater than zero.
+          </Notice>
+        )}
+        <Flex justify="between" align="center" gap="2">
+          <Stack gap="1" className="ui-grow">
+            <div>
+              Missed-schedule grace{" "}
+              <span className="ui-meta-sm">schedule.missedScheduleGraceMinutes</span>
+            </div>
+            <div className="ui-meta-sm">
+              {view.missedScheduleGraceMinutes === 0
+                ? "The watchdog is disabled — no missed-fire findings."
+                : `A schedule is flagged as missed ${view.missedScheduleGraceMinutes} minutes past its expected tick — from ${SOURCE_LABEL[view.missedScheduleGraceSource] ?? view.missedScheduleGraceSource}.`}
+              {view.managedMissedScheduleGraceMinutes !== null && ` Managed ${view.managedMissedScheduleGraceMinutes} minutes`}
+              {view.envMissedScheduleGraceMinutes !== null && `, env ${view.envMissedScheduleGraceMinutes} minutes`}
+              {`, default ${view.defaultMissedScheduleGraceMinutes} minutes`}. 0 disables the watchdog.
+            </div>
+          </Stack>
+          <Badge tone={view.missedScheduleGraceMinutes === 0 ? "danger" : "success"} dot>
+            {view.missedScheduleGraceMinutes === 0 ? "Disabled" : `${view.missedScheduleGraceMinutes} min grace`}
+          </Badge>
+        </Flex>
+        {canToggle && (
+          <Flex align="end" gap="2">
+            <TextInput
+              label="Grace (minutes, 0 disables)"
+              value={graceDraft}
+              inputMode="decimal"
+              disabled={busy === "grace"}
+              onChange={(event) => setGraceDraft(event.target.value)}
+              aria-invalid={graceInvalid}
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy === "grace" || graceInvalid || graceDraft.trim() === ""}
+              onClick={() => void postControls("grace", { missedScheduleGraceMinutes: Number(graceDraft.trim()) })}
+            >
+              Set grace
+            </Button>
+            {view.managedMissedScheduleGraceMinutes !== null && (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={busy === "grace"}
+                onClick={() => void postControls("grace", { missedScheduleGraceMinutes: null })}
+              >
+                Clear managed grace
+              </Button>
+            )}
+          </Flex>
+        )}
+        {graceInvalid && (
+          <Notice tone="warning" title="Invalid grace">
+            The grace is a number of minutes; 0 disables the watchdog.
+          </Notice>
+        )}
         <div>
           <div className="ui-meta-sm">Armed schedules — {view.inventory.length} row(s)</div>
           <Table<ArmedScheduleInventoryItem>

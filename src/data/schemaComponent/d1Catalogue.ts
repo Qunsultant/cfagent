@@ -8,11 +8,13 @@
  * bookkeeping table is runner infrastructure (created by
  * `applyMigrations`) and is NOT catalogued.
  *
- * Contents: 225 statements (including 52 ALTER TABLE statements). The
+ * Contents: 305 statements. The
  * pin tests (`tests/schema_component_*`) are the live source of truth
  * for exact entry membership as migrations land. (Historical baseline at
  * 534e8903 + 0053 was 221 statements; 0066 added 10 more, and subsequent
- * migrations updated the live catalogue to 225 entries.)
+ * migrations updated the live catalogue to 283 entries; main added #6102
+ * (0089, 7 entries) + #6557 (0090 + 0091, 5 entries), 283 → 295; #6503
+ * adds migration 0092's 4 schema entries + 6 seed entries, 295 → 305.)
  *
  * Code naming (`<kind>.d1.<table>.<action>`):
  *  - CREATE TABLE: `create_table`. The one re-create of an
@@ -41,6 +43,15 @@
  * ~/workspace/w4282/evidence-p1-ship/gen-d1-catalogue.py +
  * emit-d1-catalogue.py — re-run the generator to change it, and
  * review the emitted diff; do not hand-edit the entries.
+ *
+ * DEVIATION (#6503, migration 0092): the generator is gone — the
+ * directory above does not exist in this workspace and the generator
+ * is not in the repo — so 0092's four entries were hand-added in
+ * exactly the generated format, and the sha256 pin in
+ * tests/schema_component_d1_catalogue.test.ts was updated deliberately
+ * for the new migration. Recorded in the #6503 PR body. (Renumbered
+ * 0089 → 0092 at rebase: main landed #6102's mas_events as 0089 and
+ * #6557's provenance columns as 0090/0091 first.)
  */
 import { createCatalogue, type SchemaCatalogue } from "./catalogue";
 import type { CatalogueEntry } from "./catalogueTypes";
@@ -3758,6 +3769,37 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    // Issue #6503 — migration 0092: the one unified schedule store
+    // moves to D1 (owner direction 2026-11-25: schedule data lives in
+    // D1 only). The table mirrors the DO `unified_schedules` table
+    // column-for-column (doCatalogue `schema.do.unified_schedules`
+    // + the kind/state indexes + ormCatalogue's created_idx), so the
+    // Drizzle mapping agrees with this DDL. No rows are copied —
+    // D1 starts empty (NO-COPY owner direction 2026-11-25). HAND-ADDED (not generator-
+    // emitted): the d1Catalogue generator is gone (see the header
+    // note); the sha256 pin in tests/schema_component_d1_catalogue
+    // .test.ts is updated deliberately for this migration.
+    code: "schema.d1.unified_schedules.create_table",
+    plane: "d1",
+    table: "unified_schedules",
+    statement: `CREATE TABLE IF NOT EXISTS unified_schedules (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  state TEXT NOT NULL,
+  callback TEXT,
+  operation TEXT,
+  definition_json TEXT NOT NULL,
+  owner_login TEXT,
+  provenance_json TEXT,
+  alarm_id TEXT,
+  paused_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     // Issue #6557 â€” the four #3655 provenance fields on the D1 record, so
     // a D1-recorded run and a DO-recorded run agree on them. The DO table
     // has carried them since #3655; D1 could not store them.
@@ -3765,6 +3807,15 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     plane: "d1",
     table: "job_run_records",
     statement: `ALTER TABLE job_run_records ADD COLUMN broker_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.unified_schedules.create_index_unified_schedules_kind_idx",
+    plane: "d1",
+    table: "unified_schedules",
+    index: "unified_schedules_kind_idx",
+    statement: `CREATE INDEX IF NOT EXISTS unified_schedules_kind_idx ON unified_schedules (kind, created_at ASC, id ASC)`,
     kind: "schema",
     form: "literal",
   },
@@ -3777,10 +3828,28 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    code: "schema.d1.unified_schedules.create_index_unified_schedules_state_idx",
+    plane: "d1",
+    table: "unified_schedules",
+    index: "unified_schedules_state_idx",
+    statement: `CREATE INDEX IF NOT EXISTS unified_schedules_state_idx ON unified_schedules (state, created_at ASC, id ASC)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.d1.job_run_records.alter_table_add_column_mode",
     plane: "d1",
     table: "job_run_records",
     statement: `ALTER TABLE job_run_records ADD COLUMN mode TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.unified_schedules.create_index_unified_schedules_created_idx",
+    plane: "d1",
+    table: "unified_schedules",
+    index: "unified_schedules_created_idx",
+    statement: `CREATE INDEX IF NOT EXISTS unified_schedules_created_idx ON unified_schedules (created_at ASC, id ASC)`,
     kind: "schema",
     form: "literal",
   },
@@ -3790,6 +3859,79 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     table: "job_run_records",
     statement: `ALTER TABLE job_run_records ADD COLUMN mode_source TEXT`,
     kind: "schema",
+    form: "literal",
+  },
+  {
+    // Issue #6503 — Recreate registration (Mars tap 2026-11-25):
+    // the system-schedule seeds and the built-in-goal re-seed are
+    // catalogued D1 seed steps (phase 3 of the Recreate flow), so
+    // the Data Lifecycle panel can re-run them when the table is
+    // rebuilt. The five system seeds are Recreate steps ONLY —
+    // they are not in migration 0092's applied codes (#6503 step
+    // 7: a fresh store starts empty; the onStart reconcile seeds
+    // them), while the goals seed IS migration-applied. Each row
+    // mirrors its automatic path exactly:
+    // the five schedules mirror `reconcileSystemScheduleRecords`
+    // (kind `internal`, created paused on the monthly interval
+    // 2,592,000s, live firing callback, system provenance); the
+    // goals mirror `goalToRecord` (whole goal object as the
+    // definition, state from `enabled`, no provenance, paused_at
+    // NULL — goalToRecord never sets it). NO entry for
+    // `sweep-stale-ledger-tasks`: its row is per-user (the userLogin
+    // rides the payload) and the handler skips with no owner, so a
+    // payload-less catalogue row would be dead AND would block the
+    // reconcile's per-user seeding (it only seeds when no row
+    // exists) — the reconcile remains its only seeding path.
+    // Timestamps are the fixed literal '2026-11-25T00:00:00.000Z'
+    // (catalogue convention is fixed literals; no SQL time-function
+    // precedent exists here). `INSERT OR IGNORE` keeps the steps
+    // idempotent for Recreate re-runs. HAND-ADDED like the 0092
+    // schema entries; the sha256 pin is updated deliberately.
+    code: "seed.d1.unified_schedules.insert_token_renewal",
+    plane: "d1",
+    table: "unified_schedules",
+    statement: `INSERT OR IGNORE INTO unified_schedules (id, kind, state, callback, operation, definition_json, owner_login, provenance_json, alarm_id, paused_at, created_at, updated_at) VALUES ('token-renewal', 'internal', 'paused', 'autoRenewETradeTokens', NULL, '{"type":"interval","intervalSeconds":2592000,"callback":"autoRenewETradeTokens"}', NULL, '{"origin":"system","createdBy":"system","reason":"token-renewal","createdAt":"2026-11-25T00:00:00.000Z"}', NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z')`,
+    kind: "seed",
+    form: "literal",
+  },
+  {
+    code: "seed.d1.unified_schedules.insert_retention",
+    plane: "d1",
+    table: "unified_schedules",
+    statement: `INSERT OR IGNORE INTO unified_schedules (id, kind, state, callback, operation, definition_json, owner_login, provenance_json, alarm_id, paused_at, created_at, updated_at) VALUES ('retention', 'internal', 'paused', 'retention', NULL, '{"type":"interval","intervalSeconds":2592000,"callback":"retention"}', NULL, '{"origin":"system","createdBy":"system","reason":"retention","createdAt":"2026-11-25T00:00:00.000Z"}', NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z')`,
+    kind: "seed",
+    form: "literal",
+  },
+  {
+    code: "seed.d1.unified_schedules.insert_nightly_research",
+    plane: "d1",
+    table: "unified_schedules",
+    statement: `INSERT OR IGNORE INTO unified_schedules (id, kind, state, callback, operation, definition_json, owner_login, provenance_json, alarm_id, paused_at, created_at, updated_at) VALUES ('nightly-research', 'internal', 'paused', 'runResearchSchedule', NULL, '{"type":"interval","intervalSeconds":2592000,"callback":"runResearchSchedule"}', NULL, '{"origin":"system","createdBy":"system","reason":"nightly-research","createdAt":"2026-11-25T00:00:00.000Z"}', NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z')`,
+    kind: "seed",
+    form: "literal",
+  },
+  {
+    code: "seed.d1.unified_schedules.insert_sweep_stale_async_jobs",
+    plane: "d1",
+    table: "unified_schedules",
+    statement: `INSERT OR IGNORE INTO unified_schedules (id, kind, state, callback, operation, definition_json, owner_login, provenance_json, alarm_id, paused_at, created_at, updated_at) VALUES ('sweep-stale-async-jobs', 'internal', 'paused', 'sweepStaleAsyncJobs', NULL, '{"type":"interval","intervalSeconds":2592000,"callback":"sweepStaleAsyncJobs"}', NULL, '{"origin":"system","createdBy":"system","reason":"sweep-stale-async-jobs","createdAt":"2026-11-25T00:00:00.000Z"}', NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z')`,
+    kind: "seed",
+    form: "literal",
+  },
+  {
+    code: "seed.d1.unified_schedules.insert_schedule_watchdog",
+    plane: "d1",
+    table: "unified_schedules",
+    statement: `INSERT OR IGNORE INTO unified_schedules (id, kind, state, callback, operation, definition_json, owner_login, provenance_json, alarm_id, paused_at, created_at, updated_at) VALUES ('schedule-watchdog', 'internal', 'paused', 'watchdogMissedSchedules', NULL, '{"type":"interval","intervalSeconds":2592000,"callback":"watchdogMissedSchedules"}', NULL, '{"origin":"system","createdBy":"system","reason":"schedule-watchdog","createdAt":"2026-11-25T00:00:00.000Z"}', NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z')`,
+    kind: "seed",
+    form: "literal",
+  },
+  {
+    code: "seed.d1.unified_schedules.insert_builtin_goals",
+    plane: "d1",
+    table: "unified_schedules",
+    statement: `INSERT OR IGNORE INTO unified_schedules (id, kind, state, callback, operation, definition_json, owner_login, provenance_json, alarm_id, paused_at, created_at, updated_at) VALUES ('daily-qa-sweep', 'goal', 'active', NULL, 'qa.run_sweep', '{"budgetCents":500,"cron":"0 6 * * *","enabled":true,"id":"daily-qa-sweep","name":"Daily QA sweep","operation":"qa.run_sweep"}', NULL, NULL, NULL, NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z'), ('opportunity-hunt', 'goal', 'active', NULL, 'search.opportunity_hunt', '{"budgetCents":1000,"cron":"0 7 * * *","enabled":true,"id":"opportunity-hunt","name":"Opportunity hunt","operation":"search.opportunity_hunt"}', NULL, NULL, NULL, NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z'), ('daily-social-post', 'goal', 'paused', NULL, 'social.publish', '{"budgetCents":1,"cron":"0 9 * * 1-5","enabled":false,"id":"daily-social-post","name":"Daily social post","operation":"social.publish","timeZone":"America/New_York"}', NULL, NULL, NULL, NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z'), ('resource-daily-rollup', 'goal', 'active', NULL, 'resource.rollup_daily', '{"budgetCents":1,"cron":"30 1 * * *","enabled":true,"id":"resource-daily-rollup","name":"SessionStore daily resource rollup","operation":"resource.rollup_daily","timeZone":"UTC"}', NULL, NULL, NULL, NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z'), ('resource-cap-alert', 'goal', 'active', NULL, 'resource.cap_alert', '{"budgetCents":1,"cron":"0 0 * * *","enabled":true,"id":"resource-cap-alert","name":"SessionStore 70% cap alert","operation":"resource.cap_alert","timeZone":"UTC"}', NULL, NULL, NULL, NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z'), ('resource-dashboard-comparison', 'goal', 'active', NULL, 'resource.dashboard_comparison', '{"budgetCents":1,"cron":"0 2 * * *","enabled":true,"id":"resource-dashboard-comparison","name":"SessionStore dashboard comparison","operation":"resource.dashboard_comparison","timeZone":"UTC"}', NULL, NULL, NULL, NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z'), ('index-refresh-wikipedia', 'goal', 'active', NULL, 'index.refresh_wikipedia', '{"budgetCents":1,"cron":"0 4 * * 0","enabled":true,"id":"index-refresh-wikipedia","name":"Index-list refresh (Wikipedia)","operation":"index.refresh_wikipedia","timeZone":"UTC"}', NULL, NULL, NULL, NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z'), ('index-refresh-holdings', 'goal', 'paused', NULL, 'index.refresh_holdings', '{"budgetCents":1,"cron":"0 3 * * *","enabled":false,"id":"index-refresh-holdings","name":"Index-list refresh (ETF holdings)","operation":"index.refresh_holdings","timeZone":"UTC"}', NULL, NULL, NULL, NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z'), ('autopilot-monthly-evaluation', 'goal', 'active', NULL, 'autopilot.evaluate', '{"budgetCents":1,"cron":"0 9 1 * *","enabled":true,"id":"autopilot-monthly-evaluation","name":"Autopilot monthly evaluation","operation":"autopilot.evaluate","timeZone":"UTC"}', NULL, NULL, NULL, NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z')`,
+    kind: "seed",
     form: "literal",
   },
 ];
@@ -4221,6 +4363,25 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
     "schema.d1.mas_events.create_index_idx_mas_events_principal_created",
     "schema.d1.mas_events.create_index_idx_mas_events_type_created",
     "schema.d1.mas_events.create_index_idx_mas_events_correlation",
+  ],
+  // Issue #6503 — migration 0092 applies the unified_schedules
+  // schema (table + 3 indexes) and the built-in-goals seed. The
+  // five system-schedule seed entries are deliberately NOT in this
+  // list: they are Recreate steps (run by the Data Lifecycle
+  // Recreate flow, phase 3) and the onStart reconcile
+  // (`reconcileSystemScheduleRecords`) is their automatic seeding
+  // path. A migration-applied seed would plant the five rows on
+  // the first store use, so a fresh store would never be empty and
+  // the list route could never show "none of the six" before the
+  // reconcile runs (#6503 step 7: D1 starts empty; the list reads
+  // the store only). The entries stay in the catalogue, so the
+  // Recreate selection and the seed-agreement pins still see them.
+  92: [
+    "schema.d1.unified_schedules.create_table",
+    "schema.d1.unified_schedules.create_index_unified_schedules_kind_idx",
+    "schema.d1.unified_schedules.create_index_unified_schedules_state_idx",
+    "schema.d1.unified_schedules.create_index_unified_schedules_created_idx",
+    "seed.d1.unified_schedules.insert_builtin_goals",
   ],
   82: [
     "schema.d1.agent_referral_rules.alter_table_add_column_extension_days",
