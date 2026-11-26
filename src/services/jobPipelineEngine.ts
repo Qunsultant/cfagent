@@ -461,6 +461,31 @@ export interface JobStuckUnit {
   silentMs: number;
 }
 
+/**
+ * Issue #5279 — the live-state answer: what the engine can say about a run
+ * THAT IS EXECUTING IN THIS PROCESS, beyond the stored views `getJob` reads.
+ * A query never mutates anything and never invents a stage: a run executing
+ * elsewhere (another isolate, the workflow residency) reads as not-live here,
+ * which is the truth this process can prove.
+ */
+export interface JobLiveQuery {
+  jobId: string;
+  /** The run currently addressed by the instance, or null when it has none. */
+  runId: string | null;
+  /** The instance's stored state (idle | running | paused | completed | failed | …). */
+  state: string;
+  /**
+   * True only while THIS process is executing one of the run's units right
+   * now. Between units (or on a run executing elsewhere) it reads false —
+   * what this process can prove, never a guess at another isolate's work.
+   */
+  live: boolean;
+  /** The units executing right now, `stage:unit` — empty when not live. */
+  activeUnits: string[];
+  /** Steps started in the live run so far (0 when not live). */
+  stepExecutions: number;
+}
+
 export interface JobStuckSweepResult {
   stuck: JobStuckUnit[];
   /** The job ids whose run was settled failed because a unit was stuck. */
@@ -1252,6 +1277,14 @@ export class JobPipelineControl {
   private readonly policy: PipelinePolicy;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly inflight = new Map<string, Promise<JobRunOutcome>>();
+  /**
+   * Issue #5279 — the units executing right now, per run. Populated by the
+   * unit runner and read by `queryJob`; a run that has settled has no entry,
+   * so the query can say "not live" from the same map the executor maintains.
+   */
+  private readonly liveUnits = new Map<string, Set<string>>();
+  /** Issue #5279 — steps started per live run, reset when the run settles. */
+  private readonly liveSteps = new Map<string, number>();
 
   constructor(private readonly deps: JobPipelineDeps) {
     this.now = deps.now ?? (() => new Date());
@@ -2276,6 +2309,52 @@ export class JobPipelineControl {
       latestRun: history[0],
       history,
       stages: this.stageViews(definition, instance),
+    };
+  }
+
+  /**
+   * Issue #5279 — answer a LIVE question about a run, not a stored one.
+   *
+   * `getJob` reads persisted views; a run in flight looks like whatever was
+   * last written. This reads what only this process can prove: whether it
+   * holds the run's execution right now, which units are active, and how many
+   * steps have started. A run executing elsewhere reads `live: false` — the
+   * honest answer from here, never a guess at another isolate's state.
+   *
+   * Read-only by contract: nothing is written, no state is advanced.
+   */
+  async queryJob(jobId: string): Promise<JobLiveQuery> {
+    const instance = await this.deps.stores.instances.getInstance(jobId);
+    if (!instance) {
+      throw new JobPipelineError(
+        "job_not_found",
+        `No pipeline job "${jobId}" is defined; nothing to query.`,
+      );
+    }
+    const runId = instance.currentRunId ?? null;
+    const live = runId !== null && this.liveUnits.has(runId);
+    if (!live) {
+      // A settled run leaves no live bookkeeping behind.
+      if (runId) {
+        this.liveSteps.delete(runId);
+        this.liveUnits.delete(runId);
+      }
+      return {
+        jobId,
+        runId,
+        state: instance.state,
+        live: false,
+        activeUnits: [],
+        stepExecutions: 0,
+      };
+    }
+    return {
+      jobId,
+      runId,
+      state: instance.state,
+      live: true,
+      activeUnits: [...(this.liveUnits.get(runId!) ?? [])].sort(),
+      stepExecutions: this.liveSteps.get(runId!) ?? 0,
     };
   }
 
@@ -4475,6 +4554,11 @@ export class JobPipelineControl {
       shardIndex: eff.shardIndex,
     });
     try {
+      // Issue #5279 — this unit is live until it settles.
+      const liveKey = ctx.runId;
+      const liveSet = this.liveUnits.get(liveKey) ?? new Set<string>();
+      liveSet.add(`${stageId}:${unit.unitId}`);
+      this.liveUnits.set(liveKey, liveSet);
       let tries = 0;
       for (;;) {
         tries += 1;
@@ -4711,6 +4795,17 @@ export class JobPipelineControl {
       }
     } finally {
       ctx.activeUnits.delete(activeKey);
+      // Issue #5279 — the unit is no longer live; drop the run's entry once
+      // its last unit leaves, so a settled run reads not-live.
+      const set = this.liveUnits.get(ctx.runId);
+      if (set) {
+        set.delete(`${stageId}:${unit.unitId}`);
+        if (set.size === 0) {
+          this.liveUnits.delete(ctx.runId);
+          // The run's last unit is done: its step count is no longer live.
+          this.liveSteps.delete(ctx.runId);
+        }
+      }
     }
   }
 
@@ -5129,6 +5224,8 @@ export class JobPipelineControl {
       // Issue #6396 — the last step that STARTED is the one that failed;
       // the retry loop reads it to pick the step's own bucket.
       ctx.lastStepIndex = stepIndex;
+      // Issue #5279 — the live step count the query reports.
+      this.liveSteps.set(ctx.runId, (this.liveSteps.get(ctx.runId) ?? 0) + 1);
       const handler = this.deps.steps.resolve(stepConfig.step);
       const stepCtx: JobStepContext = {
         jobId: ctx.jobId,
