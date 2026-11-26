@@ -64,7 +64,7 @@
   // Issue #605 — report PDF blobs live in R2 (bucket provisioned by the
   // owner; reportBlobStore maps screener:*/options:* keys to stocks/*,
   // options/*). DO storage keeps only metadata pointers.
-  "r2_buckets": [{ "binding": "REPORTS_BUCKET", "bucket_name": "screener" }],
+  "r2_buckets": [{ "binding": "REPORTS_BUCKET", "bucket_name": "iros" }],
   // Issue #1546 — D1 AgentDB (owner-created): shared cross-agent query
   // projection. DO storage stays authoritative for execution state.
   "d1_databases": [{ "binding": "AGENT_DB", "database_name": "agentdb", "database_id": "8d1bebf1-b2c4-4a55-8673-03140afb8023" }],
