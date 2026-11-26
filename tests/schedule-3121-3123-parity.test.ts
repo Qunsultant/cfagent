@@ -371,6 +371,7 @@ describe("3123-P04 goals KV migrated", () => {
       operation: "test.op",
       budgetCents: 1,
       enabled: true,
+      executionMode: "deterministic" as const,
     };
     const record = goalToRecord(goal);
     expect(record.kind).toBe("goal");
