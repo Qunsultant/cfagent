@@ -86,9 +86,10 @@ import {
   type AgentScheduleExecutorDeps,
 } from "../services/agentScheduleCapability";
 import {
-  resolveAgentScheduleLoopSettings,
+  AGENT_SCHEDULE_LOOP_SETTINGS_ENTRY,
   type AgentScheduleLoopSettingsResolution,
 } from "../services/agentScheduleLoopSettings";
+import { resolveAgentConfig } from "../services/agentConfigResolver";
 import { createOrchestratorAgentScheduleExecutorDeps } from "./orchestrator/agentScheduleExecutor";
 import { resolveEffectiveScheduleFloor } from "../services/scheduleControls";
 import {
@@ -1420,19 +1421,21 @@ export class OrchestratorAgent extends PortThink {
       alarms,
       runCallback: makeRunScheduleCallback(this),
       resolveAgentScheduleLoopSettings: async () =>
-        resolveAgentScheduleLoopSettings(
-          (key) => this.readSettingRaw(key),
-          this.env,
-        ).settings,
+        (await this.getAgentScheduleLoopSettings()).settings,
     });
   }
 
   /** Internal per-login settings read used by the shared scheduler DO. */
   async getAgentScheduleLoopSettings(): Promise<AgentScheduleLoopSettingsResolution> {
-    return resolveAgentScheduleLoopSettings(
-      (key) => this.readSettingRaw(key),
-      this.env,
+    const resolution = resolveAgentConfig(
+      AGENT_SCHEDULE_LOOP_SETTINGS_ENTRY,
+      { className: "ScheduledAgent" },
+      { readSettingRaw: (key) => this.readSettingRaw(key), env: this.env },
     );
+    return {
+      settings: resolution.value as AgentScheduleLoopSettingsResolution["settings"],
+      issues: resolution.issues,
+    };
   }
 
   // Issue #2496 (Mesh Improvement S1): the in-flight openaimp MCP

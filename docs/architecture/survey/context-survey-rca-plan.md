@@ -6,7 +6,7 @@ Parent issue for the fix: #6491 (universal env context), parent incident #6487.
 
 ## 0. Counts up front
 
-**209 context definitions** counted in the platform (app-created), plus **3 platform-provided** context types received from the runtime, plus **0 test-only** definitions.
+**211 context definitions** counted in the platform (app-created; 209 in the original survey plus the #6540 `UniversalEnvContext` and #3122 `AgentScheduleToolContext` additions), plus **3 platform-provided** context types received from the runtime, plus **0 test-only** definitions.
 
 | Kind | Definitions | What it is |
 |---|---|---|
@@ -14,16 +14,19 @@ Parent issue for the fix: #6491 (universal env context), parent incident #6487.
 | Orchestrator DI "ports" contexts (Tier B) | 26 | Per-module dependency bundles built by `OrchestratorAgent.*Context()` builders |
 | Route contexts | 56 shapes (+1 alias) | One `*RouteContext` per route handler file in `src/agents/routes/` |
 | Security contexts (beyond `ExecutionContext`) | 21 | `PlatformContext*`, `ApiRequestContext*`, `McpToolContext*`, ledger-write inputs, `ObligationEvaluationContext`, resolver inputs/results |
-| MCP contexts | 2 | `McpToolContext`, `OpenaimpMcpHandlerContext` |
+| MCP contexts | 3 | `McpToolContext`, `OpenaimpMcpHandlerContext`, `AgentScheduleToolContext` |
+| Universal environment context | 1 | `UniversalEnvContext` (#6540; separate from the 77 config/env objects) |
 | Services inputs/results | 2 | `ResolveRunBrokerContextInput`, `ValidatedExecutionAccountContext` |
 | Config / env objects | 77 | `Env` (335 fields), `ResolvedEnvironment`, `EtapiConfig` + 16 sub-interfaces, OTEL file/port, `FeatureFlagPort` + `FeatureEvaluationContext`, `PriceCatalogue`/`PriceEntry`, 25 `*Modes` resolver families, 18 config JSON files, wrangler vars+bindings, misc `*Config` objects |
 | Client React contexts | 3 | `PageChromeContext`, `ToastContext`, `ChainContext` |
 | Client data shapes (props/state, not React context) | 5 | `ScanRunContext`, `OfferContext`, `PlatformContext` (store), `ScheduleRowContext`, `TradeOrderContext` |
-| **Total app-created** | **209** | 207 itemized + 2 unitemized Tier A shapes (see caveats) |
+| **Total app-created** | **211** | 209 itemized rows (207 original + 2 later canonical additions) + 2 unitemized Tier A shapes (see caveats) |
 | Platform-provided (not app-created) | 3 types, 5 receipt sites | Workers `ExecutionContext` (received at `scheduled`/`queue`/`email`), `DurableObjectState`, Agents-SDK `AgentContext` |
 | Test-only definitions | 0 | Tests import production types; they define no `*Context` type |
 
-Reading the number: most of the 209 are not "contexts" in the identity/config sense. 83 of them (57 route + 26 ports) are dependency-injection bags — one per route or extracted module — and 77 are config objects. The identity/execution core is 17 definitions covering about 10 logical contexts. The problem is not one number; it is three separate proliferations (identity, DI bags, config) with no owner and no census.
+Reading the number: most of the 211 are not "contexts" in the identity/config sense. 83 of them (57 route + 26 ports) are dependency-injection bags — one per route or extracted module — and 77 are config objects. The identity/execution core is 17 definitions covering about 10 logical contexts. The problem is not one number; it is three separate proliferations (identity, DI bags, config) with no owner and no census.
+
+The #3122 addition is a narrow schedule-tool adapter port, not a second general MCP context. `AgentScheduleToolContext` (`src/agents/mcpAdapter.ts:47`) carries only the environment, owner-login accessor, schedule action executor, loop-origin accessor, and goals-only flag. Reusing the broader `McpToolContext` would inject unrelated command, database, session, and permission dependencies into the schedule capability. The context pin records it as canonical; the current app-created total is 211.
 
 ### Counting rule (so the number can be re-derived)
 A definition is a named `type`/`interface` whose name contains `Context`, or a named config/port/file-backed object that functions as one (`Env`, `ResolvedEnvironment`, `EtapiConfig`, `OtelFileConfig`, `FeatureFlagPort`, `PriceCatalogue`, the 25 `*Modes` families). A usage is not a definition. A structural mirror counts as its own definition (it is a separate declaration that can drift). Inputs/results (`Resolve*Input`, `*Result` unions, `*DenyCode` unions) are counted only where listed in the services/security rows; elsewhere they are excluded. `environment.config.json` and wrangler vars+bindings count as one entry each in the 77. The 2 unitemized Tier A shapes: the execution slice reported 17 but itemized 15 by name; the 2 are companion shapes it did not list — flagged here, not assumed.
@@ -177,6 +180,7 @@ Common fields recurring across most route contexts: `env: Env` (or `Partial<Env>
 | `ObligationEvaluationContext` | `src/security/obligations.ts:231` | Obligation evaluation inputs | Per evaluation |
 | `McpToolContext` | `src/patterns/interfaces.ts:23` | Required: `env: Env; orm: DatabaseORM; sessionId: string; audit(…)`. Optional: `storage?`; scoped-mode carriers (`scopedModes?`, `scopedNlqModes?`, `scopedChatNlqModes?`, `scopedKnowledgeModes?`/`scopedMemoryModes?`, `scopedHttpDeliveryModes?`/`scopedJobListModes?`, `scopedEtradeModes?`, `scopedMarketDataModes?`, `scopedPaymentsModes?`, `scopedGoalChainModes?`); `asyncJobId?`; `readSettingRaw?`; mesh door seams; `requestId?`; `principal?: McpPrincipal; permissionPort?; agentAccess?; permissionDecisionSink?`; `executionContext?: ExecutionContext` (#6173); `executionId?`; `actingLogin?: () => string\|undefined`; `traceparent?: () => string\|undefined`; `facade?; submitJob?; getJob?; listJobs?` | Per-tool-call / per-turn / per-async-job; built by the "execution-context owner": chat turn, async-job executor, `/mcp` route. Read by every `IMcpToolCommand.execute(input, context)` (~25 command files) and the mesh doors | — |
 | `OpenaimpMcpHandlerContext` | `src/mcps/openaimp/handler.ts:94` | Near-subset of `McpToolContext`: `env; orm; sessionId; principal?; actingLogin?; traceparent?; storage?; permissionPort?; executionContext?: ExecutionContext` (#6173); `permissionDecisionSink?; scopedNlqModes?; scopedKnowledgeModes?; scopedMemoryModes?; scopedHttpDeliveryModes?; scopedJobListModes?; scopedGoalChainModes?; deliveryModeRun?: unknown` (the `x-delivery-mode` header); `audit(…); submitJob?; getJob?; listJobs?` | Per-MCP-exchange; created by `handleMcpChatNlqRoutes` (POST `/mcp`); `createOpenaimpMcpServer(context)` spreads it into a `McpToolContext` per tool call | Overlaps `McpToolContext` almost exactly — same fields minus `asyncJobId`, `readSettingRaw`, door seams, `agentAccess`, `executionId`, `facade`, and the ads/etrade/market-data/payments scoped carriers |
+| `AgentScheduleToolContext` | `src/agents/mcpAdapter.ts:47` (#3122) | `env; actingLogin?; execute; loopOrigin?; goalsOnly?` | Per schedule-tool adaptation; supplies only schedule-capability ports | Narrow schedule adapter dependencies; deliberately not the broad command-level `McpToolContext` |
 
 How the validated context is carried: `establishApiRequestContext(request, env, deps)` resolves **once per request at the fetch boundary** (`src/server.ts:169`, before route dispatch), with fixed boundary inputs (never client-supplied): `serviceId "api"`, `permission "task:read"`, `taskId "http:<traceId>"`, `environment "sandbox"`, `dispatchMode "manual"`, `execMode "sync"`, `correlationId = traceId`. Fail-closed, observe-first: unresolvable → audited denial, proceeds unattributed in observe mode (default); in enforce mode (`EXECUTION_CONTEXT_MODE=enforce`) 403 + named code before any route runs. Carrier is a module-level `WeakMap<Request, ApiRequestContextOutcome>` (`REQUEST_CONTEXTS`); entries die with the request. `establishMcpToolContext()` resolves its **own** context per MCP exchange at the DO route shell (`src/agents/routes/mcpChatNlq.ts`, POST `/mcp`), fixed inputs `serviceId "mcp"`, `taskId "mcp:<traceId>"`, same sandbox/manual/sync defaults — deliberately not the Worker's API context (different `serviceId`/session key/taskId; linked by trace id).
 
@@ -189,6 +193,8 @@ How the validated context is carried: `establishApiRequestContext(request, env, 
 ### 1.5 Config / env objects (77)
 
 Counting rule: each named interface/port/file-backed config once; `EtapiConfig`'s 16 sub-interfaces and the 25 `*Modes` resolver families count as distinct objects; the ~180 scope-carrier/`Resolved*` interfaces inside `src/config/` are excluded; 2 config JSON files with no `src/config/` reader found (`auto-merge.json`, `options-reports.json`) are excluded.
+
+`UniversalEnvContext` (`src/config/environment.ts`, #6540) is recorded separately from these 77 config/env objects: it is the one typed, canonical context for resolved environment settings.
 
 **`Env` — `src/types.ts:3–1133`. The single Worker-environment type. 335 fields: 13 required, 322 optional.**
 - Required (13): `ASSETS: Fetcher`, `AI: Ai`, `ORCHESTRATOR_AGENT`, `TICKER_AGENT`, `PAYMENTS_AGENT`, `SCHEDULED_AGENT`, `SCREENER_AGENT` (all `DurableObjectNamespace`), `VECTOR_MEMORY: any` (Vectorize), `APP_NAME: string`, `GITHUB_CLIENT_ID: string`, `GITHUB_CLIENT_SECRET: string`, `APP_BASE_URL: string`, `SESSION_SECRET: string`.
