@@ -73,7 +73,23 @@ import { researchEngineJobId } from "./researchDataPorts";
 import { codedMessage } from "../outcomes/outcomeAspects";
 import type { FeatureFlagPort } from "../features/featureFlagPorts";
 
-export type ResearchStageOp = "status" | "run" | "rerun" | "stop" | "resume" | "cancel";
+/**
+ * The per-stage ops the research wrapper exposes.
+ *
+ * `replay` (#6362/#6400) is the past-run op: the stage executes again as its
+ * OWN new engine run, from the run's recorded definition version and the
+ * stage's recorded input. It is deliberately not `rerun`: a re-run continues
+ * the run it belongs to, while a replay mints a separate execution and
+ * leaves the original run's records untouched.
+ */
+export type ResearchStageOp =
+  | "status"
+  | "run"
+  | "rerun"
+  | "stop"
+  | "resume"
+  | "cancel"
+  | "replay";
 
 /**
  * Issue #6040 — the one refusal code a dispatch answers when its host cannot
@@ -973,6 +989,16 @@ export async function executeResearchStageControl(
         stage: null,
       };
     }
+    // Issue #6362/#6398 — a REPLAY must never ride this rebuild. The
+    // engine's replay rule is "the recorded version, or refuse by name";
+    // rebuilding a default definition here would hand the replay a
+    // configuration the run never executed (the #6401 class of bug) and
+    // call it a reproduction. Refuse instead.
+    if (validated.op === "replay") {
+      throw new Error(
+        `Research run "${validated.runId}" cannot be replayed: no definition is recorded for "${validated.engineJobId}", so the configuration the run executed was not retained. A replay refuses rather than substituting today's defaults.`,
+      );
+    }
     const definition = buildResearchJobDefinition(validated.runId, {
       userLogin: validated.userLogin,
       trigger: "manual",
@@ -1008,6 +1034,25 @@ export async function executeResearchStageControl(
         throw err;
       }
     }
+  } else if (validated.op === "replay") {
+    // Issue #6362 — the per-stage past-run control the OODA page offers, on
+    // the op #6400 built. The run replayed is the job's current run; for a
+    // research run the dispatch pins it to the research run id, so "this
+    // stage of the run on screen" is exactly what is reproduced. The engine
+    // refuses a live job (`job_already_running`) and a stage that owns
+    // downstream stages (`replay_stage_composite`) by name.
+    const replayRunId = before.instance?.currentRunId ?? null;
+    if (!replayRunId) {
+      throw new Error(
+        `Research run "${validated.runId}" has no recorded engine run to replay — its job "${validated.engineJobId}" never ran.`,
+      );
+    }
+    const dispatch = await control.replayStage(
+      validated.engineJobId,
+      replayRunId,
+      nodePath,
+    );
+    if (dispatch.completion) await dispatch.completion;
   } else if (validated.op === "stop") {
     await control.stopStage(validated.engineJobId, nodePath);
   } else if (validated.op === "resume") {

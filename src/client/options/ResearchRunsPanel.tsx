@@ -54,8 +54,18 @@ const STAGE_ACTIONS: Record<string, Array<{ op: string; label: string }>> = {
   pending: [{ op: "run", label: "Run" }, { op: "cancel", label: "Cancel" }],
   running: [{ op: "stop", label: "Stop" }, { op: "cancel", label: "Cancel" }],
   stopped: [{ op: "resume", label: "Resume" }, { op: "cancel", label: "Cancel" }],
-  completed: [{ op: "rerun", label: "Re-run" }],
-  failed: [{ op: "rerun", label: "Re-run" }],
+  // Issue #6362 — two settled-stage verbs, deliberately different: `rerun`
+  // re-executes the stage inside THIS run (continuing it), while `replay`
+  // mints a NEW run holding just that stage, from the run's recorded input,
+  // and leaves this run's records untouched (#6400).
+  completed: [
+    { op: "rerun", label: "Re-run" },
+    { op: "replay", label: "Replay" },
+  ],
+  failed: [
+    { op: "rerun", label: "Re-run" },
+    { op: "replay", label: "Replay" },
+  ],
 };
 
 /**
@@ -203,8 +213,19 @@ function ResearchStageControl({
           body: JSON.stringify({ op }),
         },
       );
-      const data = await readJson<{ error?: string; stage?: { status?: string } }>(res);
-      setMsg(`${stageId}: ${data.stage?.status ?? "done"}.`);
+      const data = await readJson<{
+        error?: string;
+        engineRunId?: string | null;
+        stage?: { status?: string };
+      }>(res);
+      // Issue #6362 — a replay is a NEW run, so the confirmation names it;
+      // otherwise the panel would report "done" with no way to tell the
+      // operator that a second execution now exists.
+      setMsg(
+        op === "replay"
+          ? `${stageId}: replayed as new run ${data.engineRunId ?? "(unreported)"} — this run's own records are untouched.`
+          : `${stageId}: ${data.stage?.status ?? "done"}.`,
+      );
       await load();
       onAfterAction?.();
     } catch (err) {
