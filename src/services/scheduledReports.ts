@@ -105,6 +105,9 @@ import {
  */
 export { reportBodyR2Key } from "./documentPublish";
 import { createBlobStore } from "./blobStoreR2Adapter";
+// Issue #6659 — the ONE access point for report bodies (bounded reads,
+// terminal absence, negative cache, per-caller metrics).
+import { createReportBodyStore } from "./reportBodyStore";
 import { blobText } from "./blobStorePorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
@@ -1234,23 +1237,15 @@ export async function deleteCanonicalReport(
     const hit = getCanonicalReport(sql, reportId);
     if (!hit) return false;
     if (hit.bodyR2Key) {
-      const store = createBlobStore(env);
-      if (store) {
-        try {
-          await store.delete(hit.bodyR2Key);
-        } catch (err) {
-          structuredLog.error("deleteCanonicalReport.r2_delete_failed", {
-            message: `[scheduledReports] deleteCanonicalReport: R2 delete failed for report ${reportId} (key ${hit.bodyR2Key}); deleting the row anyway — the orphan sweep owns the stranded object: ${err instanceof Error ? err.message : String(err)}`,
-            reportId,
-            bodyR2Key: hit.bodyR2Key,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      } else {
-        structuredLog.error("deleteCanonicalReport.no_bucket_bound", {
-          message: `[scheduledReports] deleteCanonicalReport: no REPORTS_BUCKET bound; deleting row ${reportId} strands its R2 object (key ${hit.bodyR2Key}) for the orphan sweep`,
+      try {
+        // Issue #6659 — the delete side of the same access point.
+        await createReportBodyStore(env).remove(reportId, hit.bodyR2Key);
+      } catch (err) {
+        structuredLog.error("deleteCanonicalReport.r2_delete_failed", {
+          message: `[scheduledReports] deleteCanonicalReport: R2 delete failed for report ${reportId} (key ${hit.bodyR2Key}); deleting the row anyway — the orphan sweep owns the stranded object: ${err instanceof Error ? err.message : String(err)}`,
           reportId,
           bodyR2Key: hit.bodyR2Key,
+          error: err instanceof Error ? err.message : String(err),
         });
       }
     }
@@ -1283,13 +1278,12 @@ export async function resolveCanonicalReportBodyWithBackfill(
   hit: ScheduledReportHit
 ): Promise<string | null> {
   if (hit.bodyR2Key) return resolveCanonicalReportBody(env, hit);
-  const store = createBlobStore(env);
-  if (!store || !hit.body) return hit.body;
+  const bodyStore = createReportBodyStore(env);
+  if (!hit.body) return hit.body;
   const key = reportBodyR2Key(hit.id);
   try {
-    await store.put(key, hit.body, {
-      contentType: "application/json",
-    });
+    // Issue #6659 — the write side of the same access point.
+    await bodyStore.put(hit.id, hit.body, key);
     ensureScheduledReportsTable(sql);
     storePorts(sql).write.backfillBodyPointer(hit.id, key);
   } catch (err) {
@@ -1314,23 +1308,13 @@ export async function resolveCanonicalReportBody(
   hit: ScheduledReportHit
 ): Promise<string | null> {
   if (!hit.bodyR2Key) return hit.body;
-  const store = createBlobStore(env);
-  if (!store) return null;
-  try {
-    const obj = await store.get(hit.bodyR2Key);
-    if (!obj) return null;
-    return blobText(obj);
-  } catch (err) {
-    // Issue #876 doctrine: never silent — a failed body read is a
-    // storage symptom the worker log must show.
-    structuredLog.error("resolveCanonicalReportBody.failed", {
-      message: `[scheduledReports] resolveCanonicalReportBody failed for report ${hit.id} (key ${hit.bodyR2Key}): ${err instanceof Error ? err.message : String(err)}`,
-      reportId: hit.id,
-      bodyR2Key: hit.bodyR2Key,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
+  // Issue #6659 — through the ONE access point. A missing body is a FACT
+  // (`absent`, remembered for a short TTL so a polling client costs one GET
+  // per window instead of one per tick); a transient read error is retried
+  // within the externalized policy and then reported `unavailable`. Both
+  // resolve to null so callers keep failing closed; the store logs why.
+  const read = await createReportBodyStore(env).read(hit.id, "resolveCanonicalReportBody", hit.bodyR2Key);
+  return read.outcome === "body" ? read.body : null;
 }
 
 /** Read back the canonical stored copy for delivery. Never throws. */
