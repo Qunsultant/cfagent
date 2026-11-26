@@ -28,6 +28,7 @@ import {
   tickerPushScheduleToRecord,
 } from "../src/services/unifiedScheduleManagement";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 
 function source(rel: string): string {
   return readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
@@ -39,10 +40,14 @@ interface Recorded {
 }
 
 /** The ticker-test idiom (tests/schedule-3121-4237-ticker-push.test.ts). */
-function bareAgent(sql: MockSqlStorage): { agent: any; seen: Recorded } {
+function bareAgent(sql: MockSqlStorage, mockD1?: MockD1Database): { agent: any; seen: Recorded } {
   const seen: Recorded = { intervals: [], cancels: [] };
   const agent = Object.create(TickerAgent.prototype);
-  agent.env = {};
+  // Issue #6503 — the feed record lives in D1 now (the
+  // tickerScheduleStore is the D1 port over env.AGENT_DB); without a
+  // bound MockD1Database the store is null and every record write
+  // no-ops, so pause/resume/cadence read back as undefined.
+  agent.env = mockD1 ? { AGENT_DB: mockD1 } : {};
   agent.ctx = { storage: { sql } };
   agent.scheduleEvery = async (secs: number, cb: string) => {
     seen.intervals.push(secs);
@@ -60,7 +65,7 @@ function bareAgent(sql: MockSqlStorage): { agent: any; seen: Recorded } {
 
 describe("4352-P01 pause is recorded and survives a start", () => {
   it("cancels the schedule, records the pause, and never re-arms", async () => {
-    const { agent, seen } = bareAgent(new MockSqlStorage());
+    const { agent, seen } = bareAgent(new MockSqlStorage(), new MockD1Database());
     await agent.pauseTickerPush();
     expect(seen.cancels).toContain("sched-old");
     const record = await agent.getTickerPushRecord();
@@ -78,7 +83,7 @@ describe("4352-P01 pause is recorded and survives a start", () => {
 
 describe("4352-P02 resume arms again", () => {
   it("clears the pause and arms the feed", async () => {
-    const { agent, seen } = bareAgent(new MockSqlStorage());
+    const { agent, seen } = bareAgent(new MockSqlStorage(), new MockD1Database());
     await agent.pauseTickerPush();
     const before = seen.intervals.length;
     await agent.resumeTickerPush();
@@ -91,7 +96,7 @@ describe("4352-P02 resume arms again", () => {
 
 describe("4352-P03 the cadence is an operator fact", () => {
   it("arms the interval the operator sets and records it", async () => {
-    const { agent, seen } = bareAgent(new MockSqlStorage());
+    const { agent, seen } = bareAgent(new MockSqlStorage(), new MockD1Database());
     const applied = await agent.setTickerPushInterval(900);
     expect(applied).toEqual({ ok: true, intervalSeconds: 900 });
     expect(seen.intervals.at(-1)).toBe(900);
@@ -150,16 +155,19 @@ describe("4352-P06 the row offers the controls", () => {
   const panel = source("src/client/SchedulesPanel.tsx");
 
   it("offers the one button set, and keeps the health badge", () => {
-    // Issue #4389 — one action cell for every kind: the feed is not a special
-    // case any more, and the health badge lives in the Schedule cell.
+    // Issue #4389 — one action cell for every schedule kind. Issue
+    // #6503 step 14 — the feed is a card of its own, not a schedule
+    // row: its controls live in the feed card, the schedule cell
+    // keeps the one button set for schedule rows.
     const actions = panel.slice(panel.indexOf('key: "actions"'));
     for (const label of ["Edit", "Details", "Trigger Now", "Delete"]) {
       expect(actions).toMatch(new RegExp(`>\\s*${label}\\s*<`));
     }
     expect(actions).toContain('{s.paused ? "Resume" : "Pause"}');
-    // The feed's health badge stays on the row, in the Schedule cell.
-    const scheduleCell = panel.slice(panel.indexOf('key: "schedule"'), panel.indexOf('key: "id"'));
-    expect(scheduleCell).toContain("Missed push");
+    // Issue #6503 step 14 — the feed is a card of its own now, not a
+    // schedule row: the health badge lives in the feed card.
+    const feedCard = panel.slice(panel.indexOf("ticker-feed-card"));
+    expect(feedCard).toContain("Missed push");
   });
 
   it("the feed's id is the record id the route branches on", () => {

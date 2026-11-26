@@ -428,7 +428,9 @@ const MISC_CONFIG: Array<[string, string]> = [
   ["src/config/brokerRegistry.ts", "BrokerRegistryEntry"],
   ["src/config/brokerRegistry.ts", "BrokerAssetAccountRegistry"],
   ["src/config/heartbeatWatchdog.ts", "HeartbeatWatchdogConfig"],
-  ["src/config/heartbeatWatchdog.ts", "HeartbeatDueCheckConfig"],
+  // Issue #6503 step 13 removed the sibling `HeartbeatDueCheckConfig` row:
+  // the renewal/retention due-hour checks are retired (the duties are
+  // stored monthly schedules now), so the name no longer exists.
   ["src/config/lifecycleDefaults.ts", "LifecycleDefaults"],
   ["src/config/profileLimits.ts", "ProfileLimits"],
   ["src/config/sessionLimits.ts", "SessionLimits"],
@@ -700,7 +702,7 @@ describe("universal context census (#6528 Phase 1)", () => {
     expect(types.size).toBe(3);
   });
 
-  it("the non-*Context* counted entries are present (config 70, misc 24, react 3, identity)", () => {
+  it("the non-*Context* counted entries are present (config 70, misc 23, react 3, identity)", () => {
     const missing: string[] = [];
     for (const [file, name] of CONFIG_NAMES) {
       if (!readFileSync(file, "utf-8").includes(name)) missing.push(`${file}: ${name}`);

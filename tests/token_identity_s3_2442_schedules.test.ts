@@ -41,6 +41,8 @@ vi.mock("agents", () => {
 });
 import { OrchestratorAgent } from "../src/agents/orchestrator";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import { createD1CommercialDb, ensureCommercialSchema } from "../src/data/d1CommercialAdapter";
 
 const LOGIN = "s3user";
 const INTERNAL_ID = "user-s3-1";
@@ -60,7 +62,7 @@ function aliasRecord(githubLogin: string, internalUserId: string) {
   return { githubLogin, internalUserId, recordedAtMs: 1, source: "wired-login" };
 }
 
-function makeAgent(seeds: Array<{ ns: string; key: string; value: unknown }>) {
+async function makeAgent(seeds: Array<{ ns: string; key: string; value: unknown }>) {
   const sql = new MockSqlStorage();
   const ctx = {
     storage: { sql },
@@ -73,7 +75,26 @@ function makeAgent(seeds: Array<{ ns: string; key: string; value: unknown }>) {
   agent.env = {
     APP_ENV: "TEST",
     SESSION_STORE: sessionStoreNs,
+    // #6503 — the schedules create route persists the row in the
+    // D1 unified store (fail-closed without AGENT_DB: 503).
+    AGENT_DB: new MockD1Database(),
   } as any;
+  // #6503 — binding AGENT_DB also makes the commercial adapter
+  // real, so the create route reads the tenant broker selection
+  // from D1 instead of falling back to the legacy E*TRADE leg:
+  // with no selection stored the tenant resolves to the vocabulary
+  // default (alpaca) and creation refuses 409 for want of an
+  // Alpaca credential. These tests pin creation for the bound
+  // E*TRADE paper account, so seed the tenant's selection as
+  // etrade (tenant "primary", the IAAA default) — same shape as
+  // tests/schedules_create_route.test.ts.
+  const d1 = agent.env.AGENT_DB as MockD1Database;
+  await ensureCommercialSchema(createD1CommercialDb(d1 as never));
+  d1.sqlite
+    .prepare(
+      "INSERT OR REPLACE INTO agent_tenant_settings (tenant_id, ads_enabled, updated_at_ms, broker_id) VALUES ('primary', 0, ?, 'etrade')",
+    )
+    .run(Date.now());
   agent.schedule = async (when: any, callback: string, payload: any, options: any) => {
     return { id: "real-schedule-1", callback, payload };
   };
@@ -132,7 +153,7 @@ beforeEach(() => {
 
 describe("S3 schedule-create preflight identity pass-through", () => {
   it("internal-id token + alias records → create succeeds (no 409)", async () => {
-    const agent = makeAgent([
+    const agent = await makeAgent([
       ...aliasSeeds(),
       ...bindingSeeds(),
       { ns: "etrade", key: `etrade:token:TEST:${INTERNAL_ID}`, value: freshToken(LOGIN) },
@@ -143,7 +164,7 @@ describe("S3 schedule-create preflight identity pass-through", () => {
   });
 
   it("internal-id token, NO alias records → 409 (today's behavior)", async () => {
-    const agent = makeAgent([
+    const agent = await makeAgent([
       { ns: "etrade", key: `etrade:token:TEST:${INTERNAL_ID}`, value: freshToken(LOGIN) },
     ]);
     const { status, body } = await postCreate(agent);
@@ -152,7 +173,7 @@ describe("S3 schedule-create preflight identity pass-through", () => {
   });
 
   it("alias-login token + alias records → create succeeds", async () => {
-    const agent = makeAgent([
+    const agent = await makeAgent([
       ...aliasSeeds(),
       ...bindingSeeds(),
       { ns: "etrade", key: `etrade:token:TEST:${ALIAS_LOGIN}`, value: freshToken(LOGIN) },
@@ -163,7 +184,7 @@ describe("S3 schedule-create preflight identity pass-through", () => {
   });
 
   it("login-key token, no alias → today's behavior preserved (create succeeds)", async () => {
-    const agent = makeAgent([
+    const agent = await makeAgent([
       ...bindingSeeds(),
       { ns: "etrade", key: `etrade:token:TEST:${LOGIN}`, value: freshToken(LOGIN) },
     ]);
@@ -173,7 +194,7 @@ describe("S3 schedule-create preflight identity pass-through", () => {
   });
 
   it("no token under any key → 409", async () => {
-    const agent = makeAgent([]);
+    const agent = await makeAgent([]);
     const { status, body } = await postCreate(agent);
     expect(status).toBe(409);
     expect(body.error).toContain("Connect an E*TRADE account");

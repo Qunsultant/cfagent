@@ -44,6 +44,8 @@ vi.mock("../src/orchestrate", () => ({
 }));
 
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import { PortThink } from "../src/actors/thinkAdapter";
 
 function makeCtx() {
@@ -58,6 +60,9 @@ function makeCtx() {
 
 function makeEnv() {
   return {
+    // #6503 — goals live in the D1 unified store only (fail-closed
+    // without AGENT_DB); addGoal/triggerGoal resolve the store.
+    AGENT_DB: new MockD1Database(),
     PAYMENTS_AGENT: {
       idFromName: () => "payments-default",
       get: () => ({ budgetCheck: async () => ({ allowed: true }) }),
@@ -86,17 +91,21 @@ describe("ScheduledAgent think-fleet migration (#1956)", () => {
       budgetCents: 500,
     });
     expect(goal.id).toBe("think-fleet-probe");
-    // Isolate the probe goal before triggering: getGoals() seeds
-    // DEFAULT_SCHEDULES on empty storage, and triggerGoal runs a
-    // full onCron tick — the seeded hourly resource-cap-alert goal
-    // is always due (it never stamps lastRun by design) and fails
-    // visible without an AGENT_DB binding in this minimal env.
-    // That fail-visible branch is production-intended behavior,
-    // unrelated to the PortThink migration, so it must not leak
-    // into this test's errors assertion (repo precedent:
-    // tests/chain_executor_scheduled_agent.test.ts seeds
-    // ctx.storage with just its goal for the same reason).
-    await (agent as any).ctx.storage.put("goals", [goal]);
+    // #6503 — isolate the probe goal before triggering: addGoal
+    // ran over a D1 store that migration 0092 seeded with the 9
+    // built-ins, and triggerGoal runs a full onCron tick — the
+    // seeded hourly resource-cap-alert goal is always due (it never
+    // stamps lastRun by design) and must not leak into this test's
+    // errors assertion. The old isolation (`ctx.storage.put("goals",
+    // [goal])`) is dead — the "goals" KV key is never read — so
+    // prune the seeded goals from D1 instead (same pattern as the
+    // #6503 G3 goals-tick file).
+    const store = createD1UnifiedSchedulePorts({
+      d1: (agent as any).env.AGENT_DB as never,
+    }).unifiedSchedules;
+    for (const row of await store.listByKind("goal")) {
+      if (row.id !== "think-fleet-probe") await store.remove(row.id);
+    }
     const tick = await agent.triggerGoal("think-fleet-probe");
     expect(tick.jobsCreated).toBe(1);
     expect(tick.errors).toEqual([]);
