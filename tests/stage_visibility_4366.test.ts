@@ -162,7 +162,11 @@ describe("4366-P03 the schedule callback", () => {
     // one behavior are unchanged.
     expect(orchestrator).toContain("async runPipelineJobSchedule(payload: unknown, schedule?: { id?: unknown })");
     expect(orchestrator).toContain("requires a jobId in its payload");
-    expect(orchestrator).toContain("await door.runPipelineJob(jobId, { userLogin });");
+    // Issue #6557 — the callback now also forwards the firing payload's
+    // provenance, so the assertion matches the multi-line call and pins
+    // the carrier beside the dispatch-by-id behavior.
+    expect(orchestrator).toContain("await door.runPipelineJob(jobId, {");
+    expect(orchestrator).toContain("...(provenance ? { provenance } : {})");
   });
 });
 
