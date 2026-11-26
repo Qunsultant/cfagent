@@ -76,6 +76,8 @@ import { envStrings } from "../workflows/envStrings";
 import { createSqlDeliverySuppressionStore } from "../data/deliveryClaimsStore";
 import { createD1IndexListDb, D1IndexListStore } from "../data/d1IndexListAdapter";
 import { createJobPipelineMessaging } from "../messaging/createJobPipelineMessaging";
+import { createDeadLetterStoreAdapter } from "../data/createDeadLetterStorePorts";
+import { deadLetterRunSink } from "../services/jobPipelineDeadLetter";
 import {
   JobPipelineControl,
   jobRunRecorderFromStore,
@@ -522,6 +524,9 @@ export function createScheduledAgentPipelineControl(
   const sql = pipelineSql(ctx);
   const stores = createJobPipelineStoresFromSql(sql);
   const messaging = createJobPipelineMessaging(ctx.env);
+  // Issue #3967 — the one dead-letter store, or null when this deployment
+  // has no D1 binding (the run's failure is unchanged either way).
+  const deadLetter = createDeadLetterStoreAdapter(ctx.env);
   // Issue #5823: the feed deps are built once and shared — the feed
   // steps run through them, and the screener steps bind their
   // quote/history deps over the same #3941 provider construction.
@@ -546,6 +551,10 @@ export function createScheduledAgentPipelineControl(
     ...(ctx.env.AGENT_DB
       ? { stageEventsMirror: createD1JobStageEventStore(ctx.env.AGENT_DB) }
       : {}),
+    // Issue #3967 — a poison run lands in the platform's DLQ, the surface
+    // an operator already inspects. Best-effort: an unbound AGENT_DB (or a
+    // failing store) leaves the run's own failure exactly as it was.
+    ...(deadLetter ? { deadLetterRun: deadLetterRunSink(deadLetter) } : {}),
     // #4312 — the feed execution bound resolves from env here
     // (FEED_JOB_EXECUTION_MS, 240s when no knob is set), so the
     // host's whole-run deadline is operator-configurable.

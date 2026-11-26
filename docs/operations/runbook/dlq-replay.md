@@ -40,6 +40,22 @@ see "What this store does NOT cover" below for the platform DLQ.
   metrics; a dashboard alert on those queues is a useful second
   signal but is not required for this slice's alert to work.
 
+## Poison runs share this surface (#3967)
+
+A job unit that fails with a CODED error the retry cannot fix is not retried:
+it lands here too, with `queue` = `job-pipeline` and reason `poison_run`,
+alongside the queue drops. The row's `runId`/`unitId` columns identify the
+execution and its `detail` line names the job, stage and code
+(`job=<id> stage=<id> code=<code>: <message>`).
+
+**A poison row is not replayed — it is re-driven.** The record carries no
+envelope (a run is not a queue message), so `POST /api/ops/dlq/replay`
+refuses it with `no_envelope`; that refusal is correct, not a fault. Use the
+detail line's job id with the retry route (`POST /api/jobs/:jobId/retry`),
+which starts a fresh run on the current definition. Retry only after the
+cause is fixed (a corrected definition, a configured shard) — re-driving the
+same poison definition produces the same landing.
+
 ## Diagnosis
 
 1. **List the backlog.** As a store operator, `GET
