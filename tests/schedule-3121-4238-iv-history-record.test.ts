@@ -49,8 +49,9 @@ vi.mock("agents", () => {
 });
 
 import { OrchestratorAgent } from "../src/agents/orchestrator";
-import { SqlUnifiedScheduleStore } from "../src/data/doSqliteUnifiedScheduleAdapter";
 import { InMemoryUnifiedScheduleStore } from "../src/data/inMemoryUnifiedScheduleAdapter";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import { UNIFIED_SCHEDULE_KINDS } from "../src/data/unifiedSchedulePorts";
 import type { UnifiedScheduleRecord } from "../src/data/unifiedSchedulePorts";
 import {
@@ -256,7 +257,9 @@ describe("ensureIvHistoryCollectionRecord adopts the armed IV alarm (#4238)", ()
     sql = new MockSqlStorage();
     agent = Object.create(OrchestratorAgent.prototype);
     agent.ctx = { storage: { sql }, id: { toString: () => "iv-history-test" } };
-    agent.env = {};
+    // #6503 — the adoption writes the D1 unified store only
+    // (fail-closed without AGENT_DB); the DO store is never read.
+    agent.env = { AGENT_DB: new MockD1Database() };
     agent.listSchedules = async () => existing;
     agent.schedule = async (...args: unknown[]) => {
       scheduleCalls.push(args);
@@ -269,13 +272,25 @@ describe("ensureIvHistoryCollectionRecord adopts the armed IV alarm (#4238)", ()
     agent.audit = () => {};
   });
 
+  /** The D1 unified store this agent writes to (#6503). */
+  function d1Store() {
+    return createD1UnifiedSchedulePorts({ d1: agent.env.AGENT_DB as never }).unifiedSchedules;
+  }
+
+  /** IV rows only: D1 also holds migration-0092's seeds (5 system internal rows + 9 goals). */
+  async function ivRows() {
+    return (await d1Store().listByKind("internal")).filter(
+      (r) => r.callback === "collectIvHistory",
+    );
+  }
+
   it("adopts an existing IV alarm into the store without arming or cancelling", async () => {
     existing = [ivAlarm()];
     await agent.ensureIvHistoryCollectionRecord({ userLogin: "venus", environment: "PROD" });
     expect(scheduleCalls).toHaveLength(0);
     expect(cancelCalls).toHaveLength(0);
-    const store = new SqlUnifiedScheduleStore(sql as any);
-    const record = store.get("iv-1");
+    const store = d1Store();
+    const record = await store.get("iv-1");
     expect(record).toBeDefined();
     expect(record?.kind).toBe("internal");
     expect(record?.state).toBe("active");
@@ -286,44 +301,42 @@ describe("ensureIvHistoryCollectionRecord adopts the armed IV alarm (#4238)", ()
       expect.objectContaining({ origin: "system", reason: IV_HISTORY_COLLECTION_ORIGIN }),
     );
     expect((record?.definition as { cron?: string }).cron).toBe(IV_CRON);
-    expect(store.listByKind("internal").map((r) => r.id)).toEqual(["iv-1"]);
+    expect((await ivRows()).map((r) => r.id)).toEqual(["iv-1"]);
   });
 
   it("does not adopt a record that already exists (no duplicate save churn)", async () => {
     existing = [ivAlarm()];
-    const store = new SqlUnifiedScheduleStore(sql as any);
-    store.save(ivRecord({ createdAt: "2026-11-01T00:00:00.000Z", updatedAt: "2026-11-01T00:00:00.000Z" }));
+    const store = d1Store();
+    await store.save(ivRecord({ createdAt: "2026-11-01T00:00:00.000Z", updatedAt: "2026-11-01T00:00:00.000Z" }));
     await agent.ensureIvHistoryCollectionRecord({ userLogin: "venus", environment: "PROD" });
     expect(scheduleCalls).toHaveLength(0);
-    expect(store.get("iv-1")?.createdAt).toBe("2026-11-01T00:00:00.000Z");
+    expect((await store.get("iv-1"))?.createdAt).toBe("2026-11-01T00:00:00.000Z");
   });
 
   it("does not adopt a second record for an alarm a resumed record already points at", async () => {
     // A pause/resume cycle keeps the record id and re-arms under a new
     // alarm id: the live alarm's id is the record's alarmId, not its id.
     existing = [ivAlarm({ id: "iv-2" })];
-    const store = new SqlUnifiedScheduleStore(sql as any);
-    store.save(ivRecord({ id: "iv-1", alarmId: "iv-2", createdAt: "2026-11-01T00:00:00.000Z" }));
+    const store = d1Store();
+    await store.save(ivRecord({ id: "iv-1", alarmId: "iv-2", createdAt: "2026-11-01T00:00:00.000Z" }));
     await agent.ensureIvHistoryCollectionRecord({ userLogin: "venus", environment: "PROD" });
     expect(scheduleCalls).toHaveLength(0);
-    expect(store.list()).toHaveLength(1);
-    expect(store.get("iv-1")?.alarmId).toBe("iv-2");
+    expect(await ivRows()).toHaveLength(1);
+    expect((await store.get("iv-1"))?.alarmId).toBe("iv-2");
   });
 
   it("adopts nothing when no IV alarm exists, and arms nothing", async () => {
     await agent.ensureIvHistoryCollectionRecord({ userLogin: "venus", environment: "PROD" });
     expect(scheduleCalls).toHaveLength(0);
     expect(cancelCalls).toHaveLength(0);
-    const store = new SqlUnifiedScheduleStore(sql as any);
-    expect(store.list()).toHaveLength(0);
+    expect(await ivRows()).toHaveLength(0);
   });
 
   it("does not adopt another user's IV alarm", async () => {
     existing = [ivAlarm({ payload: { ...IV_PAYLOAD, userLogin: "other" } })];
     await agent.ensureIvHistoryCollectionRecord({ userLogin: "venus", environment: "PROD" });
     expect(scheduleCalls).toHaveLength(0);
-    const store = new SqlUnifiedScheduleStore(sql as any);
-    expect(store.list()).toHaveLength(0);
+    expect(await ivRows()).toHaveLength(0);
   });
 
   it("adopts nothing for a non-cron IV alarm (not the known shape)", async () => {
@@ -338,22 +351,15 @@ describe("ensureIvHistoryCollectionRecord adopts the armed IV alarm (#4238)", ()
     ];
     await agent.ensureIvHistoryCollectionRecord({ userLogin: "venus", environment: "PROD" });
     expect(scheduleCalls).toHaveLength(0);
-    const store = new SqlUnifiedScheduleStore(sql as any);
-    expect(store.list()).toHaveLength(0);
+    expect(await ivRows()).toHaveLength(0);
   });
 
   it("adoption still succeeds when the unified store is unavailable", async () => {
     existing = [ivAlarm()];
-    agent.ctx = {
-      storage: {
-        sql: {
-          exec: () => {
-            throw new Error("unified store unavailable in this harness");
-          },
-        },
-      },
-      id: { toString: () => "iv-history-test" },
-    };
+    // #6503 — "unavailable" is now an unbound AGENT_DB (the D1 store
+    // factory throws, the adoption returns best-effort with no store);
+    // the old broken-DO-SQLite premise is retired with the DO store.
+    agent.env = {};
     await agent.ensureIvHistoryCollectionRecord({ userLogin: "venus", environment: "PROD" });
     expect(scheduleCalls).toHaveLength(0);
     expect(cancelCalls).toHaveLength(0);
@@ -361,7 +367,7 @@ describe("ensureIvHistoryCollectionRecord adopts the armed IV alarm (#4238)", ()
 });
 
 describe("the one management path serves internal records (#4238)", () => {
-  it("lists one row per IV duty: the active record with its alarm wins over a stale paused record (#5890)", async () => {
+  it("lists one row per IV record: the active record and a stale paused record render separately (#6503, #5890 retired for non-system rows)", async () => {
     const store = new InMemoryUnifiedScheduleStore();
     const { port } = alarmsPort({
       list: async () => [ivAlarm()],
@@ -370,12 +376,17 @@ describe("the one management path serves internal records (#4238)", () => {
     store.save(ivRecord());
     store.save(ivRecord({ id: "iv-paused", alarmId: "iv-paused", state: "paused", pausedAt: NOW_ISO }));
     const items = await listUnifiedScheduleItems({ store, alarms: port });
-    // Issue #5890 — the two records are one job (same callback, same
-    // payload, same cadence): the stale per-alarm paused record must
-    // not render as a second row. The live row is the job's state.
-    expect(items.map((i) => i.id).sort()).toEqual(["iv-1"]);
+    // #6503 — the #5890 collapse retired with the derived-record
+    // source: scheduleJobKeyOf now collapses only the six system
+    // records + ticker-push, so a stored non-system row keys by its
+    // own id and the stale paused record renders as its own row.
+    // Re-creating the IV record instead of adopting the stale one
+    // is follow-up #6544; #5890's one-row-per-job still holds for
+    // the six system rows.
+    expect(items.map((i) => i.id).sort()).toEqual(["iv-1", "iv-paused"]);
     expect(items.find((i) => i.id === "iv-1")?.kind).toBe("internal");
     expect(items.find((i) => i.id === "iv-1")?.paused).toBe(false);
+    expect(items.find((i) => i.id === "iv-paused")?.paused).toBe(true);
   });
 
   it("lists a paused internal record with no live alarm as the one paused row (#5890)", async () => {
@@ -437,7 +448,9 @@ describe("the one management path serves internal records (#4238)", () => {
     expect(ran).toHaveLength(1);
     expect((ran[0] as unknown[])[0]).toBe("collectIvHistory");
     expect((ran[0] as unknown[])[1]).toEqual(
-      expect.objectContaining({ trigger: "manual", scheduleId: "iv-1" }),
+      // #6503 — step 1 dispatch-mode vocabulary: a run-now trigger
+      // stamps "triggered", not "manual".
+      expect.objectContaining({ trigger: "triggered", scheduleId: "iv-1" }),
     );
   });
 

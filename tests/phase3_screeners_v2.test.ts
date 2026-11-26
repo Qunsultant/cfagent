@@ -76,7 +76,6 @@ import {
   ensureWeightsV2Tables,
   getStrategyWeightsV2Collapsed,
 } from "../src/services/strategyWeightsV2";
-import { RESEARCH_SCHEDULED_LAST_RUN_KEY } from "../src/services/researchScheduleGuard";
 
 /* ------------------------------------------------------------------ */
 /* Fixtures                                                            */
@@ -497,8 +496,8 @@ describe("goal-driven screen ledger adoption (Phase 3)", () => {
 describe("strategy bank schedule guard (Phase 3)", () => {
   const wedEvening = new Date("2026-10-21T22:30:00.000Z"); // Wednesday UTC
 
-  it("has its own durable marker, distinct from the research run marker", () => {
-    expect(STRATEGY_BANK_LAST_RUN_KEY).not.toBe(RESEARCH_SCHEDULED_LAST_RUN_KEY);
+  it("has its own durable marker (issue #6503 retired the research run marker it used to differ from)", () => {
+    expect(STRATEGY_BANK_LAST_RUN_KEY).toBe("strategy_bank_reselection_last_run");
   });
 
   it("fires once per weekday at/after 21:00 UTC", () => {

@@ -9,13 +9,16 @@
  * (research + publish), due-run evaluations, discovery if due, and the
  * #1096 screening steps (strategy-bank re-selection proposals,
  * weights-v2, delivery). It already rides the tick today (tickRiders);
- * this slice derives ONE stable record (id nightly-research, kind
- * internal, state active) and appends it to the home list with its
- * last run joined from the ledger, so the row reads "Last research: …"
- * — or "never" when the duty has never fired. The fired run writes
- * one ledger row (jobId = record id) from the scheduled-tick handler
- * itself, so the runs routes join without a new store or a new firing
- * mechanism.
+ * this slice stores ONE stable record (id nightly-research, kind
+ * internal, state paused, monthly interval, callback
+ * runResearchSchedule) and lists it with its last run joined from
+ * the ledger, so the row reads "Last research: …" — or "never"
+ * when the duty has never fired. The fired run writes one ledger
+ * row (jobId = record id) from the scheduled-tick handler itself,
+ * so the runs routes join without a new store or a new firing
+ * mechanism. The old derived record (synthesized at read time,
+ * management refused) is deleted: the row renders only when
+ * stored, and the verbs operate on the stored row.
  *
  * State note: the Nov-12 definition comment recorded state `disabled`
  * — "firing waits on #4234". #4234 has since landed (55e3e1f): the
@@ -23,9 +26,7 @@
  * route's guard decides fire/no-fire, so the duty IS live through
  * the tick like #4239/#4240 — active, not disabled. No new kind: the
  * record uses `internal`, the #4238 seventh kind for internal-only
- * callbacks. Management ops refuse with a coded error naming the
- * derived record (pause / resume / trigger / update / delete —
- * #5891 retired the delete no-op). There is no manual trigger route for the research run — the
+ * callbacks. There is no manual trigger route for the research run — the
  * run fires on the tick; the manual research route is unchanged.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -33,18 +34,20 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import {
   UNIFIED_SCHEDULE_KINDS,
+  type UnifiedScheduleRecord,
 } from "../src/data/unifiedSchedulePorts";
 import {
   NIGHTLY_RESEARCH_RECORD_ID,
   NIGHTLY_RESEARCH_ORIGIN,
-  nightlyResearchToRecord,
   nightlyResearchRecordToListItem,
   pauseUnifiedSchedule,
   resumeUnifiedSchedule,
   deleteUnifiedSchedule,
   triggerUnifiedSchedule,
   updateUnifiedSchedule,
+  reconcileSystemScheduleRecords,
 } from "../src/services/unifiedScheduleManagement";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import { InMemoryUnifiedScheduleStore } from "../src/data/inMemoryUnifiedScheduleAdapter";
 import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
 import { scheduleIdToLedgerJobId } from "../src/services/jobRunRecords";
@@ -81,33 +84,130 @@ class SqliteTestStorage {
 const NOW = "2026-11-19T07:00:00.000Z";
 const RUN_STARTED = "2026-11-19T21:00:00.000Z";
 const RUN_FINISHED = "2026-11-19T21:05:00.000Z";
+const MONTHLY_SECONDS = 2_592_000;
 
-describe("4241 derived nightly research record", () => {
-  it("builds the one stable nightly research record (id nightly-research, internal, active)", () => {
-    const record = nightlyResearchToRecord(NOW);
-    expect(record.id).toBe("nightly-research");
+/** Minimal D1Database stand-in over node:sqlite (same as the #6503 repro). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: {
+                changes: info.changes,
+                last_row_id: info.lastInsertRowid,
+              },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+  async batch(statements: any[]) {
+    const results: any[] = [];
+    this.sqlite.exec("BEGIN");
+    try {
+      for (const stmt of statements) {
+        results.push(await stmt.run());
+      }
+      this.sqlite.exec("COMMIT");
+    } catch (err) {
+      this.sqlite.exec("ROLLBACK");
+      throw err;
+    }
+    return results;
+  }
+}
+
+/** A stored nightly-research row, as the seed creates it (state set by the test). */
+function storedResearchRecord(
+  state: "active" | "paused",
+  createdAt = NOW,
+): UnifiedScheduleRecord {
+  return {
+    id: "nightly-research",
+    kind: "internal",
+    state,
+    callback: "runResearchSchedule",
+    definition: {
+      type: "interval",
+      intervalSeconds: MONTHLY_SECONDS,
+      callback: "runResearchSchedule",
+    } as unknown as UnifiedScheduleRecord["definition"],
+    ownerLogin: null,
+    provenance: { origin: "system", createdBy: "system", reason: "nightly-research", createdAt },
+    alarmId: null,
+    pausedAt: state === "paused" ? createdAt : null,
+    createdAt,
+    updatedAt: createdAt,
+  };
+}
+
+function alarmsStub(overrides: Record<string, unknown> = {}): any {
+  return {
+    list: async () => [],
+    get: async () => undefined,
+    cancel: async () => true,
+    arm: async () => ({ id: "new-1", callback: "runResearchSchedule" }),
+    ...overrides,
+  };
+}
+
+describe("4241 stored nightly research record", () => {
+  it("reconcile seeds the one stable nightly research record (id nightly-research, internal, paused, monthly)", async () => {
+    const store = new InMemoryUnifiedScheduleStore();
+    const result = await reconcileSystemScheduleRecords(
+      { store, alarms: alarmsStub() },
+      NOW,
+    );
+    expect(result.seeded).toContain("nightly-research");
+    const record = await store.get("nightly-research");
+    expect(record?.id).toBe("nightly-research");
     expect(NIGHTLY_RESEARCH_RECORD_ID).toBe("nightly-research");
-    expect(record.kind).toBe("internal");
-    expect(record.state).toBe("active");
-    expect(record.callback).toBe("nightly-research");
-    expect(record.definition.cron).toBe(nightlyResearchDispatchCron());
-    expect(record.definition.cron).toBe("0 21 * * 1-5");
-    expect(record.definition.entryPoint).toBe("nightly-research");
-    expect(record.provenance.origin).toBe("system");
-    expect(record.provenance.reason).toBe("nightly-research");
+    expect(record?.kind).toBe("internal");
+    expect(record?.state).toBe("paused");
+    // The stored row fires through the research callback, not the
+    // old "nightly-research" callback value the derived record used.
+    expect(record?.callback).toBe("runResearchSchedule");
+    expect(
+      (record?.definition as unknown as Record<string, unknown>).intervalSeconds,
+    ).toBe(MONTHLY_SECONDS);
+    expect(
+      (record?.definition as unknown as Record<string, unknown>).cron,
+    ).toBeUndefined();
+    expect(record?.provenance.origin).toBe("system");
+    expect(record?.provenance.reason).toBe("nightly-research");
     expect(NIGHTLY_RESEARCH_ORIGIN).toBe("nightly-research");
-    expect(record.createdAt).toBe(NOW);
-    expect(record.updatedAt).toBe(NOW);
+    expect(record?.alarmId).toBeNull();
+    expect(record?.createdAt).toBe(NOW);
+    expect(record?.updatedAt).toBe(NOW);
   });
 
   it("reads the cadence from the one resolved config, never re-literalized (#6030)", () => {
     expect(DEFAULT_RESEARCH_JOB_CONFIG.scheduleUtcHour).toBe(21);
     expect(nightlyResearchDispatchCron()).toBe("0 21 * * 1-5");
-    // The env moves the record's cron with the guard's fire hour.
+    // The env moves the guard's cron with the fire hour. The stored
+    // row itself is a monthly interval now — the guard cron is the
+    // research fire rule, not the stored row's cadence.
     expect(nightlyResearchDispatchCron({ scheduleUtcHour: 22 })).toBe("0 22 * * 1-5");
-    expect(nightlyResearchToRecord(NOW, null, { scheduleUtcHour: 22 }).definition.cron).toBe(
-      "0 22 * * 1-5"
-    );
   });
 
   it("adds no new kind to the unified-store union", () => {
@@ -115,18 +215,22 @@ describe("4241 derived nightly research record", () => {
     expect(UNIFIED_SCHEDULE_KINDS).not.toContain("nightly-research");
   });
 
-  it("preserves createdAt across in-place updates (upsert, not recreate)", () => {
-    const first = nightlyResearchToRecord("2026-11-18T07:00:00.000Z");
-    const second = nightlyResearchToRecord(NOW, first);
-    expect(second.createdAt).toBe("2026-11-18T07:00:00.000Z");
-    expect(second.updatedAt).toBe(NOW);
-    expect(second.id).toBe(first.id);
+  it("an in-place update preserves createdAt (upsert, not recreate)", async () => {
+    const store = new InMemoryUnifiedScheduleStore();
+    await store.save(storedResearchRecord("active", "2026-11-18T07:00:00.000Z"));
+    const paused = await pauseUnifiedSchedule({ store, alarms: alarmsStub() }, "nightly-research", NOW);
+    expect(paused.ok).toBe(true);
+    const after = await store.get("nightly-research");
+    expect(after?.createdAt).toBe("2026-11-18T07:00:00.000Z");
+    expect(after?.updatedAt).toBe(NOW);
+    expect(after?.pausedAt).toBe(NOW);
+    expect(after?.id).toBe("nightly-research");
   });
 });
 
 describe("4241 nightly research list item (Schedules home row)", () => {
   it("carries the last run joined from the ledger", () => {
-    const record = nightlyResearchToRecord(NOW);
+    const record = storedResearchRecord("active");
     const item = nightlyResearchRecordToListItem(record, {
       started: RUN_STARTED,
       finished: RUN_FINISHED,
@@ -134,14 +238,16 @@ describe("4241 nightly research list item (Schedules home row)", () => {
     });
     expect(item.id).toBe("nightly-research");
     expect(item.kind).toBe("internal");
-    expect(item.callback).toBe("nightly-research");
-    expect(item.cron).toBe("0 21 * * 1-5");
+    expect(item.callback).toBe("runResearchSchedule");
+    // The stored row is a monthly interval, not the old nightly cron.
+    expect(item.cron).toBeUndefined();
+    expect(item.intervalSeconds).toBe(MONTHLY_SECONDS);
     expect(item.lastRunAt).toBe(RUN_STARTED);
     expect(item.lastRunOutcome).toBe("success");
   });
 
   it("carries no last run when the duty has never fired", () => {
-    const item = nightlyResearchRecordToListItem(nightlyResearchToRecord(NOW));
+    const item = nightlyResearchRecordToListItem(storedResearchRecord("paused"));
     expect(item.lastRunAt).toBeUndefined();
     expect(item.lastRunOutcome).toBeUndefined();
   });
@@ -156,6 +262,8 @@ describe("4241 home naming + classifier + ledger join", () => {
 
   it("classifies the nightly-research callback as system upkeep", () => {
     expect(classifyScheduleKind({ callback: "nightly-research" })).toBe("system");
+    // The stored row's callback is the research runner, same class.
+    expect(classifyScheduleKind({ callback: "runResearchSchedule" })).toBe("system");
   });
 
   it("resolves the nightly-research record id to its ledger job id (itself)", () => {
@@ -164,57 +272,113 @@ describe("4241 home naming + classifier + ledger join", () => {
   });
 });
 
-describe("4241 management refuses the derived record with coded errors", () => {
-  const alarms: any = {
-    list: async () => [],
-    get: async () => undefined,
-    cancel: async () => true,
-    arm: async () => ({ id: "new-1", callback: "nightly-research" }),
-  };
-
-  it("pause / resume name the derived record instead of arming a foreign alarm", async () => {
+describe("4241 management works on the stored nightly research record (no derived refusal)", () => {
+  it("pause pauses a stored active research row", async () => {
     const store = new InMemoryUnifiedScheduleStore();
-    const paused = await pauseUnifiedSchedule({ store, alarms }, "nightly-research", NOW);
-    expect(paused.ok).toBe(false);
-    if (!paused.ok) {
-      expect(paused.status).toBe(400);
-      expect(paused.error).toContain("nightly-research");
+    await store.save(storedResearchRecord("active"));
+    const paused = await pauseUnifiedSchedule({ store, alarms: alarmsStub() }, "nightly-research", NOW);
+    expect(paused.ok).toBe(true);
+    if (paused.ok) {
+      expect(paused.record.state).toBe("paused");
+      expect(paused.record.id).toBe("nightly-research");
     }
-    const resumed = await resumeUnifiedSchedule({ store, alarms }, "nightly-research", NOW);
-    expect(resumed.ok).toBe(false);
-    if (!resumed.ok) {
-      expect(resumed.status).toBe(400);
-      expect(resumed.error).toContain("nightly-research");
+    expect((await store.get("nightly-research"))?.state).toBe("paused");
+  });
+
+  it("resume re-arms a stored paused research row from its own monthly timing", async () => {
+    const store = new InMemoryUnifiedScheduleStore();
+    await store.save(storedResearchRecord("paused"));
+    const arm = vi.fn(async () => ({ id: "alarm-9", callback: "runResearchSchedule" }));
+    const resumed = await resumeUnifiedSchedule(
+      { store, alarms: alarmsStub({ arm }) },
+      "nightly-research",
+      NOW,
+    );
+    expect(resumed.ok).toBe(true);
+    if (resumed.ok) {
+      expect(resumed.record.state).toBe("active");
+      expect(resumed.record.alarmId).toBe("alarm-9");
+    }
+    expect(arm).toHaveBeenCalledTimes(1);
+    const [timing] = arm.mock.calls[0] as unknown as Array<Record<string, unknown>>;
+    expect(timing).toEqual({ type: "interval", intervalSeconds: MONTHLY_SECONDS });
+  });
+
+  it("trigger runs a stored active research row and stamps triggered, not manual", async () => {
+    const store = new InMemoryUnifiedScheduleStore();
+    await store.save({ ...storedResearchRecord("active"), alarmId: "alarm-1" });
+    const seen: Array<{ callback: string; payload: unknown }> = [];
+    const triggered = await triggerUnifiedSchedule(
+      {
+        store,
+        alarms: alarmsStub({
+          get: async () => ({ id: "alarm-1", callback: "runResearchSchedule", payload: {} }),
+        }),
+      },
+      "nightly-research",
+      async (callback: string, payload: unknown) => {
+        seen.push({ callback, payload });
+      },
+    );
+    expect(triggered.ok).toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].callback).toBe("runResearchSchedule");
+    expect((seen[0].payload as Record<string, unknown>).trigger).toBe("triggered");
+  });
+
+  it("update re-times a stored paused research row without an alarm", async () => {
+    const store = new InMemoryUnifiedScheduleStore();
+    await store.save(storedResearchRecord("paused"));
+    const updated = await updateUnifiedSchedule(
+      { store, alarms: alarmsStub() },
+      "nightly-research",
+      { intervalSeconds: MONTHLY_SECONDS * 2 },
+      Date.parse(NOW),
+    );
+    expect(updated.ok).toBe(true);
+    if (updated.ok) {
+      expect(updated.record.state).toBe("paused");
+      const def = updated.record.definition as unknown as Record<string, unknown>;
+      expect(def.intervalSeconds).toBe(MONTHLY_SECONDS * 2);
+      expect(updated.record.createdAt).toBe(NOW);
     }
   });
 
-  it("trigger / update name the derived record (not the goal surface)", async () => {
+  it("delete removes a stored research row and it stays gone", async () => {
     const store = new InMemoryUnifiedScheduleStore();
-    const triggered = await triggerUnifiedSchedule({ store, alarms }, "nightly-research", async () => {});
-    expect(triggered.ok).toBe(false);
-    if (!triggered.ok) {
-      expect(triggered.status).toBe(400);
-      expect(triggered.error).toContain("nightly-research");
-      expect(triggered.error).not.toContain("Goal schedules");
-    }
-    const updated = await updateUnifiedSchedule({ store, alarms }, "nightly-research", { cron: "0 22 * * 1-5" }, Date.now());
-    expect(updated.ok).toBe(false);
-    if (!updated.ok) {
-      expect(updated.status).toBe(400);
-      expect(updated.error).toContain("nightly-research");
-      expect(updated.error).not.toContain("Goal schedules");
-    }
+    await store.save(storedResearchRecord("paused"));
+    const deleted = await deleteUnifiedSchedule(
+      { store, alarms: alarmsStub() },
+      "nightly-research",
+    );
+    expect(deleted.ok).toBe(true);
+    if (deleted.ok) expect(deleted.cancelled).toBe(true);
+    expect(await store.get("nightly-research")).toBeUndefined();
   });
 
-  it("delete refuses the derived record with a named error (#5891)", async () => {
+  it("a missing research row 404s every verb, never a derived refusal", async () => {
     const store = new InMemoryUnifiedScheduleStore();
-    const deleted = await deleteUnifiedSchedule({ store, alarms }, "nightly-research");
-    expect(deleted.ok).toBe(false);
-    if (!deleted.ok) {
-      expect(deleted.status).toBe(400);
-      expect(deleted.error).toContain("nightly-research");
-      expect(deleted.error).toContain("derived record");
-      expect(deleted.error).not.toContain("Goal schedules");
+    // The strict alarms port: cancelling an unknown id is false
+    // (nothing was there), like the real port's contract.
+    const deps = { store, alarms: alarmsStub({ cancel: async () => false }) };
+    const cases: Array<{ result: Awaited<ReturnType<typeof pauseUnifiedSchedule>>; message: string }> = [
+      { result: await pauseUnifiedSchedule(deps, "nightly-research", NOW), message: "not found" },
+      { result: await resumeUnifiedSchedule(deps, "nightly-research", NOW), message: "is not paused" },
+      { result: await deleteUnifiedSchedule(deps, "nightly-research"), message: "not found" },
+      { result: await triggerUnifiedSchedule(deps, "nightly-research", async () => {}), message: "not found" },
+      {
+        result: await updateUnifiedSchedule(deps, "nightly-research", { intervalSeconds: MONTHLY_SECONDS }, Date.parse(NOW)),
+        message: "not found",
+      },
+    ];
+    for (const { result, message } of cases) {
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.status).toBe(404);
+        expect(result.error).toContain("nightly-research");
+        expect(result.error).toContain(message);
+        expect(result.error).not.toContain("derived");
+      }
     }
   });
 });
@@ -255,13 +419,14 @@ describe("4241 fired run writes one ledger row (jobId = record id)", () => {
   });
 });
 
-describe("4241 list route appends the nightly research row (best-effort)", () => {
+describe("4241 list route reads the stored nightly research row (no synthesis)", () => {
   let sql: SqliteTestStorage;
   let ctx: SchedulesRouteContext;
+  let d1: MockD1Database;
 
   function baseCtx(overrides: Partial<SchedulesRouteContext> = {}): SchedulesRouteContext {
     return {
-      env: {},
+      env: { AGENT_DB: d1 },
       agentCtx: { storage: { sql: sql.sql as never } } as never,
       audit: vi.fn(),
       listSchedules: vi.fn(async () => []),
@@ -284,9 +449,20 @@ describe("4241 list route appends the nightly research row (best-effort)", () =>
     recordNightlyResearchLedgerRun(sql.sql as never, RUN_STARTED, RUN_FINISHED);
   }
 
-  beforeEach(() => {
+  /** The stored research row the list renders (D1 only, #6503 fail-closed). */
+  async function seedStoredResearchRow() {
+    const store = createD1UnifiedSchedulePorts({ d1: d1 as never }).unifiedSchedules;
+    // Paused: the seed default — and the list renders a stored row
+    // from the store only when paused (an active row renders
+    // through its live alarm, which this fixture has none of).
+    await store.save(storedResearchRecord("paused"));
+  }
+
+  beforeEach(async () => {
     sql = new SqliteTestStorage();
+    d1 = new MockD1Database();
     ctx = baseCtx();
+    await seedStoredResearchRow();
   });
 
   async function list() {
@@ -296,27 +472,31 @@ describe("4241 list route appends the nightly research row (best-effort)", () =>
     return (await res!.json()) as { schedules: Array<Record<string, unknown>> };
   }
 
-  it("appends the nightly research row with its last run when the ledger has a run", async () => {
+  it("shows the stored nightly research row with its last run when the ledger has a run", async () => {
     seedNightlyResearchRun();
     const body = await list();
     const row = body.schedules.find((s) => s.id === "nightly-research");
     expect(row).toBeDefined();
     expect(row?.kind).toBe("internal");
-    expect(row?.callback).toBe("nightly-research");
-    expect(row?.cron).toBe("0 21 * * 1-5");
-    expect(row?.state).toBe("active");
+    expect(row?.callback).toBe("runResearchSchedule");
+    expect(row?.cron).toBeUndefined();
+    expect(row?.intervalSeconds).toBe(MONTHLY_SECONDS);
+    expect(row?.state).toBe("paused");
     expect(row?.lastRunAt).toBe(RUN_STARTED);
     expect(row?.lastRunOutcome).toBe("success");
   });
 
-  it("appends the row with no last run when the duty has never fired", async () => {
+  it("shows the stored row with no last run when the duty has never fired", async () => {
     const body = await list();
     const row = body.schedules.find((s) => s.id === "nightly-research");
     expect(row).toBeDefined();
     expect(row?.lastRunAt).toBeUndefined();
   });
 
-  it("omits the row (list still 200) when the ledger read throws", async () => {
+  it("keeps the stored row without a last run (list still 200) when the ledger read throws", async () => {
+    // The ledger read fails but the unified-store list still works:
+    // only job_run_records queries throw. The stored row renders
+    // without its last run — a ledger failure never drops a row.
     const ledgerDownSql = {
       exec: (query: string, ...params: unknown[]) => {
         if (query.includes("job_run_records")) throw new Error("sql down");
@@ -330,7 +510,9 @@ describe("4241 list route appends the nightly research row (best-effort)", () =>
     const res = await handleSchedulesRoutes(req, new URL(req.url), "/api/schedules", "sess", throwing);
     expect(res?.status).toBe(200);
     const body = (await res!.json()) as { schedules: Array<Record<string, unknown>> };
-    expect(body.schedules.find((s) => s.id === "nightly-research")).toBeUndefined();
+    const row = body.schedules.find((s) => s.id === "nightly-research");
+    expect(row).toBeDefined();
+    expect(row?.lastRunAt).toBeUndefined();
   });
 });
 
@@ -391,11 +573,14 @@ describe("4241 runs routes join the nightly research record to its ledger rows",
   });
 });
 
-describe("4241 detail route answers the derived nightly research record", () => {
-  it("GET /api/schedules/nightly-research returns the derived detail, not 404", async () => {
+describe("4241 detail route answers the stored nightly research record", () => {
+  it("GET /api/schedules/nightly-research returns the stored detail, not 404", async () => {
     const sql = new SqliteTestStorage();
+    const d1 = new MockD1Database();
+    const store = createD1UnifiedSchedulePorts({ d1: d1 as never }).unifiedSchedules;
+    await store.save(storedResearchRecord("active"));
     const ctx = {
-      env: {},
+      env: { AGENT_DB: d1 },
       agentCtx: { storage: { sql: sql.sql as never } } as never,
       audit: vi.fn(),
       listSchedules: vi.fn(async () => []),
@@ -423,7 +608,7 @@ describe("4241 detail route answers the derived nightly research record", () => 
     const data = (await res?.json()) as any;
     const detail = data.schedule ?? data;
     expect(detail.id).toBe("nightly-research");
-    expect(detail.callback).toBe("nightly-research");
+    expect(detail.callback).toBe("runResearchSchedule");
   });
 });
 

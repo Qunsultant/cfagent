@@ -71,6 +71,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import { DatabaseORM } from "../src/orm";
+import { MockD1Database } from "./mock-d1";
 import { MockSqlStorage } from "./mock-sql";
 
 vi.mock("../src/agents/nlq", async (importOriginal) => {
@@ -118,7 +119,10 @@ const routeCtx = (overrides: Record<string, any> = {}): McpChatNlqRouteContext =
   ({
     getOrm: () => ({}) as any,
     getStorageSql: () => ({}),
-    env: {},
+    // #6503 — the /nlq route builds the agent-schedule capability
+    // deps over the D1 unified store (fail-closed without AGENT_DB:
+    // 500), same as tests/mcp_chat_nlq_routes_extraction.test.ts.
+    env: { AGENT_DB: new MockD1Database() },
     audit: vi.fn(),
     submitAsyncJob: vi.fn(async () => ({ jobId: "j1", status: "queued" as const, statusUrl: "/jobs/j1" })),
     getAsyncJob: vi.fn(() => undefined),
@@ -153,7 +157,10 @@ const toolCtx = (overrides: Record<string, any> = {}) => {
     sql,
     orm,
     audit,
-    ctx: { env: {}, orm, sessionId: "sess-1", audit, ...overrides } as any,
+    // #6503 — the async-job nlq.execute path builds the
+    // agent-schedule capability over the D1 unified store
+    // (fail-closed without AGENT_DB).
+    ctx: { env: { AGENT_DB: new MockD1Database() }, orm, sessionId: "sess-1", audit, ...overrides } as any,
   };
 };
 
@@ -426,8 +433,12 @@ describe("async job nlq.execute: rest vs mcp port contract", () => {
     }
   }
 
-  const jobCtx = (sql: FakeJobSql, audit: any, env: any = {}) =>
+  const jobCtx = (sql: FakeJobSql, audit: any, env: any = { AGENT_DB: new MockD1Database() }) =>
     ({
+      // #6503 — the rest-mode nlq.execute path builds the
+      // agent-schedule capability over the D1 unified store
+      // (fail-closed without AGENT_DB, so the job never reaches
+      // the NLQ function); the mcp-direct path does not.
       env,
       agentCtx: { storage: { sql } } as any,
       ensureTables: () => sql,

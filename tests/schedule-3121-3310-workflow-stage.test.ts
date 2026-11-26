@@ -725,7 +725,11 @@ describe("3310-E executor: workflow-stage actions through the stages adapter", (
     expect(triggered.ok).toBe(true);
     expect(h.runs).toHaveLength(1);
     expect(h.runs[0]?.callback).toBe("runWorkflowStage");
-    expect(h.runs[0]?.payload).toMatchObject({ jobId: "two-child", nodePath: "0", trigger: "manual", scheduleId });
+    // Issue #6503 step 1 — the deliberate dispatch-mode vocabulary
+    // change: a manual trigger stamps "triggered", not "manual"
+    // (JobRunTrigger is manual|scheduled; the triggered dispatch
+    // mode is "triggered"). The pin moves with the vocabulary.
+    expect(h.runs[0]?.payload).toMatchObject({ jobId: "two-child", nodePath: "0", trigger: "triggered", scheduleId });
     const deleted = await executeAgentScheduleAction(deps as never, {
       action: "delete",
       kind: "workflow-stage",
@@ -770,7 +774,9 @@ describe("3310-M the one management service serves the workflow-stage kind", () 
     expect(resumed.id).toBe(created.id);
     expect(h.alarms.size).toBe(1);
     await h.adapter.trigger!(created.id);
-    expect(h.runs[0]?.payload).toMatchObject({ jobId: "two-child", nodePath: "0", trigger: "manual", scheduleId: created.id });
+    // Issue #6503 step 1 — "triggered", not "manual": the deliberate
+    // dispatch-mode vocabulary change (see the E6 pin above).
+    expect(h.runs[0]?.payload).toMatchObject({ jobId: "two-child", nodePath: "0", trigger: "triggered", scheduleId: created.id });
     const cancelled = await h.adapter.cancel(created.id);
     expect(cancelled).toBe(true);
     expect(await h.store.get(created.id)).toBeUndefined();

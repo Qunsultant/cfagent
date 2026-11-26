@@ -439,9 +439,19 @@ const ORCH = "agents/orchestrator.ts";
  *  #6102 (mas_events D1 replacement) makes recordAudit async via the
  *  audit event port + the waitUntil fire-and-forget in audit() —
  *  measured 4,125 lines / 190,149 B on the rebased tree, so budget
- *  lines rise to 4140 and bytes rise to 190_700. */
-const BUDGET_LINES = 4140;
-const BUDGET_BYTES = 190_700;
+ *  lines rise to 4140 and bytes rise to 190_700.
+ *  #6503 (no-derived consolidation) moves the executor-deps build to
+ *  the extracted module (agentScheduleExecutor.ts, D1 store +
+ *  start-paused wiring) and retires the scheduled-tick route —
+ *  measured 4,140 lines / 191,508 B on the rebased tree, so budget
+ *  lines rise to 4150 and bytes rise to 192_000, which keeps headroom
+ *  for the next delegating wrapper.
+ *  #3122 (agentic loop safeguards, landed on main after the #6503
+ *  rebase) adds the loop state + turn queue + run-ID mint to the
+ *  class — measured 4,160 lines / 192,343 B on the rebased tree, so
+ *  budget lines rise to 4170 and bytes rise to 192_900. */
+const BUDGET_LINES = 4170;
+const BUDGET_BYTES = 192_900;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;

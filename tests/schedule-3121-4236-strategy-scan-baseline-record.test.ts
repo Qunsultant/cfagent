@@ -47,7 +47,8 @@ vi.mock("agents", () => {
 });
 
 import { OrchestratorAgent } from "../src/agents/orchestrator";
-import { SqlUnifiedScheduleStore } from "../src/data/doSqliteUnifiedScheduleAdapter";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { MockD1Database } from "./mock-d1";
 import {
   STRATEGY_SCAN_BASELINE_ORIGIN,
   strategyScanBaselineToRecord,
@@ -156,7 +157,10 @@ describe("ensureStrategyScanSchedule saves the baseline record (#4236)", () => {
     sql = new MockSqlStorage();
     agent = Object.create(OrchestratorAgent.prototype);
     agent.ctx = { storage: { sql }, id: { toString: () => "strategy-scan-test" } };
-    agent.env = {};
+    // #6503 — the arm/adopt path saves the baseline record in the
+    // D1 unified store (resolved from env.AGENT_DB); the DO store
+    // this file used to read back from is retired.
+    agent.env = { AGENT_DB: new MockD1Database() };
     agent.listSchedules = async () => existing;
     agent.schedule = async (when: any, callback: string, payload: any, options: any) => {
       scheduleCalls.push([when, callback, payload, options]);
@@ -191,11 +195,16 @@ describe("ensureStrategyScanSchedule saves the baseline record (#4236)", () => {
     });
   });
 
+  /** The D1 unified store the arm/adopt path writes. */
+  function d1Store() {
+    return createD1UnifiedSchedulePorts({ d1: agent.env.AGENT_DB as never }).unifiedSchedules;
+  }
+
   it("saves a screen record for the armed alarm, origin named", async () => {
     await agent.ensureStrategyScanSchedule({ userLogin: "venus", environment: "PROD" });
     expect(scheduleCalls).toHaveLength(1);
-    const store = new SqlUnifiedScheduleStore(sql as any);
-    const record = store.get("scan-1");
+    const store = d1Store();
+    const record = await store.get("scan-1");
     expect(record).toBeDefined();
     expect(record?.kind).toBe("screen");
     expect(record?.state).toBe("active");
@@ -217,7 +226,7 @@ describe("ensureStrategyScanSchedule saves the baseline record (#4236)", () => {
       }),
     );
     // The record is the list's record: the merged list shows it active.
-    expect(store.listByState("active").some((r) => r.id === "scan-1")).toBe(true);
+    expect((await store.listByState("active")).some((r) => r.id === "scan-1")).toBe(true);
   });
 
   it("adopts an already-armed baseline into the store without re-arming", async () => {
@@ -230,8 +239,8 @@ describe("ensureStrategyScanSchedule saves the baseline record (#4236)", () => {
     ];
     await agent.ensureStrategyScanSchedule({ userLogin: "venus", environment: "PROD" });
     expect(scheduleCalls).toHaveLength(0);
-    const store = new SqlUnifiedScheduleStore(sql as any);
-    const record = store.get("x");
+    const store = d1Store();
+    const record = await store.get("x");
     expect(record).toBeDefined();
     expect(record?.kind).toBe("screen");
     expect(record?.state).toBe("active");
@@ -251,8 +260,8 @@ describe("ensureStrategyScanSchedule saves the baseline record (#4236)", () => {
         payload: { userLogin: "venus", environment: "PROD", universe: "NASDAQ100", trigger: "scheduled" },
       },
     ];
-    const store = new SqlUnifiedScheduleStore(sql as any);
-    store.save({
+    const store = d1Store();
+    await store.save({
       id: "x",
       kind: "screen",
       state: "active",
@@ -269,12 +278,12 @@ describe("ensureStrategyScanSchedule saves the baseline record (#4236)", () => {
     });
     await agent.ensureStrategyScanSchedule({ userLogin: "venus", environment: "PROD" });
     expect(scheduleCalls).toHaveLength(0);
-    expect(store.get("x")?.createdAt).toBe("2026-11-01T00:00:00.000Z");
+    expect((await store.get("x"))?.createdAt).toBe("2026-11-01T00:00:00.000Z");
   });
 
   it("a paused baseline still blocks re-arming and keeps its paused record", async () => {
-    const store = new SqlUnifiedScheduleStore(sql as any);
-    store.save({
+    const store = d1Store();
+    await store.save({
       id: "paused-scan",
       kind: "screen",
       state: "paused",
@@ -292,10 +301,15 @@ describe("ensureStrategyScanSchedule saves the baseline record (#4236)", () => {
     });
     await agent.ensureStrategyScanSchedule({ userLogin: "venus", environment: "PROD" });
     expect(scheduleCalls).toHaveLength(0);
-    expect(store.get("paused-scan")?.state).toBe("paused");
+    expect((await store.get("paused-scan"))?.state).toBe("paused");
   });
 
   it("arming still succeeds when the unified store is unavailable", async () => {
+    // #6503 — the unavailable leg is an unbound AGENT_DB now (the
+    // store resolves to null, best-effort); the throwing DO sql
+    // below is the old shape of "unavailable" and no longer the
+    // seam the arm reads.
+    agent.env = {};
     agent.ctx = {
       storage: {
         sql: {

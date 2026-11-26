@@ -32,8 +32,9 @@ import {
   updateUnifiedSchedule,
 } from "../src/services/unifiedScheduleManagement";
 import { InMemoryUnifiedScheduleStore } from "../src/data/inMemoryUnifiedScheduleAdapter";
-import { SqlUnifiedScheduleStore } from "../src/data/doSqliteUnifiedScheduleAdapter";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import {
   TickerAgent,
   TICKER_PUSH_INTERVAL_SECONDS,
@@ -66,10 +67,14 @@ class FakeConnection {
  * ticker-test idiom (tests/ticker_idle_cancel_2443.test.ts): the
  * methods under test touch only overridable scheduler/connection
  * methods plus the defensive store seam (agent.ctx) — never a real DO.
+ *
+ * Issue #6503 — the feed record lives in D1 now (the
+ * tickerScheduleStore is the D1 port over env.AGENT_DB), so the
+ * agent takes a MockD1Database; reads go through the D1 port too.
  */
-function bareAgent(sql?: MockSqlStorage): any {
+function bareAgent(sql?: MockSqlStorage, mockD1?: MockD1Database): any {
   const agent = Object.create(TickerAgent.prototype);
-  agent.env = {};
+  agent.env = mockD1 ? { AGENT_DB: mockD1 } : {};
   if (sql) agent.ctx = { storage: { sql } };
   agent.scheduleEvery = async (secs: number, cb: string) => {
     return { id: "sched-1", callback: cb };
@@ -84,6 +89,12 @@ function tickerRecord(): UnifiedScheduleRecord {
     { intervalSeconds: 3000, armed: true, lastPushAt: "2026-11-12T14:00:00.000Z" },
     "2026-11-12T14:00:00.000Z",
   );
+}
+
+/** Issue #6503 — read the ticker-push record from the D1 store. */
+async function d1TickerRecord(mockD1: MockD1Database) {
+  const store = createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules;
+  return store.get("ticker-push");
 }
 
 describe("4237 kind + record shape", () => {
@@ -227,10 +238,11 @@ describe("4237 list item (Schedules home row)", () => {
 describe("4237 TickerAgent records its own feed (best-effort, never breaks the feed)", () => {
   it("onStart with listeners arms and records the push (armed, alarm id, interval)", async () => {
     const sql = new MockSqlStorage();
-    const agent = bareAgent(sql);
+    const mockD1 = new MockD1Database();
+    const agent = bareAgent(sql, mockD1);
     agent.getConnections = () => [new FakeConnection("conn-1")];
     await agent.onStart();
-    const stored = new SqlUnifiedScheduleStore(sql as any).get("ticker-push");
+    const stored = await d1TickerRecord(mockD1);
     expect(stored?.kind).toBe("ticker-push");
     expect(stored?.state).toBe("active");
     expect((stored?.definition as any).armed).toBe(true);
@@ -240,12 +252,13 @@ describe("4237 TickerAgent records its own feed (best-effort, never breaks the f
 
   it("pushTicks stamps lastPushAt on the record", async () => {
     const sql = new MockSqlStorage();
-    const agent = bareAgent(sql);
+    const mockD1 = new MockD1Database();
+    const agent = bareAgent(sql, mockD1);
     const conn = new FakeConnection("conn-1");
     conn.setState({ symbols: [], expiryMode: "continuity", streamProvenance: "bare" });
     agent.getConnections = () => [conn];
     await agent.pushTicks();
-    const stored = new SqlUnifiedScheduleStore(sql as any).get("ticker-push");
+    const stored = await d1TickerRecord(mockD1);
     expect(stored?.kind).toBe("ticker-push");
     expect(typeof (stored?.definition as any).lastPushAt).toBe("string");
     expect((stored?.definition as any).armed).toBe(true);
@@ -253,11 +266,12 @@ describe("4237 TickerAgent records its own feed (best-effort, never breaks the f
 
   it("last disconnect records the feed as disarmed (idle, not missed)", async () => {
     const sql = new MockSqlStorage();
-    const agent = bareAgent(sql);
+    const mockD1 = new MockD1Database();
+    const agent = bareAgent(sql, mockD1);
     const closing = new FakeConnection("conn-1");
     agent.getConnections = () => [closing];
     await agent.onClose(closing, 1000, "", true);
-    const stored = new SqlUnifiedScheduleStore(sql as any).get("ticker-push");
+    const stored = await d1TickerRecord(mockD1);
     expect(stored?.kind).toBe("ticker-push");
     expect((stored?.definition as any).armed).toBe(false);
   });
@@ -276,7 +290,8 @@ describe("4237 TickerAgent records its own feed (best-effort, never breaks the f
 
   it("exposes the record for the list route's RPC read", async () => {
     const sql = new MockSqlStorage();
-    const agent = bareAgent(sql);
+    const mockD1 = new MockD1Database();
+    const agent = bareAgent(sql, mockD1);
     expect(await agent.getTickerPushRecord()).toBeNull();
     agent.getConnections = () => [new FakeConnection("conn-1")];
     await agent.onStart();
@@ -357,6 +372,7 @@ describe("4237 management refuses the live feed with coded errors", () => {
 describe("4237 list route appends the ticker row (best-effort)", () => {
   let sql: MockSqlStorage;
   let ctx: any;
+  let mockD1: MockD1Database;
 
   function fakeTickerNamespace(record: UnifiedScheduleRecord | null, throwing = false) {
     return {
@@ -372,8 +388,13 @@ describe("4237 list route appends the ticker row (best-effort)", () => {
 
   beforeEach(() => {
     sql = new MockSqlStorage();
+    // Issue #6503 — the list route reads the D1 store only: bind a
+    // MockD1Database as AGENT_DB (the step-7 fixture pattern), or
+    // the fail-closed factory throws 500 on every list call. The
+    // ticker binding rides alongside it where the test provides one.
+    mockD1 = new MockD1Database();
     ctx = {
-      env: {},
+      env: { AGENT_DB: mockD1 },
       agentCtx: { storage: { sql } },
       audit: vi.fn(),
       listSchedules: async () => [],
@@ -399,6 +420,7 @@ describe("4237 list route appends the ticker row (best-effort)", () => {
   it("appends the ticker-push row with health when the ticker answers", async () => {
     const lastPushAt = new Date().toISOString();
     ctx.env = {
+      AGENT_DB: mockD1,
       TICKER_AGENT: fakeTickerNamespace(
         tickerPushScheduleToRecord(
           { intervalSeconds: 3000, armed: true, lastPushAt },
@@ -417,7 +439,7 @@ describe("4237 list route appends the ticker row (best-effort)", () => {
   });
 
   it("omits the row (list still 200) when the ticker RPC throws", async () => {
-    ctx.env = { TICKER_AGENT: fakeTickerNamespace(null, true) };
+    ctx.env = { AGENT_DB: mockD1, TICKER_AGENT: fakeTickerNamespace(null, true) };
     const body = await list();
     expect(body.schedules.find((s) => s.id === "ticker-push")).toBeUndefined();
   });

@@ -48,6 +48,8 @@ vi.mock("../src/orchestrate", () => ({
 }));
 
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 
 function makeCtx(initialGoals?: any[]) {
   const store = new Map<string, unknown>();
@@ -79,13 +81,53 @@ function makeFakeD1(projectionRows: Array<Record<string, unknown>> = []) {
   const rollups = new Map<string, Record<string, unknown>>();
   const alertState = new Map<string, Record<string, unknown>>();
   const reports = new Map<string, Record<string, unknown>>();
+  /**
+   * Issue #6503 — the fake also serves the D1 unified-schedules
+   * table the goals tick reads now. The Drizzle adapter issues
+   * `select ... from "unified_schedules"` (read via .all() or
+   * .raw()) and `insert ... on conflict("id") do update` upserts
+   * (via .run()); the map below is that table. Migration
+   * statements hit the default run() success leg — the table is
+   * created `IF NOT EXISTS` and the fake never persists DDL.
+   */
+  const schedules = new Map<string, Record<string, unknown>>();
+  const SCHEDULE_COLS = [
+    "id", "kind", "state", "callback", "operation", "definition_json",
+    "owner_login", "provenance_json", "alarm_id", "paused_at",
+    "created_at", "updated_at",
+  ];
+  function scheduleRows(sql: string, params: unknown[]) {
+    let rows = [...schedules.values()];
+    if (/"kind" = \?/i.test(sql)) rows = rows.filter((r) => r.kind === params[0]);
+    else if (/"id" = \?/i.test(sql)) rows = rows.filter((r) => r.id === params[0]);
+    else if (/"state" = \?/i.test(sql)) rows = rows.filter((r) => r.state === params[0]);
+    rows.sort(
+      (a, b) =>
+        String(a.created_at).localeCompare(String(b.created_at)) ||
+        String(a.id).localeCompare(String(b.id)),
+    );
+    return rows;
+  }
   const db = {
     prepare(sql: string) {
       return {
         bind(...params: unknown[]) {
           return {
             run: async () => {
-              if (/insert into "resource_daily_rollups"/i.test(sql)) {
+              if (/insert into "unified_schedules"/i.test(sql)) {
+                const row: Record<string, unknown> = {};
+                SCHEDULE_COLS.forEach((col, i) => {
+                  row[col] = params[i];
+                });
+                schedules.set(String(row.id), row);
+              } else if (/delete from "unified_schedules"/i.test(sql)) {
+                if (/"id" = \?/i.test(sql)) schedules.delete(String(params[0]));
+                else if (/"state" = \?/i.test(sql)) {
+                  for (const [k, v] of [...schedules]) {
+                    if (v.state === params[0]) schedules.delete(k);
+                  }
+                } else schedules.clear();
+              } else if (/insert into "resource_daily_rollups"/i.test(sql)) {
                 const [day, ns, op, caller, trigger, ops, rows_read, rows_written] = params as [
                   string, string, string, string, string, number, number, number,
                 ];
@@ -104,6 +146,9 @@ function makeFakeD1(projectionRows: Array<Record<string, unknown>> = []) {
               return { success: true };
             },
             all: async () => {
+              if (/from "unified_schedules"/i.test(sql)) {
+                return { results: scheduleRows(sql, params) };
+              }
               if (/from "resource_daily_rollups"/i.test(sql) && /max\("day"\)/i.test(sql)) {
                 const days = [...rollups.values()].map((r) => r.day as string);
                 return { results: days.length ? [{ day: days.sort().at(-1) }] : [] };
@@ -128,6 +173,11 @@ function makeFakeD1(projectionRows: Array<Record<string, unknown>> = []) {
               return { results: [] };
             },
             raw: async () => {
+              if (/from "unified_schedules"/i.test(sql)) {
+                return scheduleRows(sql, params).map((r) =>
+                  SCHEDULE_COLS.map((c) => r[c]),
+                );
+              }
               if (/from "resource_daily_rollups"/i.test(sql) && /max\("day"\)/i.test(sql)) {
                 const days = [...rollups.values()].map((r) => r.day as string);
                 return days.length ? [[days.sort().at(-1)]] : [];
@@ -160,7 +210,20 @@ function makeFakeD1(projectionRows: Array<Record<string, unknown>> = []) {
       };
     },
   };
-  return { db, rollups, alertState, reports };
+  return { db, rollups, alertState, reports, schedules };
+}
+
+/**
+ * Issue #6503 — the fixture goal is planted in the D1 schedule
+ * store, not the DO KV "goals" key (which the agent no longer
+ * reads). Planting exactly one goal keeps each tick isolated: an
+ * empty store would re-seed all nine built-in goals.
+ */
+async function plantGoals(db: any, goals: Array<Record<string, unknown>>) {
+  const store = createD1UnifiedSchedulePorts({ d1: db as never }).unifiedSchedules;
+  for (const goal of goals) {
+    await store.save(goalToRecord(goal as never));
+  }
 }
 
 function makeEnv(fakeD1: any, slackUrl?: string) {
@@ -203,7 +266,8 @@ describe("resource.rollup_daily via onCron", () => {
     const { db, rollups } = makeFakeD1([
       { bucket: 0, ns: "sessions", op: "get", caller: "requireAuth", trigger: "user", ops: 100, rows_read: 100, rows_written: 0 },
     ]);
-    const ctx = makeCtx([resourceGoal()]);
+    await plantGoals(db, [resourceGoal()]);
+    const ctx = makeCtx();
     const env = makeEnv(db);
     const agent = new ScheduledAgent(ctx as never, env as never);
     const tick = await agent.onCron(env as never, { halted: false } as never);
@@ -212,14 +276,15 @@ describe("resource.rollup_daily via onCron", () => {
     expect(rollups.size).toBe(1);
     const row = [...rollups.values()][0];
     expect(row).toMatchObject({ day: "2026-10-26", op: "get", ops: 100, rows_read: 100 });
-    const goals = ctx._store.get("goals") as any[];
+    const goals = await agent.listGoals();
     expect(goals[0].lastRun).toBe("2026-10-27T01:30:00.000Z");
   });
 
   it("does not fire at 01:00 UTC (before the scheduled minute)", async () => {
     vi.setSystemTime(new Date("2026-10-27T01:00:00Z"));
     const { db, rollups } = makeFakeD1([]);
-    const ctx = makeCtx([resourceGoal()]);
+    await plantGoals(db, [resourceGoal()]);
+    const ctx = makeCtx();
     const env = makeEnv(db);
     const agent = new ScheduledAgent(ctx as never, env as never);
     const tick = await agent.onCron(env as never, { halted: false } as never);
@@ -229,15 +294,17 @@ describe("resource.rollup_daily via onCron", () => {
 
   it("errors and stays due when AGENT_DB is unbound", async () => {
     vi.setSystemTime(new Date("2026-10-27T01:30:00Z"));
-    const ctx = makeCtx([resourceGoal()]);
+    const ctx = makeCtx();
     const env = makeEnv(undefined);
     delete (env as any).AGENT_DB;
     const agent = new ScheduledAgent(ctx as never, env as never);
     const tick = await agent.onCron(env as never, { halted: false } as never);
-    expect(tick.jobsSkipped).toBe(1);
+    // Issue #6503 — the load itself is fail-closed now: the tick
+    // refuses before any goal is evaluated, so nothing is skipped
+    // (0, not 1) and nothing is created; the error names AGENT_DB.
+    expect(tick.jobsSkipped).toBe(0);
+    expect(tick.jobsCreated).toBe(0);
     expect(tick.errors.join(" ")).toMatch(/AGENT_DB/);
-    const goals = ctx._store.get("goals") as any[];
-    expect(goals[0].lastRun).toBeUndefined();
   });
 });
 
@@ -257,7 +324,8 @@ describe("resource.cap_alert via onCron", () => {
       cron: "0 * * * *",
       operation: "resource.cap_alert",
     });
-    const ctx = makeCtx([goal]);
+    await plantGoals(db, [goal]);
+    const ctx = makeCtx();
     const env = makeEnv(db, "https://hooks.slack.test/services/XXX");
     const agent = new ScheduledAgent(ctx as never, env as never);
 
@@ -275,7 +343,7 @@ describe("resource.cap_alert via onCron", () => {
     await agent.onCron(env as never, { halted: false, resourceSlackPost: post } as never);
     expect(post).toHaveBeenCalledTimes(1);
 
-    const goals = ctx._store.get("goals") as any[];
+    const goals = await agent.listGoals();
     expect(goals[0].lastRun).toBeUndefined();
   });
 
@@ -290,7 +358,8 @@ describe("resource.cap_alert via onCron", () => {
       cron: "0 * * * *",
       operation: "resource.cap_alert",
     });
-    const ctx = makeCtx([goal]);
+    await plantGoals(db, [goal]);
+    const ctx = makeCtx();
     const env = makeEnv(db, "https://hooks.slack.test/services/XXX");
     const agent = new ScheduledAgent(ctx as never, env as never);
     vi.setSystemTime(new Date("2026-10-26T15:00:00Z"));
@@ -314,7 +383,8 @@ describe("resource.dashboard_comparison via onCron", () => {
       cron: "0 2 * * *",
       operation: "resource.dashboard_comparison",
     });
-    const ctx = makeCtx([goal]);
+    await plantGoals(db, [goal]);
+    const ctx = makeCtx();
     const env = makeEnv(db);
     const agent = new ScheduledAgent(ctx as never, env as never);
 
@@ -346,7 +416,8 @@ describe("resource.dashboard_comparison via onCron", () => {
       cron: "0 2 * * *",
       operation: "resource.dashboard_comparison",
     });
-    const ctx = makeCtx([goal]);
+    await plantGoals(db, [goal]);
+    const ctx = makeCtx();
     const env = makeEnv(db);
     const agent = new ScheduledAgent(ctx as never, env as never);
     vi.setSystemTime(new Date("2026-10-27T02:00:00Z"));
@@ -354,7 +425,7 @@ describe("resource.dashboard_comparison via onCron", () => {
     expect(tick.jobsCreated).toBe(0);
     expect(tick.jobsSkipped).toBe(1);
     expect(reports.size).toBe(0);
-    const goals = ctx._store.get("goals") as any[];
+    const goals = await agent.listGoals();
     expect(goals[0].lastRun).toBeUndefined();
   });
 });

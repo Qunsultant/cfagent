@@ -29,9 +29,11 @@
  *  - Bundle route: multi-candidate body normalization (legacy single
  *    `candidate` still works), validation precedes any broker call.
  *  - Routes: /screening/activity + /screening/controls (pause/stage/
- *    flags, changes recorded), and the scheduled tick's Phase 6 steps
- *    (re-selection proposals + weights-v2 job ride the existing tick;
- *    pause skips the #1096 autonomous steps and records the skip).
+ *    flags, changes recorded), and the scheduled research job's Phase 6
+ *    steps (re-selection proposals + weights-v2 job ride the stored
+ *    nightly-research schedule via runScheduledScreeningSteps, called
+ *    from runResearchSchedule after a successful run; pause skips the
+ *    #1096 autonomous steps and records the skip).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -71,6 +73,7 @@ import {
   listScreeningActivity,
   buildScreeningActivityFeed,
 } from "../src/services/screeningActivity";
+import { runScheduledScreeningSteps } from "../src/services/scheduledScreeningSteps";
 import {
   formatDiscoveryDelivery,
   formatGoalScreenDelivery,
@@ -833,8 +836,28 @@ describe("screening activity + controls routes (Phase 6)", () => {
   });
 });
 
-describe("scheduled tick Phase 6 steps (Phase 6)", () => {
+describe("scheduled research Phase 6 steps (Phase 6)", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  // Issue #6503 — the Phase 6 steps rode the retired
+  // POST /research/scheduled-tick route; they now run from the stored
+  // nightly-research schedule's callback via runScheduledScreeningSteps.
+  // These pins exercise the WIRING at the service seam, not the
+  // guards: the strategy-bank guard is forced to fire — its own
+  // fire/no-fire matrix (weekday, 21:00 UTC, durable marker) is pinned
+  // by Phase 3.
+  function stepsDeps(fixture: ReturnType<typeof tickCtx>) {
+    const { ctx, orm, agent } = fixture;
+    return {
+      userLogin: "alice",
+      agent: agent as any,
+      orm: orm as any,
+      readSetting: (key: string) => ctx.readSettingRaw(key),
+      writeSetting: (key: string, value: string) => ctx.writeSetting(key, value),
+      env: ctx.env as Record<string, string | undefined>,
+      now: new Date("2026-10-23T12:00:00Z"),
+    };
+  }
 
   function trackRecordWithEvidence() {
     const ideas = Array.from({ length: 12 }, (_, i) => ({
@@ -895,34 +918,27 @@ describe("scheduled tick Phase 6 steps (Phase 6)", () => {
   }
 
   it("runs re-selection (proposal recorded) and the weights-v2 job on the tick", async () => {
-    (shouldFireResearchTick as any).mockReturnValue({ fire: true, dateKey: "2026-10-23" });
-    const { ctx, orm } = tickCtx(false);
-    const res = await handleScreenerResearchRoutes(
-      req("POST", "/research/scheduled-tick", undefined, { "x-user-login": "alice" }),
-      urlOf("/research/scheduled-tick"), "/research/scheduled-tick", "s1", ctx
-    );
-    expect((res as Response).status).toBe(200);
-    const body = await (res as Response).json();
-    expect(body.screeningSteps?.reselection?.proposals).toBeGreaterThanOrEqual(1);
-    expect(body.screeningSteps?.weightsV2).toBeDefined();
-    const proposals = listReselectionProposals(orm as any, "alice");
+    const fixture = tickCtx(false);
+    const out = await runScheduledScreeningSteps(stepsDeps(fixture));
+    expect(out.screeningSteps?.reselection).toBeDefined();
+    expect(
+      (out.screeningSteps?.reselection as { proposals?: number } | undefined)?.proposals,
+    ).toBeGreaterThanOrEqual(1);
+    expect(out.screeningSteps?.weightsV2).toBeDefined();
+    const proposals = listReselectionProposals(fixture.orm as any, "alice");
     expect(proposals.length).toBeGreaterThanOrEqual(1);
     expect(proposals[0].proposal.governance).toBe("proposal_only_not_promoted");
     expect(proposals[0].proposal.activeSet.map((a) => a.strategy)).toContain("iron_condor");
+    expect(fixture.agent.runDiscoveryIfDue).toHaveBeenCalled();
   });
 
   it("when paused, the tick skips the #1096 autonomous steps and records the skip", async () => {
-    (shouldFireResearchTick as any).mockReturnValue({ fire: true, dateKey: "2026-10-23" });
-    const { ctx, orm, agent } = tickCtx(true);
-    const res = await handleScreenerResearchRoutes(
-      req("POST", "/research/scheduled-tick", undefined, { "x-user-login": "alice" }),
-      urlOf("/research/scheduled-tick"), "/research/scheduled-tick", "s1", ctx
-    );
-    const body = await (res as Response).json();
-    expect(body.screeningPaused).toBe(true);
-    expect(agent.runDiscoveryIfDue).not.toHaveBeenCalled();
-    expect(listReselectionProposals(orm as any, "alice")).toHaveLength(0);
-    const activity = listScreeningActivity(orm as any, "alice");
+    const fixture = tickCtx(true);
+    const out = await runScheduledScreeningSteps(stepsDeps(fixture));
+    expect(out.screeningPaused).toBe(true);
+    expect(fixture.agent.runDiscoveryIfDue).not.toHaveBeenCalled();
+    expect(listReselectionProposals(fixture.orm as any, "alice")).toHaveLength(0);
+    const activity = listScreeningActivity(fixture.orm as any, "alice");
     expect(activity.some((a) => a.kind === "schedule_control" && /paused/i.test(a.summary))).toBe(true);
   });
 });

@@ -9,6 +9,15 @@
  * not break (lastRun stamping, createdAt preservation, removal sync,
  * one scan per flow).
  *
+ * #6503 — the store is D1 now (the DO SqlUnifiedScheduleStore is
+ * retired as a live store): one `store.save` is a single Drizzle
+ * upsert (INSERT ... ON CONFLICT DO UPDATE), not the old DO
+ * DELETE + INSERT pair, so a changed goal costs 1 write exec and
+ * 0 deletes; a removal still costs 1 delete. The counting wrapper
+ * counts D1 statements by shape (kind scan / upsert / delete) and
+ * the pins below are re-pinned to that shape — the dirty-check
+ * behavior (only changed goals are written) is unchanged.
+ *
  * - 4205-P01 tick writes nothing when nothing changed: a tick over
  *   not-due goals costs one scan and zero write execs.
  * - 4205-P02 tick writes only the changed goal: a due goal fires and
@@ -27,7 +36,6 @@
  *   is a change.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { DatabaseSync } from "node:sqlite";
 
 vi.mock("agents", () => ({
   routeAgentRequest: async () => null,
@@ -72,43 +80,31 @@ vi.mock("../src/security/etradeOAuth", () => ({
   isTokenExpiredEt: vi.fn(() => false),
 }));
 
-import type { SqlStorage } from "../src/orm";
-import { SqlUnifiedScheduleStore } from "../src/data/doSqliteUnifiedScheduleAdapter";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import {
   goalToRecord,
   isUnchangedGoalRecord,
 } from "../src/services/unifiedScheduleManagement";
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
 
-/** node:sqlite double for the SqlStorage seam (same shape as #2964). */
-class SqliteTestStorage {
-  readonly sqlite = new DatabaseSync(":memory:");
-  get sql(): SqliteTestStorage {
-    return this;
-  }
-  exec(query: string, ...params: unknown[]): unknown[] {
-    const stmt = this.sqlite.prepare(query);
-    if (/^\s*(SELECT|PRAGMA)/i.test(query)) {
-      return stmt.all(...(params as never[])) as unknown[];
-    }
-    stmt.run(...(params as never[]));
-    return [];
-  }
-}
-
 /**
- * Counting wrapper: kind scans plus the write execs a save costs.
- * One `store.save` is a DELETE + INSERT pair (2 write execs); a
- * removal-sync delete is 1 delete with no insert.
+ * Counting wrapper over MockD1: kind scans plus the write execs a
+ * save costs, counted by D1 statement shape (verified against the
+ * adapter's Drizzle SQL: listByKind is `select ... from
+ * "unified_schedules" where "kind" = ?`; save is a single `insert
+ * into "unified_schedules" ... on conflict ... do update`; remove
+ * is `delete from "unified_schedules" where "id" = ?`). One
+ * `store.save` is ONE upsert (1 write exec, 0 deletes); a
+ * removal-sync delete is 1 delete with no insert. Migration
+ * statements (CREATE / _migrations markers / the 0092 seed INSERT
+ * OR IGNORE with a bare table name) match none of these shapes.
  */
-class CountingStorage implements SqlStorage {
+class CountingD1 {
   kindScan = 0;
   deletes = 0;
   inserts = 0;
-  constructor(private inner: SqliteTestStorage) {}
-  get sqlite(): DatabaseSync {
-    return this.inner.sqlite;
-  }
+  constructor(private inner: MockD1Database) {}
   get writeExecs(): number {
     return this.deletes + this.inserts;
   }
@@ -117,12 +113,44 @@ class CountingStorage implements SqlStorage {
     this.deletes = 0;
     this.inserts = 0;
   }
-  exec(query: string, ...params: unknown[]): unknown[] {
-    const q = query.replace(/\s+/g, " ");
-    if (/SELECT \* FROM unified_schedules WHERE kind/.test(q)) this.kindScan++;
-    else if (/^DELETE FROM unified_schedules WHERE id = \?$/.test(q)) this.deletes++;
-    else if (/^INSERT INTO unified_schedules/.test(q)) this.inserts++;
-    return this.inner.exec(query, ...params);
+  prepare(sql: string) {
+    const stmt = this.inner.prepare(sql);
+    const norm = sql.replace(/\s+/g, " ");
+    const count = () => {
+      if (/^select .* from "unified_schedules" where "unified_schedules"\."kind" = \?/i.test(norm)) {
+        this.kindScan++;
+      } else if (/^insert into "unified_schedules"/i.test(norm)) {
+        this.inserts++;
+      } else if (/^delete from "unified_schedules" where/i.test(norm)) {
+        this.deletes++;
+      }
+    };
+    return {
+      bind: (...params: unknown[]) => {
+        const bound = stmt.bind(...params);
+        return {
+          run: async () => {
+            count();
+            return bound.run();
+          },
+          all: async () => {
+            count();
+            return bound.all();
+          },
+          first: async () => {
+            count();
+            return bound.first();
+          },
+          raw: async () => {
+            count();
+            return bound.raw();
+          },
+        };
+      },
+    };
+  }
+  async batch(statements: any[]) {
+    return this.inner.batch(statements);
   }
 }
 
@@ -136,19 +164,25 @@ function makeEnv() {
   } as any;
 }
 
-/** A SQL-backed agent whose store scans and writes are counted. */
-function makeCountedAgent() {
-  const counting = new CountingStorage(new SqliteTestStorage());
+/** A D1-backed agent whose store scans and writes are counted. */
+async function makeCountedAgent() {
+  const counting = new CountingD1(new MockD1Database());
   const kv = new Map<string, unknown>();
   const ctx = {
     storage: {
       get: async (k: string) => (kv.has(k) ? kv.get(k) : undefined),
       put: async (k: string, v: unknown) => void kv.set(k, v),
-      sql: counting as never,
+      delete: async (k: string) => void kv.delete(k),
     },
   };
-  const agent = new (ScheduledAgent as any)(ctx, makeEnv());
-  const store = new SqlUnifiedScheduleStore(counting as never);
+  const agent = new (ScheduledAgent as any)(ctx, { ...makeEnv(), AGENT_DB: counting as never });
+  const store = createD1UnifiedSchedulePorts({ d1: counting as never }).unifiedSchedules;
+  // #6503 — the first store op lazily ensures the schema and
+  // migration 0092's seeds land (5 system rows + 9 goals); clear
+  // them so the fixtures below are the only rows (same pattern as
+  // the #6503 G3 goals-tick file). The clear runs before any
+  // counting reset, so the ensure's statements never enter the pins.
+  await store.clear();
   return { agent, kv, counting, store };
 }
 
@@ -174,10 +208,10 @@ afterEach(() => {
 
 describe("4205-P01 tick writes nothing when nothing changed", () => {
   it("a tick over not-due goals costs one scan and zero write execs", async () => {
-    const { agent, counting, store } = makeCountedAgent();
+    const { agent, counting, store } = await makeCountedAgent();
     const nowIso = new Date().toISOString();
     for (let i = 0; i < 3; i++) {
-      store.save(goalToRecord(testGoal({ id: `goal-${i}`, lastRun: nowIso }) as any));
+      await store.save(goalToRecord(testGoal({ id: `goal-${i}`, lastRun: nowIso }) as any));
     }
     counting.reset();
     const tick = await agent.onCron();
@@ -195,18 +229,18 @@ describe("4205-P01 tick writes nothing when nothing changed", () => {
 
 describe("4205-P02 tick writes only the changed goal", () => {
   it("a due goal fires and persists its stamp; untouched goals are not re-written", async () => {
-    const { agent, counting, store } = makeCountedAgent();
+    const { agent, counting, store } = await makeCountedAgent();
     const nowIso = new Date().toISOString();
     const createdAt = "2026-11-01T06:00:00.000Z";
     // Due goal with an older stored createdAt: the re-save must keep
     // it, never reshuffle order — and must stamp lastRun.
-    store.save({
+    await store.save({
       ...goalToRecord(testGoal({ id: "due", lastRun: null }) as any),
       createdAt,
       updatedAt: createdAt,
     });
     for (let i = 0; i < 2; i++) {
-      store.save(goalToRecord(testGoal({ id: `quiet-${i}`, lastRun: nowIso }) as any));
+      await store.save(goalToRecord(testGoal({ id: `quiet-${i}`, lastRun: nowIso }) as any));
     }
     counting.reset();
     const tick = await agent.onCron();
@@ -214,31 +248,33 @@ describe("4205-P02 tick writes only the changed goal", () => {
     expect(tick.jobsCreated).toBe(1);
     expect(tick.errors).toEqual([]);
     expect(counting.kindScan).toBe(1);
-    // Exactly one save: the fired goal's DELETE + INSERT pair.
-    expect(counting.writeExecs).toBe(2);
-    expect(counting.deletes).toBe(1);
+    // Exactly one save: the fired goal's single D1 upsert (#6503 —
+    // the DO DELETE + INSERT pair is retired with the DO store).
+    expect(counting.writeExecs).toBe(1);
+    expect(counting.deletes).toBe(0);
     expect(counting.inserts).toBe(1);
     const goals = await agent.listGoals();
     expect(goals.find((g: any) => g.id === "due")?.lastRun).toBe("2026-11-03T06:00:00.000Z");
     expect(goals.find((g: any) => g.id === "quiet-0")?.lastRun).toBe(nowIso);
     expect(goals.find((g: any) => g.id === "quiet-1")?.lastRun).toBe(nowIso);
-    expect(store.listByKind("goal").find((r) => r.id === "due")?.createdAt).toBe(createdAt);
+    expect((await store.listByKind("goal")).find((r) => r.id === "due")?.createdAt).toBe(createdAt);
   });
 });
 
 describe("4205-P03 mutations write only their goal", () => {
   it("setGoalEnabled persists the toggle and writes only that goal", async () => {
-    const { agent, counting, store } = makeCountedAgent();
+    const { agent, counting, store } = await makeCountedAgent();
     const nowIso = new Date().toISOString();
     for (let i = 0; i < 3; i++) {
-      store.save(goalToRecord(testGoal({ id: `goal-${i}`, lastRun: nowIso }) as any));
+      await store.save(goalToRecord(testGoal({ id: `goal-${i}`, lastRun: nowIso }) as any));
     }
     counting.reset();
     const ok = await agent.setGoalEnabled("goal-1", false);
     expect(ok).toBe(true);
     expect(counting.kindScan).toBe(1);
-    expect(counting.writeExecs).toBe(2);
-    expect(counting.deletes).toBe(1);
+    // #6503 — one D1 upsert, not the old DO DELETE + INSERT pair.
+    expect(counting.writeExecs).toBe(1);
+    expect(counting.deletes).toBe(0);
     expect(counting.inserts).toBe(1);
     const goals = await agent.listGoals();
     expect(goals.find((g: any) => g.id === "goal-1")?.enabled).toBe(false);
@@ -246,23 +282,24 @@ describe("4205-P03 mutations write only their goal", () => {
   });
 
   it("addGoal writes only the new goal", async () => {
-    const { agent, counting, store } = makeCountedAgent();
+    const { agent, counting, store } = await makeCountedAgent();
     const nowIso = new Date().toISOString();
-    store.save(goalToRecord(testGoal({ id: "seed-goal", lastRun: nowIso }) as any));
+    await store.save(goalToRecord(testGoal({ id: "seed-goal", lastRun: nowIso }) as any));
     counting.reset();
     const created = await agent.addGoal(testGoal({ id: "added" }));
     expect(created.id).toBe("added");
     expect(counting.kindScan).toBe(1);
-    expect(counting.writeExecs).toBe(2);
-    expect(counting.deletes).toBe(1);
+    // #6503 — one D1 upsert, not the old DO DELETE + INSERT pair.
+    expect(counting.writeExecs).toBe(1);
+    expect(counting.deletes).toBe(0);
     expect(counting.inserts).toBe(1);
   });
 
   it("removeGoal deletes the removed row and writes nothing else", async () => {
-    const { agent, counting, store } = makeCountedAgent();
+    const { agent, counting, store } = await makeCountedAgent();
     const nowIso = new Date().toISOString();
     for (let i = 0; i < 3; i++) {
-      store.save(goalToRecord(testGoal({ id: `goal-${i}`, lastRun: nowIso }) as any));
+      await store.save(goalToRecord(testGoal({ id: `goal-${i}`, lastRun: nowIso }) as any));
     }
     counting.reset();
     const ok = await agent.removeGoal("goal-1");
@@ -271,15 +308,15 @@ describe("4205-P03 mutations write only their goal", () => {
     // Removal sync only: one DELETE, no INSERT for the kept goals.
     expect(counting.deletes).toBe(1);
     expect(counting.inserts).toBe(0);
-    expect(store.listByKind("goal").map((r) => r.id).sort()).toEqual(["goal-0", "goal-2"]);
+    expect((await store.listByKind("goal")).map((r) => r.id).sort()).toEqual(["goal-0", "goal-2"]);
   });
 });
 
 describe("4205-P04 no-snapshot fallback still re-lists, still skips unchanged goals", () => {
   it("saveGoals with no snapshot re-lists, removes the dropped row, and does not re-save the kept goal", async () => {
-    const { agent, counting, store } = makeCountedAgent();
-    store.save(goalToRecord(testGoal({ id: "keep" }) as any));
-    store.save(goalToRecord(testGoal({ id: "drop" }) as any));
+    const { agent, counting, store } = await makeCountedAgent();
+    await store.save(goalToRecord(testGoal({ id: "keep" }) as any));
+    await store.save(goalToRecord(testGoal({ id: "drop" }) as any));
     const goals = await agent.listGoals();
     const kept = goals.filter((g: any) => g.id === "keep");
     counting.reset();
@@ -290,44 +327,45 @@ describe("4205-P04 no-snapshot fallback still re-lists, still skips unchanged go
     expect(counting.deletes).toBe(1);
     // The kept goal is unchanged: no re-save pair.
     expect(counting.inserts).toBe(0);
-    expect(store.listByKind("goal").map((r) => r.id)).toEqual(["keep"]);
+    expect((await store.listByKind("goal")).map((r) => r.id)).toEqual(["keep"]);
   });
 });
 
 describe("4205-P05 trigger saves only the triggered goal", () => {
   it("triggering a goal that fires costs one scan and one save of that goal", async () => {
-    const { agent, counting, store } = makeCountedAgent();
+    const { agent, counting, store } = await makeCountedAgent();
     const nowIso = new Date().toISOString();
-    store.save(goalToRecord(testGoal({ id: "trig-goal", lastRun: null }) as any));
+    await store.save(goalToRecord(testGoal({ id: "trig-goal", lastRun: null }) as any));
     for (let i = 0; i < 2; i++) {
-      store.save(goalToRecord(testGoal({ id: `quiet-${i}`, lastRun: nowIso }) as any));
+      await store.save(goalToRecord(testGoal({ id: `quiet-${i}`, lastRun: nowIso }) as any));
     }
     counting.reset();
     const tick = await agent.triggerGoal("trig-goal");
     expect(tick.jobsCreated).toBe(1);
     expect(tick.errors).toEqual([]);
     expect(counting.kindScan).toBe(1);
-    // The firing trigger stamps the goal (1 pair); quiet goals are
+    // The firing trigger stamps the goal (1 upsert); quiet goals are
     // never saved. (The restore save runs only on the no-job path —
     // jobsCreated === 0 — so a firing trigger has exactly one save.)
-    expect(counting.writeExecs).toBe(2);
-    expect(counting.deletes).toBe(1);
+    // #6503 — one D1 upsert, not the old DO DELETE + INSERT pair.
+    expect(counting.writeExecs).toBe(1);
+    expect(counting.deletes).toBe(0);
     expect(counting.inserts).toBe(1);
     const goals = await agent.listGoals();
     expect(goals.find((g: any) => g.id === "trig-goal")?.lastRun).toBe("2026-11-03T06:00:00.000Z");
   });
 
   it("a second save with the same snapshot still writes after a stamp-then-reset (the trigger restore shape)", async () => {
-    const { agent, counting, store } = makeCountedAgent();
-    store.save(goalToRecord(testGoal({ id: "trig-goal", lastRun: null }) as any));
+    const { agent, counting, store } = await makeCountedAgent();
+    await store.save(goalToRecord(testGoal({ id: "trig-goal", lastRun: null }) as any));
     const { goals, records } = await (agent as any).loadGoalRecords();
     const goal = goals.find((g: any) => g.id === "trig-goal");
     counting.reset();
     // First save stamps the firing (the onCron save inside a trigger).
     goal.lastRun = "2026-11-03T06:00:00.000Z";
     await (agent as any).saveGoals(goals, records);
-    expect(counting.writeExecs).toBe(2);
-    expect(store.listByKind("goal").find((r) => r.id === "trig-goal")?.definition).toMatchObject({
+    expect(counting.writeExecs).toBe(1);
+    expect((await store.listByKind("goal")).find((r) => r.id === "trig-goal")?.definition).toMatchObject({
       lastRun: "2026-11-03T06:00:00.000Z",
     });
     // Restore save resets lastRun: the snapshot the first save
@@ -336,8 +374,9 @@ describe("4205-P05 trigger saves only the triggered goal", () => {
     // would compare equal and the store would keep the stamp.
     goal.lastRun = null;
     await (agent as any).saveGoals(goals, records);
-    expect(counting.writeExecs).toBe(4);
-    expect(counting.deletes).toBe(2);
+    // #6503 — two D1 upserts total, zero deletes (no DO pair).
+    expect(counting.writeExecs).toBe(2);
+    expect(counting.deletes).toBe(0);
     expect(counting.inserts).toBe(2);
     const goalsAfter = await agent.listGoals();
     expect(goalsAfter.find((g: any) => g.id === "trig-goal")?.lastRun).toBeNull();

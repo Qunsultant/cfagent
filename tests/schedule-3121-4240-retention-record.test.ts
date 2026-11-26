@@ -1,22 +1,20 @@
 /**
  * Issue #3121 #4240 — retention pass in the single schedule.
  *
- * The retention duty fires today through the heartbeat due-check
- * (#4234): runRetentionEntryPoint runs daily after 04:00 UTC and
- * records its own ledger row via recordDispatch, but there is no
- * unified-store record and no Schedules home row, so a missed pass
- * is invisible. This slice derives ONE stable record (id retention,
- * kind internal, state active) and appends it to the home list with
- * its last pass joined from the ledger, so the row reads
- * "Last pass: …" with the prune/export summary — or "never" when
- * the duty has never fired.
+ * The retention duty fires today through its stored schedule
+ * (#6503): the six system duties are real stored platform-level
+ * rows (monthly, created paused), fired through their entry
+ * points when the stored schedule fires, and the Schedules home
+ * lists the stored retention row with its last pass joined from
+ * the ledger, so the row reads "Last pass: …" with the
+ * prune/export summary — or "never" when the duty has never
+ * fired. The old derived record (synthesized at read time,
+ * management refused with a coded "derived record" error) is
+ * deleted: the row renders only when stored, and the verbs
+ * operate on the stored row (404 when it is missing).
  *
  * Record-only in the same sense as #4239: no new kind, no new
- * alarm, no new firing mechanism. The record is derived, not
- * stored — there is no alarm to adopt and no steady-state alarm
- * exists (the Worker cron is OFF per #4112). Management ops refuse
- * with a coded error naming the derived record (pause / resume /
- * trigger / update / delete — #5891 retired the delete no-op). The manual trigger stays
+ * alarm, no new firing mechanism. The manual trigger stays
  * on its existing route POST /api/schedules/trigger-retention.
  * The pass-outcome summary is built by the entry point from the
  * route's own response (prune counts, orphan sweep, snapshot
@@ -28,18 +26,20 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import {
   UNIFIED_SCHEDULE_KINDS,
+  type UnifiedScheduleRecord,
 } from "../src/data/unifiedSchedulePorts";
 import {
   RETENTION_RECORD_ID,
   RETENTION_ORIGIN,
-  retentionToRecord,
   retentionRecordToListItem,
   pauseUnifiedSchedule,
   resumeUnifiedSchedule,
   deleteUnifiedSchedule,
   triggerUnifiedSchedule,
   updateUnifiedSchedule,
+  reconcileSystemScheduleRecords,
 } from "../src/services/unifiedScheduleManagement";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import { InMemoryUnifiedScheduleStore } from "../src/data/inMemoryUnifiedScheduleAdapter";
 import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
 import { buildJobRunRecord, scheduleIdToLedgerJobId } from "../src/services/jobRunRecords";
@@ -106,22 +106,119 @@ const RETENTION_BODY = {
   },
 };
 
-describe("4240 derived retention record", () => {
-  it("builds the one stable retention record (id retention, internal, active)", () => {
-    const record = retentionToRecord(NOW);
-    expect(record.id).toBe("retention");
+const MONTHLY_SECONDS = 2_592_000;
+
+/** Minimal D1Database stand-in over node:sqlite (same as the #6503 repro). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: {
+                changes: info.changes,
+                last_row_id: info.lastInsertRowid,
+              },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+  async batch(statements: any[]) {
+    const results: any[] = [];
+    this.sqlite.exec("BEGIN");
+    try {
+      for (const stmt of statements) {
+        results.push(await stmt.run());
+      }
+      this.sqlite.exec("COMMIT");
+    } catch (err) {
+      this.sqlite.exec("ROLLBACK");
+      throw err;
+    }
+    return results;
+  }
+}
+
+/** A stored retention row, as the seed creates it (state set by the test). */
+function storedRetentionRecord(
+  state: "active" | "paused",
+  createdAt = NOW,
+): UnifiedScheduleRecord {
+  return {
+    id: "retention",
+    kind: "internal",
+    state,
+    callback: "retention",
+    definition: {
+      type: "interval",
+      intervalSeconds: MONTHLY_SECONDS,
+      callback: "retention",
+    } as unknown as UnifiedScheduleRecord["definition"],
+    ownerLogin: null,
+    provenance: { origin: "system", createdBy: "system", reason: "retention", createdAt },
+    alarmId: null,
+    pausedAt: state === "paused" ? createdAt : null,
+    createdAt,
+    updatedAt: createdAt,
+  };
+}
+
+function alarmsStub(overrides: Record<string, unknown> = {}): any {
+  return {
+    list: async () => [],
+    get: async () => undefined,
+    cancel: async () => true,
+    arm: async () => ({ id: "new-1", callback: "retention" }),
+    ...overrides,
+  };
+}
+
+describe("4240 stored retention record", () => {
+  it("reconcile seeds the one stable retention record (id retention, internal, paused, monthly)", async () => {
+    const store = new InMemoryUnifiedScheduleStore();
+    const result = await reconcileSystemScheduleRecords(
+      { store, alarms: alarmsStub() },
+      NOW,
+    );
+    expect(result.seeded).toContain("retention");
+    const record = await store.get("retention");
+    expect(record?.id).toBe("retention");
     expect(RETENTION_RECORD_ID).toBe("retention");
-    expect(record.kind).toBe("internal");
-    expect(record.state).toBe("active");
-    expect(record.callback).toBe("retention");
-    expect(record.definition.cron).toBe(RETENTION_DISPATCH_CRON);
-    expect(record.definition.cron).toBe("0 4 * * *");
-    expect(record.definition.entryPoint).toBe("retention");
-    expect(record.provenance.origin).toBe("system");
-    expect(record.provenance.reason).toBe("retention");
+    expect(record?.kind).toBe("internal");
+    expect(record?.state).toBe("paused");
+    expect(record?.callback).toBe("retention");
+    expect(
+      (record?.definition as unknown as Record<string, unknown>).intervalSeconds,
+    ).toBe(MONTHLY_SECONDS);
+    expect(
+      (record?.definition as unknown as Record<string, unknown>).cron,
+    ).toBeUndefined();
+    expect(record?.provenance.origin).toBe("system");
+    expect(record?.provenance.reason).toBe("retention");
     expect(RETENTION_ORIGIN).toBe("retention");
-    expect(record.createdAt).toBe(NOW);
-    expect(record.updatedAt).toBe(NOW);
+    expect(record?.alarmId).toBeNull();
+    expect(record?.createdAt).toBe(NOW);
+    expect(record?.updatedAt).toBe(NOW);
   });
 
   it("adds no new kind to the unified-store union", () => {
@@ -129,18 +226,22 @@ describe("4240 derived retention record", () => {
     expect(UNIFIED_SCHEDULE_KINDS).not.toContain("retention");
   });
 
-  it("preserves createdAt across in-place updates (upsert, not recreate)", () => {
-    const first = retentionToRecord("2026-11-18T06:00:00.000Z");
-    const second = retentionToRecord(NOW, first);
-    expect(second.createdAt).toBe("2026-11-18T06:00:00.000Z");
-    expect(second.updatedAt).toBe(NOW);
-    expect(second.id).toBe(first.id);
+  it("an in-place update preserves createdAt (upsert, not recreate)", async () => {
+    const store = new InMemoryUnifiedScheduleStore();
+    await store.save(storedRetentionRecord("active", "2026-11-18T06:00:00.000Z"));
+    const paused = await pauseUnifiedSchedule({ store, alarms: alarmsStub() }, "retention", NOW);
+    expect(paused.ok).toBe(true);
+    const after = await store.get("retention");
+    expect(after?.createdAt).toBe("2026-11-18T06:00:00.000Z");
+    expect(after?.updatedAt).toBe(NOW);
+    expect(after?.pausedAt).toBe(NOW);
+    expect(after?.id).toBe("retention");
   });
 });
 
 describe("4240 retention list item (Schedules home row)", () => {
   it("carries the last pass joined from the ledger, detail verbatim", () => {
-    const record = retentionToRecord(NOW);
+    const record = storedRetentionRecord("active");
     const item = retentionRecordToListItem(record, {
       started: "2026-11-19T04:00:00.000Z",
       finished: "2026-11-19T04:00:05.000Z",
@@ -150,7 +251,10 @@ describe("4240 retention list item (Schedules home row)", () => {
     expect(item.id).toBe("retention");
     expect(item.kind).toBe("internal");
     expect(item.callback).toBe("retention");
-    expect(item.cron).toBe("0 4 * * *");
+    // The stored row is a monthly interval, not the old daily cron.
+    expect(item.cron).toBeUndefined();
+    expect(item.intervalSeconds).toBe(MONTHLY_SECONDS);
+    expect(item.state).toBe("active");
     expect(item.lastRunAt).toBe("2026-11-19T04:00:00.000Z");
     expect(item.lastRunOutcome).toBe("success");
     expect(item.lastRunDetail).toBe(
@@ -159,7 +263,7 @@ describe("4240 retention list item (Schedules home row)", () => {
   });
 
   it("carries no last run when the duty has never fired", () => {
-    const item = retentionRecordToListItem(retentionToRecord(NOW));
+    const item = retentionRecordToListItem(storedRetentionRecord("paused"));
     expect(item.lastRunAt).toBeUndefined();
     expect(item.lastRunOutcome).toBeUndefined();
     expect(item.lastRunDetail).toBeUndefined();
@@ -225,57 +329,113 @@ describe("4240 home naming + classifier", () => {
   });
 });
 
-describe("4240 management refuses the derived record with coded errors", () => {
-  const alarms: any = {
-    list: async () => [],
-    get: async () => undefined,
-    cancel: async () => true,
-    arm: async () => ({ id: "new-1", callback: "retention" }),
-  };
-
-  it("pause / resume name the derived record instead of arming a foreign alarm", async () => {
+describe("4240 management works on the stored retention record (no derived refusal)", () => {
+  it("pause pauses a stored active retention row", async () => {
     const store = new InMemoryUnifiedScheduleStore();
-    const paused = await pauseUnifiedSchedule({ store, alarms }, "retention", NOW);
-    expect(paused.ok).toBe(false);
-    if (!paused.ok) {
-      expect(paused.status).toBe(400);
-      expect(paused.error).toContain("retention");
+    await store.save(storedRetentionRecord("active"));
+    const paused = await pauseUnifiedSchedule({ store, alarms: alarmsStub() }, "retention", NOW);
+    expect(paused.ok).toBe(true);
+    if (paused.ok) {
+      expect(paused.record.state).toBe("paused");
+      expect(paused.record.id).toBe("retention");
     }
-    const resumed = await resumeUnifiedSchedule({ store, alarms }, "retention", NOW);
-    expect(resumed.ok).toBe(false);
-    if (!resumed.ok) {
-      expect(resumed.status).toBe(400);
-      expect(resumed.error).toContain("retention");
+    expect((await store.get("retention"))?.state).toBe("paused");
+  });
+
+  it("resume re-arms a stored paused retention row from its own monthly timing", async () => {
+    const store = new InMemoryUnifiedScheduleStore();
+    await store.save(storedRetentionRecord("paused"));
+    const arm = vi.fn(async () => ({ id: "alarm-9", callback: "retention" }));
+    const resumed = await resumeUnifiedSchedule(
+      { store, alarms: alarmsStub({ arm }) },
+      "retention",
+      NOW,
+    );
+    expect(resumed.ok).toBe(true);
+    if (resumed.ok) {
+      expect(resumed.record.state).toBe("active");
+      expect(resumed.record.alarmId).toBe("alarm-9");
+    }
+    expect(arm).toHaveBeenCalledTimes(1);
+    const [timing] = arm.mock.calls[0] as unknown as Array<Record<string, unknown>>;
+    expect(timing).toEqual({ type: "interval", intervalSeconds: MONTHLY_SECONDS });
+  });
+
+  it("trigger runs a stored active retention row and stamps triggered, not manual", async () => {
+    const store = new InMemoryUnifiedScheduleStore();
+    await store.save({ ...storedRetentionRecord("active"), alarmId: "alarm-1" });
+    const seen: Array<{ callback: string; payload: unknown }> = [];
+    const triggered = await triggerUnifiedSchedule(
+      {
+        store,
+        alarms: alarmsStub({
+          get: async () => ({ id: "alarm-1", callback: "retention", payload: {} }),
+        }),
+      },
+      "retention",
+      async (callback: string, payload: unknown) => {
+        seen.push({ callback, payload });
+      },
+    );
+    expect(triggered.ok).toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].callback).toBe("retention");
+    expect((seen[0].payload as Record<string, unknown>).trigger).toBe("triggered");
+  });
+
+  it("update re-times a stored paused retention row without an alarm", async () => {
+    const store = new InMemoryUnifiedScheduleStore();
+    await store.save(storedRetentionRecord("paused"));
+    const updated = await updateUnifiedSchedule(
+      { store, alarms: alarmsStub() },
+      "retention",
+      { intervalSeconds: MONTHLY_SECONDS * 2 },
+      Date.parse(NOW),
+    );
+    expect(updated.ok).toBe(true);
+    if (updated.ok) {
+      expect(updated.record.state).toBe("paused");
+      const def = updated.record.definition as unknown as Record<string, unknown>;
+      expect(def.intervalSeconds).toBe(MONTHLY_SECONDS * 2);
+      expect(updated.record.createdAt).toBe(NOW);
     }
   });
 
-  it("trigger / update name the derived record (not the goal surface)", async () => {
+  it("delete removes a stored retention row and it stays gone", async () => {
     const store = new InMemoryUnifiedScheduleStore();
-    const triggered = await triggerUnifiedSchedule({ store, alarms }, "retention", async () => {});
-    expect(triggered.ok).toBe(false);
-    if (!triggered.ok) {
-      expect(triggered.status).toBe(400);
-      expect(triggered.error).toContain("retention");
-      expect(triggered.error).not.toContain("Goal schedules");
-    }
-    const updated = await updateUnifiedSchedule({ store, alarms }, "retention", { cron: "0 5 * * *" }, Date.now());
-    expect(updated.ok).toBe(false);
-    if (!updated.ok) {
-      expect(updated.status).toBe(400);
-      expect(updated.error).toContain("retention");
-      expect(updated.error).not.toContain("Goal schedules");
-    }
+    await store.save(storedRetentionRecord("paused"));
+    const deleted = await deleteUnifiedSchedule(
+      { store, alarms: alarmsStub() },
+      "retention",
+    );
+    expect(deleted.ok).toBe(true);
+    if (deleted.ok) expect(deleted.cancelled).toBe(true);
+    expect(await store.get("retention")).toBeUndefined();
   });
 
-  it("delete refuses the derived record with a named error (#5891)", async () => {
+  it("a missing retention row 404s every verb, never a derived refusal", async () => {
     const store = new InMemoryUnifiedScheduleStore();
-    const deleted = await deleteUnifiedSchedule({ store, alarms }, "retention");
-    expect(deleted.ok).toBe(false);
-    if (!deleted.ok) {
-      expect(deleted.status).toBe(400);
-      expect(deleted.error).toContain("retention");
-      expect(deleted.error).toContain("derived record");
-      expect(deleted.error).not.toContain("Goal schedules");
+    // The strict alarms port: cancelling an unknown id is false
+    // (nothing was there), like the real port's contract.
+    const deps = { store, alarms: alarmsStub({ cancel: async () => false }) };
+    const cases: Array<{ result: Awaited<ReturnType<typeof pauseUnifiedSchedule>>; message: string }> = [
+      { result: await pauseUnifiedSchedule(deps, "retention", NOW), message: "not found" },
+      { result: await resumeUnifiedSchedule(deps, "retention", NOW), message: "is not paused" },
+      { result: await deleteUnifiedSchedule(deps, "retention"), message: "not found" },
+      { result: await triggerUnifiedSchedule(deps, "retention", async () => {}), message: "not found" },
+      {
+        result: await updateUnifiedSchedule(deps, "retention", { intervalSeconds: MONTHLY_SECONDS }, Date.parse(NOW)),
+        message: "not found",
+      },
+    ];
+    for (const { result, message } of cases) {
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.status).toBe(404);
+        expect(result.error).toContain("retention");
+        expect(result.error).toContain(message);
+        expect(result.error).not.toContain("derived");
+      }
     }
   });
 });
@@ -341,13 +501,14 @@ describe("4240 entry point records the pass summary in the dispatch detail", () 
   });
 });
 
-describe("4240 list route appends the retention row (best-effort)", () => {
+describe("4240 list route reads the stored retention row (no synthesis)", () => {
   let sql: SqliteTestStorage;
   let ctx: SchedulesRouteContext;
+  let d1: MockD1Database;
 
   function baseCtx(overrides: Partial<SchedulesRouteContext> = {}): SchedulesRouteContext {
     return {
-      env: {},
+      env: { AGENT_DB: d1 },
       agentCtx: { storage: { sql: sql.sql as never } } as never,
       audit: vi.fn(),
       listSchedules: vi.fn(async () => []),
@@ -382,9 +543,20 @@ describe("4240 list route appends the retention row (best-effort)", () => {
     );
   }
 
-  beforeEach(() => {
+  /** The stored retention row the list renders (D1 only, #6503 fail-closed). */
+  async function seedStoredRetentionRow() {
+    const store = createD1UnifiedSchedulePorts({ d1: d1 as never }).unifiedSchedules;
+    // Paused: the seed default — and the list renders a stored row
+    // from the store only when paused (an active row renders
+    // through its live alarm, which this fixture has none of).
+    await store.save(storedRetentionRecord("paused"));
+  }
+
+  beforeEach(async () => {
     sql = new SqliteTestStorage();
+    d1 = new MockD1Database();
     ctx = baseCtx();
+    await seedStoredRetentionRow();
   });
 
   async function list() {
@@ -394,15 +566,16 @@ describe("4240 list route appends the retention row (best-effort)", () => {
     return (await res!.json()) as { schedules: Array<Record<string, unknown>> };
   }
 
-  it("appends the retention row with its last pass when the ledger has a run", async () => {
+  it("shows the stored retention row with its last pass when the ledger has a run", async () => {
     seedRetentionRun();
     const body = await list();
     const row = body.schedules.find((s) => s.id === "retention");
     expect(row).toBeDefined();
     expect(row?.kind).toBe("internal");
     expect(row?.callback).toBe("retention");
-    expect(row?.cron).toBe("0 4 * * *");
-    expect(row?.state).toBe("active");
+    expect(row?.cron).toBeUndefined();
+    expect(row?.intervalSeconds).toBe(MONTHLY_SECONDS);
+    expect(row?.state).toBe("paused");
     expect(row?.lastRunAt).toBe("2026-11-19T04:00:00.000Z");
     expect(row?.lastRunOutcome).toBe("success");
     expect(row?.lastRunDetail).toBe(
@@ -410,14 +583,17 @@ describe("4240 list route appends the retention row (best-effort)", () => {
     );
   });
 
-  it("appends the row with no last run when the duty has never fired", async () => {
+  it("shows the stored row with no last run when the duty has never fired", async () => {
     const body = await list();
     const row = body.schedules.find((s) => s.id === "retention");
     expect(row).toBeDefined();
     expect(row?.lastRunAt).toBeUndefined();
   });
 
-  it("omits the row (list still 200) when the ledger read throws", async () => {
+  it("keeps the stored row without a last run (list still 200) when the ledger read throws", async () => {
+    // The ledger read fails but the unified-store list still works:
+    // only job_run_records queries throw. The stored row renders
+    // without its last run — a ledger failure never drops a row.
     const ledgerDownSql = {
       exec: (query: string, ...params: unknown[]) => {
         if (query.includes("job_run_records")) throw new Error("sql down");
@@ -431,7 +607,9 @@ describe("4240 list route appends the retention row (best-effort)", () => {
     const res = await handleSchedulesRoutes(req, new URL(req.url), "/api/schedules", "sess", throwing);
     expect(res?.status).toBe(200);
     const body = (await res!.json()) as { schedules: Array<Record<string, unknown>> };
-    expect(body.schedules.find((s) => s.id === "retention")).toBeUndefined();
+    const row = body.schedules.find((s) => s.id === "retention");
+    expect(row).toBeDefined();
+    expect(row?.lastRunAt).toBeUndefined();
   });
 });
 
@@ -502,11 +680,14 @@ describe("4240 runs routes join the retention record to its ledger rows", () => 
   });
 });
 
-describe("4240 detail route answers the derived retention record", () => {
-  it("GET /api/schedules/retention returns the derived detail, not 404", async () => {
+describe("4240 detail route answers the stored retention record", () => {
+  it("GET /api/schedules/retention returns the stored detail, not 404", async () => {
     const sql = new SqliteTestStorage();
+    const d1 = new MockD1Database();
+    const store = createD1UnifiedSchedulePorts({ d1: d1 as never }).unifiedSchedules;
+    await store.save(storedRetentionRecord("active"));
     const ctx = {
-      env: {},
+      env: { AGENT_DB: d1 },
       agentCtx: { storage: { sql: sql.sql as never } } as never,
       audit: vi.fn(),
       listSchedules: vi.fn(async () => []),
@@ -551,10 +732,14 @@ describe("4240 Schedules home renders the retention row (source pins)", () => {
     expect(jobsApi).toContain("lastRunDetail");
   });
 
-  it("no new firing: the retention still rides the heartbeat due-check", () => {
-    const agent = source("src/agents/scheduled-agent.ts");
-    expect(agent).toContain("runRetentionEntryPoint");
+  it("no new firing: the retention fires through its stored schedule, not the heartbeat due-check", () => {
+    // Issue #6503 — the heartbeat due-checks are retired: the duty
+    // fires through its stored schedule's entry point, which lives
+    // in consolidatedCronEntries (not the scheduled agent).
+    const entries = source("src/services/consolidatedCronEntries.ts");
+    expect(entries).toContain("runRetentionEntryPoint");
     // The slice adds no Worker cron and no SDK alarm for retention.
+    // The old dispatch cron survives only as the ledger job id.
     const dueChecks = source("src/services/heartbeatDueChecks.ts");
     expect(dueChecks).toContain('RETENTION_DISPATCH_CRON = "0 4 * * *"');
   });
