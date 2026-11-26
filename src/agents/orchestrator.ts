@@ -85,10 +85,7 @@ import {
   type AgentScheduleActionRequest,
   type AgentScheduleExecutorDeps,
 } from "../services/agentScheduleCapability";
-import {
-  createWorkflowStageScheduleAdapter,
-  type WorkflowStageRegistry,
-} from "../services/workflowStageSchedule";
+import { createOrchestratorAgentScheduleExecutorDeps } from "./orchestrator/agentScheduleExecutor";
 import { resolveEffectiveScheduleFloor } from "../services/scheduleControls";
 import {
   definePipelineJobFromSpecViaDoor,
@@ -1406,84 +1403,19 @@ export class OrchestratorAgent extends PortThink {
   }
 
   private agentScheduleExecutorDeps(): AgentScheduleExecutorDeps {
-    const unifiedStore = createUnifiedSchedulePorts({
-      sql: this.ctx.storage.sql,
-      storage: this.ctx.storage,
-    });
     const alarms = makeScheduleAlarmsPort(this, {
       resolveFloor: () =>
         resolveEffectiveScheduleFloor(this.ctx.storage.sql, this.env).seconds,
     });
-    const runCallback = makeRunScheduleCallback(this);
-    const stageRegistry: WorkflowStageRegistry = {
-      getDefinition: async (jobId) => {
-        try {
-          const view = await getScheduledAgentDoor(this.env).getPipelineJobStatus(jobId);
-          return view.definition ?? null;
-        } catch {
-          return null;
-        }
-      },
-    };
-    const scheduledAgent = getScheduledAgentDoor(this.env);
-    return createAgentScheduleExecutorDepsForDo(
-      this.env,
-      this.ctx.storage.sql,
-      (type, payload) => this.audit(type, "orchestrator", payload),
-      {
-        sdk: nlqPortToAgentSdkAdapter(
-          this.nlqSchedulingPort(),
-          unifiedStore.unifiedSchedules,
-          {
-            alarms,
-            runCallback,
-            nowIso: () => new Date().toISOString(),
-            nowMs: () => Date.now(),
-          },
-        ),
-        goals: {
-          list: async () => (await scheduledAgent.listGoals()) as unknown as Array<Record<string, unknown>>,
-          add: async (goal, actor) => {
-            if (
-              typeof goal.id !== "string" ||
-              typeof goal.name !== "string" ||
-              typeof goal.cron !== "string" ||
-              typeof goal.operation !== "string" ||
-              typeof goal.budgetCents !== "number"
-            ) {
-              throw new Error("Goal schedules require id, name, cron, operation, and budgetCents.");
-            }
-            return (await scheduledAgent.addGoal({
-              id: goal.id,
-              name: goal.name,
-              cron: goal.cron,
-              operation: goal.operation,
-              budgetCents: goal.budgetCents,
-              ...(typeof goal.enabled === "boolean" ? { enabled: goal.enabled } : {}),
-              ...(goal.executionMode === "deterministic" || goal.executionMode === "agentic-loop"
-                ? { executionMode: goal.executionMode }
-                : {}),
-              ...(typeof goal.timeZone === "string" ? { timeZone: goal.timeZone } : {}),
-              ...(goal.provenance !== undefined ? { provenance: goal.provenance } : {}),
-              ...(goal.subDailyOptIn === true ? { subDailyOptIn: true } : {}),
-              ...(actor ? { actor } : {}),
-            })) as unknown as Record<string, unknown>;
-          },
-          remove: (id, actor) => scheduledAgent.removeGoal(id, actor),
-          setEnabled: (id, enabled, actor) =>
-            scheduledAgent.setGoalEnabled(id, enabled, actor),
-          trigger: (id, actor) =>
-            scheduledAgent.triggerGoal(id, this.env, actor),
-        },
-        stages: createWorkflowStageScheduleAdapter({
-          store: unifiedStore.unifiedSchedulesSync,
-          alarms,
-          registry: stageRegistry,
-          runCallback,
-          nowIso: () => new Date().toISOString(),
-        }),
-      },
-    );
+    return createOrchestratorAgentScheduleExecutorDeps({
+      env: this.env,
+      sql: this.ctx.storage.sql,
+      storage: this.ctx.storage,
+      audit: (type, payload) => this.audit(type, "orchestrator", payload),
+      schedulingPort: this.nlqSchedulingPort(),
+      alarms,
+      runCallback: makeRunScheduleCallback(this),
+    });
   }
 
   // Issue #2496 (Mesh Improvement S1): the in-flight openaimp MCP

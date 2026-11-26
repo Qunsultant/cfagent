@@ -535,6 +535,8 @@ describe("#686 Actor surface on the production class", () => {
         sessionId: "cutover-session-1",
         requestId: "cutover-test",
         audit: () => {},
+        actingLogin: () => "cutover-user",
+        agentScheduleExecute: async () => ({ ok: true }),
       })
     ).sort();
     expect(classNames).toEqual(factoryNames);
