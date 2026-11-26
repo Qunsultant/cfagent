@@ -16,7 +16,8 @@
  * the step module imports them from here, so there is still one
  * home for each name.
  */
-import type { JobNodeConfig } from "../data/jobPipelinePorts";
+import type { JobNodeConfig, JobRunProvenance } from "../data/jobPipelinePorts";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import type { ShardChainContext } from "../types";
 
 /** The chain job's kind — the job id is `options-chain:<chainId>`. */
@@ -58,6 +59,38 @@ export type OptionsChainFormat = (typeof OPTIONS_CHAIN_FORMATS)[number];
 /** The engine job id for a chain — the chain id IS the job id. */
 export function optionsChainJobId(chainId: string): string {
   return `${OPTIONS_CHAIN_JOB_KIND}:${chainId}`;
+}
+
+/**
+ * Issue #6584 — the provenance a chain start hands the workflow
+ * residency: the four facts the firing schedule ALREADY resolved onto
+ * the chain (#3655: broker via resolveTenantBroker, data provider via
+ * resolveTenantProviders, mode + mode source via
+ * resolveScheduledEffectiveMode). Nothing is re-derived here and nothing
+ * is inferred — this is a read of the chain's own record.
+ *
+ * A manual, retried or replayed start names none (null), exactly as
+ * #6557's owner decision requires: only a firing schedule payload (and
+ * the chain it fires) is a source, and the record then keeps explicit
+ * nulls rather than a guess.
+ */
+export function chainRunProvenance(
+  chain: ShardChainContext,
+  trigger: JobRunTrigger | undefined,
+): JobRunProvenance | null {
+  if (trigger !== "scheduled") return null;
+  const carrier: JobRunProvenance = {
+    brokerId: chain.brokerId ?? null,
+    dataProviderId: chain.dataProviderId ?? null,
+    mode: chain.mode ?? null,
+    modeSource: chain.modeSource ?? null,
+  };
+  const named =
+    carrier.brokerId !== null ||
+    carrier.dataProviderId !== null ||
+    carrier.mode !== null ||
+    carrier.modeSource !== null;
+  return named ? carrier : null;
 }
 
 /** The chain job's root execution mode: sequential, batch, async delivery, monolith root. */

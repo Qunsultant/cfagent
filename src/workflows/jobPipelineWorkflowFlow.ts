@@ -27,11 +27,24 @@ import { createJobPipelineControl } from "../services/jobPipelineControlFactory"
 import { JobPipelineError } from "../services/jobPipelineConfig";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { normalizeJobRunTrigger } from "../data/jobRunRecordPorts";
+import {
+  normalizeRunProvenance,
+  type JobRunProvenance,
+} from "../data/jobPipelinePorts";
 
 export interface JobPipelineWorkflowPayload {
   jobId: string;
   trigger?: JobRunTrigger;
   scopePath?: string;
+  /**
+   * Issue #6584 — the four provenance facts the start seam resolved for
+   * this run (broker, data provider, mode, mode source). This is the
+   * run's own fact, not configuration: the definition stays read from the
+   * job stores at run start, and the carrier never decides what executes.
+   * Absent for a start seam that resolved none — the engine then records
+   * explicit nulls (#6557's "never inferred" rule).
+   */
+  provenance?: JobRunProvenance;
 }
 
 /** Minimal structural step surface the flow needs (fakeable in tests). */
@@ -95,6 +108,10 @@ export async function runJobPipelineWorkflowFlow(
       trigger: normalizeJobRunTrigger(payload.trigger),
       ...(payload.scopePath ? { scopePath: payload.scopePath } : {}),
       ...(workflowInstanceId ? { workflowInstanceId } : {}),
+      // Issue #6584 — the carrier the start seam resolved, normalized
+      // through the carrier's own rule: a malformed payload records
+      // nulls rather than a half-parsed fact, and never fails the run.
+      provenance: normalizeRunProvenance(payload.provenance),
     });
   } catch (error) {
     if (

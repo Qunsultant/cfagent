@@ -23,7 +23,7 @@
  */
 import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
 import type { SqlStorage } from "../../orm";
-import type { JobRunProvenance } from "../../data/jobPipelinePorts";
+import { normalizeRunProvenance, type JobRunProvenance } from "../../data/jobPipelinePorts";
 import {
   buildCronDispatchRecord,
   type CronDispatchRecordInput,
@@ -275,21 +275,18 @@ function payloadProvenance(payload: unknown): {
  * run record uses, so the two surfaces cannot drift.
  */
 export function payloadRunProvenance(payload: unknown): JobRunProvenance | null {
-  const p = payloadProvenance(payload);
-  if (
-    p.brokerId === undefined &&
-    p.dataProviderId === undefined &&
-    p.mode === undefined &&
-    p.modeSource === undefined
-  ) {
-    return null;
-  }
-  return {
-    brokerId: p.brokerId ?? null,
-    dataProviderId: p.dataProviderId ?? null,
-    mode: p.mode ?? null,
-    modeSource: p.modeSource ?? null,
-  };
+  // Issue #6584 — the field rule lives in the carrier's own module
+  // (normalizeRunProvenance), so the sync path and the workflow-shard
+  // path cannot drift; this function only adds the payload rule that a
+  // payload naming NONE of the four is no carrier at all.
+  const carrier = normalizeRunProvenance(payloadProvenance(payload));
+  if (!carrier) return null;
+  const named =
+    carrier.brokerId !== null ||
+    carrier.dataProviderId !== null ||
+    carrier.mode !== null ||
+    carrier.modeSource !== null;
+  return named ? carrier : null;
 }
 
 export async function recordScheduleCallbackRun(

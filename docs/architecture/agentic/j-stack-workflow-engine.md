@@ -1211,6 +1211,23 @@ retried, replayed or re-run dispatch records explicit nulls, never an
 inferred broker. D1 stores them too now (migration 0091), so both
 residencies agree on the run's provenance.
 
+The workflow-shard residency reads the same carrier (#6584).
+`JobPipelineWorkflowPayload` carries an optional `provenance`, and
+`runJobPipelineWorkflowFlow` normalizes it through
+`normalizeRunProvenance` â€” the one field rule `parseRunProvenance`
+also uses, so the payload path and the stored-carrier path cannot
+drift â€” before passing it to `control.runJob`. The scheduled source
+there is the options chain: `startOptionsChainWorkflow` resolves the
+four facts from the chain it was handed (`chainRunProvenance`), which
+the firing schedule already stamped (#3655), and puts them on the
+instance it creates. A manual chain start names none and the record
+keeps explicit nulls; a malformed payload carrier reads as nulls and
+never fails the run. `startPipelineJobWorkflow` threads the same
+optional carrier, so every creator of a `JobPipelineWorkflow`
+instance offers one payload shape. An options screen start resolves no
+mode, so it records none rather than deriving one â€” deriving would be
+the inference the owner decision excludes.
+
 ### 3.14 Run records
 
 The terminal record is written by `recordTerminal`
