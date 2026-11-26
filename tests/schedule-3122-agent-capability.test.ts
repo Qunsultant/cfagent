@@ -97,7 +97,7 @@ describe("3122-P02..P09 classifier", () => {
 
     await expect(
       runScheduleCallback("autonomousMarketScreen", { executionMode: "agentic-loop" }),
-    ).rejects.toThrow("owner-configured iteration and cost bounds");
+    ).rejects.toThrow("owner-managed turn, duration, and model-token bounds");
     await expect(
       runScheduleCallback("autonomousMarketScreen", { executionMode: "unexpected" }),
     ).rejects.toThrow("Unsupported schedule executionMode: unexpected.");
@@ -458,6 +458,100 @@ describe("3122-P13..P15 executor", () => {
     expect((ledger[0] as Record<string, unknown>).outcome).toBe("skipped");
   });
 
+  it("allows agentic-loop goal creation only with enabled owner-managed bounds", async () => {
+    const { deps, goalsAdded } = harness({
+      resolveAgentScheduleLoopSettings: async () => ({
+        enabled: true,
+        maxTurns: 4,
+        maxDurationMs: 30_000,
+        maxModelTokens: 2_000,
+      }),
+    });
+    const out = await executeAgentScheduleAction(deps as never, {
+      action: "create",
+      kind: "goal",
+      principal,
+      tenantId: "primary",
+      operation: "resource.rollup_daily",
+      goal: {
+        id: "bounded-loop-goal",
+        name: "Bounded loop goal",
+        cron: "0 9 * * *",
+        operation: "resource.rollup_daily",
+        budgetCents: 500,
+        executionMode: "agentic-loop",
+      },
+    });
+    expect(out.ok).toBe(true);
+    expect(goalsAdded).toHaveLength(1);
+    expect(goalsAdded[0]).toMatchObject({
+      executionMode: "agentic-loop",
+      provenance: { createdBy: principal.login },
+    });
+  });
+
+  it("requires the existing approval flow before a loop can create a successor schedule", async () => {
+    const { deps, getPending, goalsAdded } = harness({
+      resolveAgentScheduleLoopSettings: async () => ({
+        enabled: true,
+        maxTurns: 4,
+        maxDurationMs: 30_000,
+        maxModelTokens: 2_000,
+      }),
+    });
+    const out = await executeAgentScheduleAction(deps as never, {
+      action: "create",
+      kind: "goal",
+      principal,
+      tenantId: "primary",
+      operation: "resource.rollup_daily",
+      goal: {
+        id: "successor-goal",
+        name: "Successor goal",
+        cron: "0 9 * * *",
+        operation: "resource.rollup_daily",
+        budgetCents: 500,
+        executionMode: "deterministic",
+      },
+      loopOrigin: { scheduleId: "source-goal", runId: "run-1" },
+    });
+    expect(out).toMatchObject({ ok: false, code: "approval-required" });
+    expect(getPending()[0]?.approvalReasons.join(" ")).toContain(
+      "cannot re-arm itself or create a successor",
+    );
+    expect(goalsAdded).toHaveLength(0);
+  });
+
+  it("prevents an active loop from recursively triggering another loop schedule", async () => {
+    const { deps, goalsAdded } = harness({
+      resolveAgentScheduleLoopSettings: async () => ({
+        enabled: true,
+        maxTurns: 4,
+        maxDurationMs: 30_000,
+        maxModelTokens: 2_000,
+      }),
+    });
+    goalsAdded.push({
+      id: "nested-loop",
+      name: "Nested loop",
+      operation: "resource.rollup_daily",
+      budgetCents: 500,
+      enabled: true,
+      executionMode: "agentic-loop",
+      provenance: { createdBy: principal.login },
+    });
+    const out = await executeAgentScheduleAction(deps as never, {
+      action: "trigger",
+      kind: "goal",
+      principal,
+      tenantId: "primary",
+      scheduleId: "nested-loop",
+      loopOrigin: { scheduleId: "source-loop", runId: "run-1" },
+    });
+    expect(out).toMatchObject({ ok: false, code: "unsupported" });
+    expect(goalsAdded).toHaveLength(1);
+  });
+
   it("P13b PDP denial blocks the action and audits the denial", async () => {
     const { deps, ledger, sdkItems } = harness({
       pdp: async () => ({ enforced: true as const, allowed: false as const, reason: "NO_MEMBERSHIP" }),
@@ -741,6 +835,33 @@ describe("3122 direct Think scheduling tool", () => {
       tools["manage_agent_schedule"].execute({ action: "list", kind: "goal" }),
     ).resolves.toMatchObject({ ok: false, code: "denied" });
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("injects loop origin on the server and limits the loop tool to goal schedules", async () => {
+    const { createAgentScheduleManagementTool } = await import("../src/agents/mcpAdapter");
+    const execute = vi.fn(async () => ({ ok: true as const }));
+    const tool = createAgentScheduleManagementTool({
+      env: { IAAA_TENANT_ID: "tenant-from-env" },
+      actingLogin: () => "trusted-login",
+      execute,
+      goalsOnly: true,
+      loopOrigin: () => ({ scheduleId: "source-goal", runId: "run-1" }),
+    } as never);
+    expect(
+      tool.inputSchema.safeParse({
+        action: "list",
+        kind: "sdk",
+        loopOrigin: { scheduleId: "spoofed", runId: "spoofed" },
+      }).success,
+    ).toBe(false);
+    await tool.execute({ action: "list", kind: "goal" });
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "list",
+        kind: "goal",
+        loopOrigin: { scheduleId: "source-goal", runId: "run-1" },
+      }),
+    );
   });
 
   it("requires and forwards an explicit execution mode when creating schedules", async () => {

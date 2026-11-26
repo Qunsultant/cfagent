@@ -85,6 +85,10 @@ import {
   type AgentScheduleActionRequest,
   type AgentScheduleExecutorDeps,
 } from "../services/agentScheduleCapability";
+import {
+  resolveAgentScheduleLoopSettings,
+  type AgentScheduleLoopSettingsResolution,
+} from "../services/agentScheduleLoopSettings";
 import { createOrchestratorAgentScheduleExecutorDeps } from "./orchestrator/agentScheduleExecutor";
 import { resolveEffectiveScheduleFloor } from "../services/scheduleControls";
 import {
@@ -1415,7 +1419,20 @@ export class OrchestratorAgent extends PortThink {
       schedulingPort: this.nlqSchedulingPort(),
       alarms,
       runCallback: makeRunScheduleCallback(this),
+      resolveAgentScheduleLoopSettings: async () =>
+        resolveAgentScheduleLoopSettings(
+          (key) => this.readSettingRaw(key),
+          this.env,
+        ).settings,
     });
+  }
+
+  /** Internal per-login settings read used by the shared scheduler DO. */
+  async getAgentScheduleLoopSettings(): Promise<AgentScheduleLoopSettingsResolution> {
+    return resolveAgentScheduleLoopSettings(
+      (key) => this.readSettingRaw(key),
+      this.env,
+    );
   }
 
   // Issue #2496 (Mesh Improvement S1): the in-flight openaimp MCP

@@ -892,6 +892,38 @@ sync (`src/services/corpusSync.ts`, paginated `bucket.list({prefix:
 kill-switch because it is armed as a schedule. `ListMultipartUploads`
 has no call site in `src/`; it is not claimed as a driver.
 
+### 5.5 Bounded agentic schedule goals (#3122)
+
+The deterministic schedule path remains unchanged. An agentic loop
+is available only for goal schedules and only when the owner has
+stored valid `agent_schedule_loop_settings` for that login through
+the existing `/api/copilot-channels/config` settings door
+(`entry: "agentScheduleLoopSettings"`, `className: "ScheduledAgent"`).
+The value requires all four fields:
+`enabled`, positive `maxTurns`, positive `maxDurationMs` (bounded to
+the platform timer range), and positive `maxModelTokens`. There are
+no code defaults: absent, malformed, or unreadable settings fail
+closed. `enabled: false` is the owner-controlled kill switch.
+
+The loop runs as one Think turn with `maxSteps` and output tokens
+bounded by the stored values, plus an abort timer and live settings
+checks at each step and schedule-tool action boundary. Provider-reported token usage is
+measured cumulatively; missing usage stops the loop without
+continuation. Reaching the configured model-token cap creates a
+pending entry in the existing schedule-approval queue. An approver
+with `action:approve` can authorize one further bounded run; while
+that approval is pending, the due schedule does not start duplicate
+loops. The cap is a usage bound, not a USD estimate: no provider
+price is invented.
+
+The loop receives the existing governed schedule-management tool
+only. Its origin is server-stamped; creating a successor, changing
+the source schedule, or resuming it requires the existing
+`action:approve` schedule-approval HITL flow. Model-supplied identity or loop-origin
+fields are not accepted. The owner settings are read for the
+schedule's recorded creator, so legacy agentic-loop records without
+provenance cannot execute.
+
 ## 6. Queues (surveyed)
 
 Three distinct mechanisms carry queued work today. They are not

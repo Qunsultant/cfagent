@@ -10,6 +10,7 @@ import {
   type WorkflowStageRegistry,
 } from "../../services/workflowStageSchedule";
 import type { Env } from "../../types";
+import type { AgentScheduleLoopSettings } from "../../services/agentScheduleLoopSettings";
 import { getScheduledAgentDoor } from "./meshDoors";
 import { makeRunScheduleCallback, makeScheduleAlarmsPort } from "../routes/schedules";
 
@@ -26,6 +27,9 @@ export interface AgentScheduleExecutorInput {
   schedulingPort: Parameters<typeof nlqPortToAgentSdkAdapter>[0];
   alarms: ReturnType<typeof makeScheduleAlarmsPort>;
   runCallback: ReturnType<typeof makeRunScheduleCallback>;
+  resolveAgentScheduleLoopSettings?: (
+    login: string,
+  ) => Promise<AgentScheduleLoopSettings | null>;
 }
 
 export function createOrchestratorAgentScheduleExecutorDeps(
@@ -47,7 +51,7 @@ export function createOrchestratorAgentScheduleExecutorDeps(
   };
   const scheduledAgent = () => getScheduledAgentDoor(context.env);
 
-  return createAgentScheduleExecutorDepsForDo(
+  const deps = createAgentScheduleExecutorDepsForDo(
     context.env,
     context.sql,
     context.audit,
@@ -105,4 +109,8 @@ export function createOrchestratorAgentScheduleExecutorDeps(
       }),
     },
   );
+  if (context.resolveAgentScheduleLoopSettings) {
+    deps.resolveAgentScheduleLoopSettings = context.resolveAgentScheduleLoopSettings;
+  }
+  return deps;
 }

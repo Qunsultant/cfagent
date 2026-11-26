@@ -49,7 +49,7 @@ export interface ScheduledGoal {
 }
 
 export const AGENTIC_LOOP_UNAVAILABLE_REASON =
-  "Agentic-loop scheduling is unavailable until owner-configured iteration and cost bounds, a kill switch, and no-self-rearm enforcement are wired.";
+  "Agentic-loop scheduling requires valid owner-managed turn, duration, and model-token bounds with the kill switch enabled.";
 
 /**
  * Issue #3121 S1 — schedule creation provenance (#2366 items 3–4).
