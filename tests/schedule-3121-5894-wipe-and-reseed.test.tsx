@@ -6,16 +6,18 @@
  * one-click empty, then re-seed to the needed set — seedable built-in
  * goals (from the server, owner-removed goals subtracted, never
  * re-added) + the Track 1 recreation plan — with a preview of what
- * will exist after the reset, confirm, and a verified result. Derived
- * rows re-derive, declared tasks re-arm on the next Think reconcile,
+ * will exist after the reset, confirm, and a verified result.
+ * Declared tasks re-arm on the next Think reconcile,
  * sweep/watchdog arms re-arm via the ensure-guards; every other user
- * row goes and stays gone, and the preview says so by id.
+ * row goes and stays gone, and the preview says so by id. Stored
+ * system rows go and stay gone too — there is no derived class any
+ * more (#6503 step 14).
  *
  * The needed set is defined in one place (`resetNeededSet`): the
  * seedable list comes from GET /api/schedule/builtin-goals (the
  * server's config read, never a client copy), the Track 1 labels from
  * `track1RecreatePlan()`, the comeback classes from #5893's
- * `emptyListComeback` — and every planted job must resolve in the one
+ * `returningRows` — and every planted job must resolve in the one
  * job catalogue (#5880), or the preview refuses. No second defaults
  * list. The action is platform-admin gated with the same overview
  * probe the empty action uses.
@@ -48,13 +50,13 @@ const pausedItem = {
   payload: { universe: "SP500", userLogin: "trader1", environment: "TEST" },
 };
 
-const derivedItem = {
+const systemItem = {
   id: "token-renewal",
   type: "cron",
   callback: "autoRenewETradeTokens",
   cron: "0 3 * * *",
   kind: "internal",
-  source: { kind: "derived", job: "token-renewal", origin: "code" },
+  source: { kind: "system", job: "auto-renew-etrade-tokens", origin: "system" },
   payload: { userLogin: "trader1", environment: "TEST" },
 };
 
@@ -242,11 +244,12 @@ function installFetch(schedules: any[]) {
             pausedPreserved: live.filter((s) => s.paused).length,
           });
         }
-        // Cancel the alarms; derived rows re-derive on the next list,
-        // so they stay listed. Declared tasks re-arm on the next Think
-        // reconcile, so they are gone from this re-fetch.
-        const cancelled = alarms.filter((s) => s.id !== "token-renewal");
-        live = live.filter((s) => s.paused || s.id === "token-renewal");
+        // Cancel the alarms; every cancelled row leaves the list.
+        // Declared tasks re-arm on the next Think reconcile, so
+        // they are gone from this re-fetch; stored system rows go
+        // and stay gone until the reconcile re-seeds them.
+        const cancelled = alarms;
+        live = live.filter((s) => s.paused);
         return Response.json({
           cancelled: cancelled.length,
           cancelledIds: cancelled.map((s) => s.id),
@@ -347,7 +350,7 @@ afterEach(async () => {
 describe("5894 the needed set is defined in one place", () => {
   it("classifies seeded goals, removed goals, Track 1, comeback, and gone-for-good", () => {
     const needed = resetNeededSet(
-      [screenItem, pausedItem, derivedItem, declaredItem, goalItem, manualGoalItem] as any,
+      [screenItem, pausedItem, systemItem, declaredItem, goalItem, manualGoalItem] as any,
       SEEDABLE_GOALS,
       REMOVED_GOALS,
       TRACK1_PLAN as any,
@@ -360,11 +363,12 @@ describe("5894 the needed set is defined in one place", () => {
       "Options NASDAQ100",
       "Options SP100",
     ]);
-    expect(needed.derived).toEqual(["token-renewal"]);
     expect(needed.declaredTasks).toEqual(["declared-1"]);
     // screen-1 and screen-paused go; the manual goal is not seedable,
     // so it goes too — only the server's seedable list comes back.
-    expect(needed.goneForGood).toEqual(["screen-1", "screen-paused", "my-manual-goal"]);
+    // The stored system row goes and stays gone: it is re-seeded by
+    // the reconcile, not by this reset's needed set.
+    expect(needed.goneForGood).toEqual(["screen-1", "screen-paused", "token-renewal", "my-manual-goal"]);
   });
 
   it("a current goal in the seedable list is re-planted, not gone; one outside it is gone", () => {
@@ -396,7 +400,6 @@ describe("5894 the needed set is defined in one place", () => {
       seededGoals: [],
       removedGoals: [],
       track1: ["Stock pre-market", "Stock intra-day", "Options NASDAQ100", "Options SP100"],
-      derived: [],
       declaredTasks: [],
       goneForGood: [],
     });
@@ -406,7 +409,7 @@ describe("5894 the needed set is defined in one place", () => {
 describe("5894 the gate: platform admins see the reset, others see it said", () => {
   it("a non-admin sees no Reset button and a plain note instead", async () => {
     overviewMode = "denied";
-    await renderPanel([screenItem, derivedItem]);
+    await renderPanel([screenItem, systemItem]);
     await waitForText("platform-admin");
     expect(buttonNamed("Reset to defaults")).toBeNull();
     expect(recorded.filter((r) => r.url === "/api/schedules/cancel-all")).toHaveLength(0);
@@ -416,7 +419,7 @@ describe("5894 the gate: platform admins see the reset, others see it said", () 
   });
 
   it("a platform admin sees the Reset to defaults button", async () => {
-    await renderPanel([screenItem, derivedItem]);
+    await renderPanel([screenItem, systemItem]);
     await waitForText("Reset to defaults");
     expect(buttonNamed("Reset to defaults")).not.toBeNull();
   });
@@ -424,7 +427,7 @@ describe("5894 the gate: platform admins see the reset, others see it said", () 
 
 describe("5894 preview → confirm → verify", () => {
   it("preview names what will exist after the reset, what comes back, and what stays gone", async () => {
-    await renderPanel([screenItem, pausedItem, derivedItem, declaredItem, goalItem, manualGoalItem]);
+    await renderPanel([screenItem, pausedItem, systemItem, declaredItem, goalItem, manualGoalItem]);
     await waitForText("Reset to defaults");
     await click(buttonNamed("Reset to defaults"));
     await waitFor(() => document.querySelector(".sched-confirm-modal") !== null, "reset modal");
@@ -438,9 +441,10 @@ describe("5894 preview → confirm → verify", () => {
     expect(dialog.textContent).toContain("Stock pre-market");
     expect(dialog.textContent).toContain("Options SP100");
     // Comeback on its own.
-    expect(dialog.textContent).toContain("token-renewal");
+    expect(dialog.textContent).not.toContain("derived row");
     expect(dialog.textContent).toContain("declared-1");
-    // Gone for good, by id — including the manual goal.
+    // Gone for good, by id — including the stored system row and the manual goal.
+    expect(dialog.textContent).toContain("token-renewal");
     expect(dialog.textContent).toContain("screen-1");
     expect(dialog.textContent).toContain("my-manual-goal");
     // Owner-removed goals stay removed, named.
@@ -455,7 +459,7 @@ describe("5894 preview → confirm → verify", () => {
   });
 
   it("confirm wipes, re-seeds, re-creates Track 1, and verifies by re-fetch", async () => {
-    await renderPanel([screenItem, pausedItem, derivedItem, declaredItem, goalItem, manualGoalItem]);
+    await renderPanel([screenItem, pausedItem, systemItem, declaredItem, goalItem, manualGoalItem]);
     await waitForText("Reset to defaults");
     await click(buttonNamed("Reset to defaults"));
     await waitFor(() => document.querySelector(".sched-confirm-modal") !== null, "reset modal");
@@ -473,14 +477,15 @@ describe("5894 preview → confirm → verify", () => {
     // The notice title is the button label, so wait for the
     // notice-specific reseed line instead of the title.
     await waitForText("Re-seeded");
-    expect(document.body.textContent).toContain("Cancelled 4 alarm(s)");
+    expect(document.body.textContent).toContain("Cancelled 5 alarm(s)");
     expect(document.body.textContent).toContain("deleted 1 paused record(s)");
     // Both seedable goals planted (goal-1 re-planted, opportunity-hunt new).
     expect(recorded.filter((r) => r.url === "/api/schedule/goals" && r.method === "POST")).toHaveLength(2);
     expect(recorded.filter((r) => r.url === "/api/schedules/create" && r.method === "POST")).toHaveLength(4);
     expect(document.body.textContent).toContain("Re-seeded 2 built-in goal(s)");
     expect(document.body.textContent).toContain("Re-created 4 of 4 Track 1 screen(s)");
-    expect(document.body.textContent).toContain("token-renewal");
+    // The stored system row is gone from the re-fetched list.
+    expect(document.body.textContent).not.toContain("token-renewal");
     expect(document.body.textContent).toContain("opportunity-hunt");
     // Declared tasks re-arm on the next Think reconcile, not now —
     // named as pending, not reported as missing.
@@ -492,7 +497,7 @@ describe("5894 preview → confirm → verify", () => {
   });
 
   it("a failed clear step still re-seeds and reports the partial wipe honestly", async () => {
-    await renderPanel([screenItem, pausedItem, derivedItem]);
+    await renderPanel([screenItem, pausedItem, systemItem]);
     await waitForText("Reset to defaults");
     failClearConfirm = true;
     await click(buttonNamed("Reset to defaults"));
@@ -509,7 +514,7 @@ describe("5894 preview → confirm → verify", () => {
   });
 
   it("a failed Track 1 create is named instead of claimed", async () => {
-    await renderPanel([screenItem, derivedItem]);
+    await renderPanel([screenItem, systemItem]);
     await waitForText("Reset to defaults");
     failCreateCallback = "autonomousOptionsAnalysis";
     await click(buttonNamed("Reset to defaults"));

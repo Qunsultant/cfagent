@@ -33,6 +33,7 @@ vi.mock("agents", () => ({
 
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
 import { OPERATION_CATALOG, createJob } from "../src/orchestrate";
+import { MockD1Database } from "./mock-d1";
 
 function makeCtx() {
   const store = new Map<string, unknown>();
@@ -49,6 +50,11 @@ function makeCtx() {
 
 function makeEnv() {
   return {
+    // #6503 — goals live in the D1 unified store only (fail-closed
+    // without AGENT_DB). The forced goal IS a built-in: migration
+    // 0092's seed plants daily-qa-sweep, so no fixture planting is
+    // needed — binding D1 is enough.
+    AGENT_DB: new MockD1Database(),
     PAYMENTS_AGENT: {
       idFromName: () => "payments-default",
       get: () => ({

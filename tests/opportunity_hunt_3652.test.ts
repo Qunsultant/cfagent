@@ -29,6 +29,7 @@ vi.mock("agents", () => ({
 }));
 
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
+import { MockD1Database } from "./mock-d1";
 import { OPERATION_CATALOG, createJob } from "../src/orchestrate";
 import {
   executeOpportunityHunt,
@@ -52,6 +53,11 @@ function makeCtx() {
 
 function makeEnv() {
   return {
+    // #6503 — the tick's goals live in the D1 unified store only
+    // (fail-closed without AGENT_DB). The migration-0092 seed
+    // plants opportunity-hunt itself, so no fixture planting is
+    // needed: the forced goal resolves from the seed.
+    AGENT_DB: new MockD1Database(),
     PAYMENTS_AGENT: {
       idFromName: () => "payments-default",
       get: () => ({ budgetCheck: async () => ({ allowed: true }) }),

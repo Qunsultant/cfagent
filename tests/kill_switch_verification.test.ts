@@ -64,12 +64,22 @@ describe("entry-point enumeration (#756)", () => {
     // self-checks the switch (halted result), and the scheduled tick
     // calls it directly. A new caller must be added here deliberately,
     // with its halt story, or this pin fails.
+    // #6503 — second caller: src/services/scheduledScreeningSteps.ts
+    // (new file, the scheduled-screening tick extracted into the
+    // unified scheduler) runs the v2 adjustment over the screened
+    // ideas. Halt story: the callee self-checks — runWeightsV2Adjustment
+    // returns { halted: true, applied: [] } when isAdaptationHalted —
+    // and the tick records wres.halted in steps.weightsV2, applying
+    // nothing while halted.
     const v2Callers = prodFiles
       .filter((f) => f.rel !== "services/strategyWeightsV2.ts")
       .filter((f) => /\brunWeightsV2Adjustment\b/.test(f.text))
       .map((f) => f.rel)
       .sort();
-    expect(v2Callers).toEqual(["agents/routes/screenerResearch.ts"]);
+    expect(v2Callers).toEqual([
+      "agents/routes/screenerResearch.ts",
+      "services/scheduledScreeningSteps.ts",
+    ]);
     // The entry dispatches the route over HTTP; it names the path, not
     // the function. Slice 8 of #2902 moves the scheduled tick from
     // server.ts to src/server/routes/queue.ts, so the entry surface is

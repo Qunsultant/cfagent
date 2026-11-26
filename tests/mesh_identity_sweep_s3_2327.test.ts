@@ -86,6 +86,8 @@ import {
 } from "../src/services/researchTriggers";
 import { PaymentsAgent } from "../src/agents/payments-agent";
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import { dispatchPaymentsA2A } from "../src/agents/payments/a2aDispatch";
 import { AGENTIC_SPEND_AGENT_ID } from "../src/payments/ledger";
 import { compileGoal } from "../src/orchestrate";
@@ -324,21 +326,16 @@ describe("orchestrator research publish entry (#2327)", () => {
   });
 });
 
-describe("research scheduled-tick route (#2327)", () => {
-  // Issue #6471 — the fire decision reads the live clock
-  // (shouldFireResearchTick fires on weekday ticks at/after 21:00 UTC
-  // when nothing fired today), so this pin failed in the evening
-  // window: the fire path throws (getResearchAgent → null) instead of
-  // taking the skip path. Pin the clock to a weekday noon UTC so the
-  // identity gate + skip path are exercised deterministically.
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-11-24T12:00:00Z"));
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
+describe("research scheduled-tick route — retired (#6503)", () => {
+  // Issue #6503 — POST /research/scheduled-tick is deleted: nightly
+  // research is a real stored schedule now, fired through
+  // OrchestratorAgent.runResearchSchedule. These pins own the
+  // retirement: the route matches nothing, and nothing dispatches
+  // through it. The identity gate for scheduled research lives in
+  // runResearchAndPublish (pinned in "orchestrator research publish
+  // entry" above: a run with no identity is refused before any agent
+  // is resolved) and in runResearchSchedule's unowned skip (pinned
+  // in "retired fallback literals" below).
   function makeRouteCtx() {
     // The tick route now evaluates ctx.getOrm() eagerly in the fire
     // path (the #2037 outcome write + the engine dispatch take it as
@@ -365,7 +362,7 @@ describe("research scheduled-tick route (#2327)", () => {
     } as any;
   }
 
-  it("answers 401 and dispatches nothing when the identity header is absent", async () => {
+  it("POST /research/scheduled-tick matches no route and dispatches nothing", async () => {
     const ctx = makeRouteCtx();
     const request = new Request("https://agent.internal/research/scheduled-tick", {
       method: "POST",
@@ -377,11 +374,11 @@ describe("research scheduled-tick route (#2327)", () => {
       "session",
       ctx,
     );
-    expect(res?.status).toBe(401);
+    expect(res).toBeNull();
     expect(ctx.runResearchAndPublish).not.toHaveBeenCalled();
   });
 
-  it("an identity header is honoured (the tick proceeds past the identity gate)", async () => {
+  it("an identified request to the retired route still matches no route", async () => {
     const ctx = makeRouteCtx();
     const request = new Request("https://agent.internal/research/scheduled-tick", {
       method: "POST",
@@ -394,21 +391,8 @@ describe("research scheduled-tick route (#2327)", () => {
       "session",
       ctx,
     );
-    // This pin owns the identity gate's verdict, not the tick's work. A bare
-    // `200` made it time-dependent: outside the fire window the guard skips
-    // and the route answers 200, while inside it (weekdays from 21:00 UTC)
-    // the tick actually runs the pipeline — and this stub resolves no
-    // research agent, so the run reports `research_stage_unavailable` as a
-    // 500. Both outcomes are "past the gate"; only a 401/403 is a refusal.
-    // Pinned as the gate's verdict, with the fire path's own refusal named
-    // so a change that starts refusing an identified caller still fails.
-    expect([200, 500]).toContain(res!.status);
-    expect(res!.status).not.toBe(401);
-    expect(res!.status).not.toBe(403);
-    if (res!.status === 500) {
-      const body = (await res!.clone().json()) as { error?: string };
-      expect(body.error ?? "").toContain("research_stage_unavailable");
-    }
+    expect(res).toBeNull();
+    expect(ctx.runResearchAndPublish).not.toHaveBeenCalled();
   });
 });
 
@@ -525,6 +509,9 @@ function makeScheduledHarness() {
     },
   };
   const env = {
+    // #6503 — goals live in the D1 unified store only (fail-closed
+    // without AGENT_DB); the agent never reads the "goals" KV key.
+    AGENT_DB: new MockD1Database(),
     PAYMENTS_AGENT: {
       idFromName: () => "payments-default",
       get: () => ({
@@ -555,7 +542,13 @@ describe("ScheduledAgent budget-check threading (#2327)", () => {
     await agent.synthesizeSchedule(chain, { id: "s3-thread-oncron", cron: dueCron() });
     await agent.approveSynthesizedSchedule("s3-thread-oncron");
     const goal = await agent.materializeSynthesizedSchedule("s3-thread-oncron");
-    store.set("goals", [goal]);
+    // #6503 — prune migration 0092's seeded built-ins from D1 after
+    // materialize, so the tick sees ONLY the chain goal (same pattern
+    // as the #6503 G3 goals-tick file; the "goals" KV key is dead).
+    const d1Store = createD1UnifiedSchedulePorts({ d1: env.AGENT_DB as never }).unifiedSchedules;
+    for (const row of await d1Store.listByKind("goal")) {
+      if (row.id !== "s3-thread-oncron") await d1Store.remove(row.id);
+    }
     await agent.onCron();
     expect(budgetCalls.length).toBeGreaterThan(0);
     for (const call of budgetCalls) {
@@ -672,10 +665,20 @@ describe("retired fallback literals — source evidence (#2327)", () => {
   });
 
   it("the scheduled-tick handler fabricates no default login", () => {
+    // Issue #6503 — the route is retired, so no handler can fabricate
+    // a login on the scheduled path at all; the identity gate lives in
+    // runResearchAndPublish (pinned above) and the unowned skip in
+    // OrchestratorAgent.runResearchSchedule (pinned below).
     const src = read("../src/agents/routes/screenerResearch.ts");
-    const start = src.indexOf('"/research/scheduled-tick"');
+    expect(src).not.toContain("/research/scheduled-tick");
+  });
+
+  it("runResearchSchedule resolves no default login for an unowned firing", () => {
+    const src = read("../src/agents/orchestrator.ts");
+    const start = src.indexOf("async runResearchSchedule(");
     expect(start).toBeGreaterThan(-1);
-    const section = src.slice(start, start + 400);
-    expect(section).not.toContain('|| "default"');
+    const section = src.slice(start, start + 1200);
+    expect(section).not.toContain('"default"');
+    expect(section).toContain("Skipping unowned scheduled research run");
   });
 });

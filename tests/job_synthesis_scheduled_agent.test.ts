@@ -26,6 +26,7 @@ vi.mock("agents", () => ({
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
 import { SYNTHESIZED_SCHEDULES_KEY } from "../src/agentic/jobSynthesis";
 import { compileGoal } from "../src/orchestrate";
+import { MockD1Database } from "./mock-d1";
 
 function makeCtx() {
   const store = new Map<string, unknown>();
@@ -42,6 +43,9 @@ function makeCtx() {
 
 function makeEnv() {
   return {
+    // #6503 — listGoals reads the D1 unified store only (fail-closed
+    // without AGENT_DB); the agent never reads the "goals" KV key.
+    AGENT_DB: new MockD1Database(),
     PAYMENTS_AGENT: {
       idFromName: () => "payments-default",
       get: () => ({ budgetCheck: async () => ({ allowed: true }) }),

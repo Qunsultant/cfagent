@@ -14,8 +14,9 @@
  *   pause/resume; the SDK alarm id is a record field; zero live
  *   imports of the retired paused-store modules.
  * - 3123-P04 goals KV migrated: goal ↔ record round-trip; with a
- *   SQL-backed ScheduledAgent, goals persist in the store, not KV;
- *   without SQL the KV path still works (fallback, never a break).
+ *   D1-bound ScheduledAgent, goals persist in the D1 unified store,
+ *   not KV; without D1 the save fails closed (no KV fallback —
+ *   #6503 step 6(f) deleted the fallback and the "goals" KV key).
  * - 3123-P05 one ledger write entry: recordLedgerRun is the only
  *   job_run_records write path; mergeLedgerRuns is newest-first
  *   with dedup; every buildJobRunRecord call site routes through it.
@@ -117,6 +118,7 @@ import {
   removeGoal,
 } from "../src/client/jobsApi";
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
+import { MockD1Database } from "./mock-d1";
 
 function source(rel: string): string {
   return readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
@@ -392,7 +394,16 @@ describe("3123-P04 goals KV migrated", () => {
         sql: sql as never,
       },
     };
-    const agent = new ScheduledAgent(ctx as never, {} as never);
+    // Issue #6503 step 6(f) — the unified store is D1 ONLY: the
+    // agent builds it from the bound AGENT_DB (the old DO-SQLite
+    // seam is gone), so the test binds a D1 instead of relying on
+    // the ctx sql storage. saveGoals lists the D1 store directly
+    // (no seed on save), so the read-back below is exactly the one
+    // saved goal.
+    const agent = new ScheduledAgent(
+      ctx as never,
+      { AGENT_DB: new MockD1Database() } as never,
+    );
     await (agent as any).saveGoals([
       {
         id: "goal-1",
@@ -408,7 +419,12 @@ describe("3123-P04 goals KV migrated", () => {
     expect(goals.map((g: any) => g.id)).toEqual(["goal-1"]);
   });
 
-  it("without SQL storage, the KV path still works (fallback, never a break)", async () => {
+  it("without D1 bound, saveGoals fails closed (no KV fallback)", async () => {
+    // Issue #6503 step 6(f) — the KV fallback is DELETED: without
+    // a bound AGENT_DB there is no store to save to, and the agent
+    // refuses instead of writing the "goals" KV key. The old test
+    // ("without SQL storage, the KV path still works") pinned the
+    // retired behavior; this pins its replacement.
     const kv = new Map<string, unknown>();
     const ctx = {
       storage: {
@@ -425,41 +441,26 @@ describe("3123-P04 goals KV migrated", () => {
       budgetCents: 1,
       enabled: true,
     };
-    await (agent as any).saveGoals([goal]);
-    expect(kv.get("goals")).toEqual([goal]);
-    expect((await (agent as any).listGoals()).map((g: any) => g.id)).toEqual(["goal-1"]);
+    await expect((agent as any).saveGoals([goal])).rejects.toThrow(
+      /AGENT_DB is not bound/,
+    );
+    expect(kv.has("goals")).toBe(false);
+    await expect((agent as any).listGoals()).rejects.toThrow(
+      /AGENT_DB is not bound/,
+    );
   });
 
-  it("ScheduledAgent no longer writes the goals KV key when SQL storage exists", () => {
+  it("ScheduledAgent never writes the goals KV key (D1-only)", () => {
     const body = source("src/agents/scheduled-agent.ts");
-    // Exactly three `put("goals"` writes, each inside its no-SQL
-    // fallback branch: getGoals seeds the fallback key only when
-    // empty and re-writes it when the #6293 reconciliation corrects
-    // the stale opportunity-hunt cron, and saveGoals persists the
-    // fallback key. The store path never touches the KV key.
-    
-    const writes = body.split('put("goals"').length - 1;
-    expect(writes).toBe(3);
-    const getGoals = body.slice(
-      body.indexOf("private async getGoals"),
-      body.indexOf("private async saveGoals"),
-    );
-    const saveGoals = body.slice(body.indexOf("private async saveGoals"));
-    // Two writes in getGoals (seed + #6293 reconciliation re-write),
-  // one in saveGoals.
-  expect(getGoals.split('put("goals"').length - 1).toBe(2);
-  expect(saveGoals.split('put("goals"').length - 1).toBe(1);
-  for (const method of [getGoals, saveGoals]) {
-      expect(method).toContain("if (!store)");
-      // Every put sits after the guard, inside the fallback branch.
-      let from = 0;
-      for (;;) {
-          const at = method.indexOf('put("goals"', from);
-        if (at < 0) break;
-        expect(at).toBeGreaterThan(method.indexOf("if (!store)"));
-        from = at + 1;
-      }
-    }
+    // Issue #6503 step 6(f) — the retired behavior was exactly
+    // three `put("goals"` writes (getGoals seed + #6293
+    // reconciliation re-write + saveGoals persistence), each inside
+    // a no-SQL fallback branch. The fallback is deleted: the "goals"
+    // KV key is never read or written anywhere in the agent, and the
+    // store is D1-only (fail-closed without AGENT_DB).
+    expect(body.split('put("goals"').length - 1).toBe(0);
+    expect(body.split('get("goals"').length - 1).toBe(0);
+    expect(body).toContain("AGENT_DB is not bound");
     expect(body).toContain("unified");
   });
 });
@@ -641,6 +642,12 @@ describe("3123-P10 before/after counts", () => {
     // index-schema module the ORM entry replaced referenced the table
     // only via the UNIFIED_SCHEDULES_TABLE const, so the literal did
     // not live there.) Adapters reference the const, never the literal.
+    // Issue #6503 — two more homes, both deliberate consequences of
+    // the D1 move: migration 0092's DDL lives in the D1 catalogue
+    // (src/data/schemaComponent/d1Catalogue.ts, table + index
+    // entries), and the Drizzle mapping names the table
+    // (src/data/drizzleSchema.ts, sqliteTable("unified_schedules")).
+    // 8 → 10.
     const literalHomes = liveSrcFiles()
       .filter((f) =>
         readFileSync(join(REPO_ROOT, f), "utf8").includes('"unified_schedules"'),
@@ -651,6 +658,8 @@ describe("3123-P10 before/after counts", () => {
       "src/client/AdminQueueWipePanel.tsx",
       "src/client/SchedulesPanel.tsx",
       "src/client/adminQueueApi.ts",
+      "src/data/drizzleSchema.ts",
+      "src/data/schemaComponent/d1Catalogue.ts",
       "src/data/schemaComponent/doCatalogue.ts",
       "src/data/schemaComponent/ormCatalogue.ts",
       "src/data/unifiedSchedulePorts.ts",

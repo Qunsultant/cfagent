@@ -3,17 +3,14 @@
  *
  * The internal maintenance sweeps (sweepStaleLedgerTasks,
  * sweepStaleAsyncJobs) and the schedule watchdog
- * (watchdogMissedSchedules) are code-armed SDK alarms
- * (OrchestratorAgent.onStart + scheduleEvery). Before this slice
- * they had no unified-store records and no home visibility, and —
- * verified first, per the resume note — only the watchdog wrote a
- * ledger row for its runs (its per-sweep heartbeat,
- * jobId schedule-watchdog-heartbeat); the two sweeps wrote none
- * (audit events + logs only). This slice derives ONE stable record
- * per duty (id = the ledger job id, kind internal, state active)
- * and appends all three to the home list with their last run joined
- * from the ledger, so a sweep that finds stale work — or a
- * watchdog that finds missed schedules — shows its counts.
+ * (watchdogMissedSchedules) are stored platform-level schedules
+ * (#6503): one stored row per duty (id = the ledger job id, kind
+ * internal, state paused, monthly interval), listed with their
+ * last run joined from the ledger, so a sweep that finds stale
+ * work — or a watchdog that finds missed schedules — shows its
+ * counts. The old derived records (synthesized at read time,
+ * management refused) are deleted: a row renders only when
+ * stored, and the verbs operate on the stored row.
  *
  * Recording reuses the #3394 wrapper (recordScheduleCallbackRun,
  * the ONE recorder — no second recorder): the two sweep methods
@@ -22,21 +19,19 @@
  * method is NOT wrapped — its heartbeat row already IS its run
  * row, and wrapping it would double-record every sweep. The
  * wrapper is called with the normalized schedule { id: RECORD_ID }
- * (never the SDK alarm id): the derived record is the ledger
+ * (never the SDK alarm id): the stored record is the ledger
  * identity, and the alarm id is a substrate id that changes on
  * re-arm. The watchdog keeps skipping the three by name
  * (RECORDED_SCHEDULE_CALLBACKS unchanged): its lookup is by alarm
  * id, and these rows are keyed by record id — it still cannot
  * observe them by schedule.id, so watching them would cry wolf.
- * Management ops refuse with a coded error naming the derived
- * record (pause / resume / trigger / update / delete — #5891
- * retired the delete no-op).
- * Sweep behavior is unchanged; no new firing is added.
+ * Sweep behavior is unchanged; the duties fire from their stored
+ * schedules, not SDK arms.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { UNIFIED_SCHEDULE_KINDS } from "../src/data/unifiedSchedulePorts";
+import { UNIFIED_SCHEDULE_KINDS, type UnifiedScheduleRecord } from "../src/data/unifiedSchedulePorts";
 import {
   STALE_LEDGER_SWEEP_RECORD_ID,
   STALE_LEDGER_SWEEP_DISPATCH_CRON,
@@ -52,9 +47,6 @@ import {
   STALE_LEDGER_SWEEP_ORIGIN,
   STALE_ASYNC_JOB_SWEEP_ORIGIN,
   SCHEDULE_WATCHDOG_ORIGIN,
-  staleLedgerSweepToRecord,
-  staleAsyncJobSweepToRecord,
-  scheduleWatchdogToRecord,
   staleLedgerSweepRecordToListItem,
   staleAsyncJobSweepRecordToListItem,
   scheduleWatchdogRecordToListItem,
@@ -63,7 +55,9 @@ import {
   deleteUnifiedSchedule,
   triggerUnifiedSchedule,
   updateUnifiedSchedule,
+  reconcileSystemScheduleRecords,
 } from "../src/services/unifiedScheduleManagement";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import { InMemoryUnifiedScheduleStore } from "../src/data/inMemoryUnifiedScheduleAdapter";
 import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
 import { scheduleIdToLedgerJobId } from "../src/services/jobRunRecords";
@@ -104,12 +98,105 @@ class SqliteTestStorage {
 const NOW = "2026-11-19T07:00:00.000Z";
 const RUN_STARTED = "2026-11-19T06:00:00.000Z";
 const RUN_FINISHED = "2026-11-19T06:00:05.000Z";
+const MONTHLY_SECONDS = 2_592_000;
 
-const DERIVED_IDS = [
+const STORED_IDS = [
   "sweep-stale-ledger-tasks",
   "sweep-stale-async-jobs",
   "schedule-watchdog",
 ] as const;
+
+const CALLBACKS: Record<string, string> = {
+  "sweep-stale-ledger-tasks": "sweepStaleLedgerTasks",
+  "sweep-stale-async-jobs": "sweepStaleAsyncJobs",
+  "schedule-watchdog": "watchdogMissedSchedules",
+};
+
+/** Minimal D1Database stand-in over node:sqlite (same as the #6503 repro). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: {
+                changes: info.changes,
+                last_row_id: info.lastInsertRowid,
+              },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+  async batch(statements: any[]) {
+    const results: any[] = [];
+    this.sqlite.exec("BEGIN");
+    try {
+      for (const stmt of statements) {
+        results.push(await stmt.run());
+      }
+      this.sqlite.exec("COMMIT");
+    } catch (err) {
+      this.sqlite.exec("ROLLBACK");
+      throw err;
+    }
+    return results;
+  }
+}
+
+/** A stored sweep/watchdog row, as the seed creates it (state set by the test). */
+function storedDutyRecord(
+  id: (typeof STORED_IDS)[number],
+  state: "active" | "paused",
+  createdAt = NOW,
+): UnifiedScheduleRecord {
+  return {
+    id,
+    kind: "internal",
+    state,
+    callback: CALLBACKS[id],
+    definition: {
+      type: "interval",
+      intervalSeconds: MONTHLY_SECONDS,
+      callback: CALLBACKS[id],
+    } as unknown as UnifiedScheduleRecord["definition"],
+    ownerLogin: null,
+    provenance: { origin: "system", createdBy: "system", reason: id, createdAt },
+    alarmId: null,
+    pausedAt: state === "paused" ? createdAt : null,
+    createdAt,
+    updatedAt: createdAt,
+  };
+}
+
+function alarmsStub(overrides: Record<string, unknown> = {}): any {
+  return {
+    list: async () => [],
+    get: async () => undefined,
+    cancel: async () => true,
+    arm: async () => ({ id: "new-1", callback: "sweepStaleLedgerTasks" }),
+    ...overrides,
+  };
+}
 
 function seedRun(sql: SqliteTestStorage, jobId: string, detail: string): void {
   recordLedgerRun(new SqlJobRunRecordStore(sql.sql as never), {
@@ -128,65 +215,58 @@ function seedRun(sql: SqliteTestStorage, jobId: string, detail: string): void {
   });
 }
 
-describe("4242 derived sweep + watchdog records", () => {
-  it("builds the one stable stale-ledger-sweep record (internal, active)", () => {
-    const record = staleLedgerSweepToRecord(NOW);
-    expect(record.id).toBe("sweep-stale-ledger-tasks");
+describe("4242 stored sweep + watchdog records", () => {
+  it("reconcile seeds the one stable record per duty (internal, paused, monthly)", async () => {
+    const store = new InMemoryUnifiedScheduleStore();
+    const result = await reconcileSystemScheduleRecords(
+      { store, alarms: alarmsStub() },
+      NOW,
+      { userLogin: "mars" },
+    );
+    for (const id of STORED_IDS) {
+      expect(result.seeded).toContain(id);
+      const record = await store.get(id);
+      expect(record?.id).toBe(id);
+      expect(record?.kind).toBe("internal");
+      expect(record?.state).toBe("paused");
+      expect(record?.callback).toBe(CALLBACKS[id]);
+      expect(
+        (record?.definition as unknown as Record<string, unknown>).intervalSeconds,
+      ).toBe(MONTHLY_SECONDS);
+      expect(
+        (record?.definition as unknown as Record<string, unknown>).cron,
+      ).toBeUndefined();
+      expect(record?.provenance.origin).toBe("system");
+      expect(record?.provenance.reason).toBe(id);
+      expect(record?.alarmId).toBeNull();
+      expect(record?.createdAt).toBe(NOW);
+      expect(record?.updatedAt).toBe(NOW);
+    }
     expect(STALE_LEDGER_SWEEP_RECORD_ID).toBe("sweep-stale-ledger-tasks");
-    expect(record.kind).toBe("internal");
-    expect(record.state).toBe("active");
-    expect(record.callback).toBe("sweepStaleLedgerTasks");
-    expect(record.definition.cron).toBe(STALE_LEDGER_SWEEP_DISPATCH_CRON);
-    expect(record.definition.cron).toBe("0 */6 * * *");
-    expect(record.definition.entryPoint).toBe("sweep-stale-ledger-tasks");
-    expect(record.provenance.origin).toBe("system");
-    expect(record.provenance.reason).toBe("sweep-stale-ledger-tasks");
-    expect(STALE_LEDGER_SWEEP_ORIGIN).toBe("sweep-stale-ledger-tasks");
-    expect(record.createdAt).toBe(NOW);
-    expect(record.updatedAt).toBe(NOW);
-  });
-
-  it("builds the one stable stale-async-job-sweep record (internal, active)", () => {
-    const record = staleAsyncJobSweepToRecord(NOW);
-    expect(record.id).toBe("sweep-stale-async-jobs");
     expect(STALE_ASYNC_JOB_SWEEP_RECORD_ID).toBe("sweep-stale-async-jobs");
-    expect(record.kind).toBe("internal");
-    expect(record.state).toBe("active");
-    expect(record.callback).toBe("sweepStaleAsyncJobs");
-    expect(record.definition.cron).toBe(STALE_ASYNC_JOB_SWEEP_DISPATCH_CRON);
-    expect(record.definition.cron).toBe("*/15 * * * *");
-    expect(record.definition.entryPoint).toBe("sweep-stale-async-jobs");
-    expect(record.provenance.origin).toBe("system");
-    expect(record.provenance.reason).toBe("sweep-stale-async-jobs");
-    expect(STALE_ASYNC_JOB_SWEEP_ORIGIN).toBe("sweep-stale-async-jobs");
-    expect(record.createdAt).toBe(NOW);
-    expect(record.updatedAt).toBe(NOW);
-  });
-
-  it("builds the one stable schedule-watchdog record (internal, active)", () => {
-    const record = scheduleWatchdogToRecord(NOW);
-    expect(record.id).toBe("schedule-watchdog");
     expect(SCHEDULE_WATCHDOG_RECORD_ID).toBe("schedule-watchdog");
-    expect(record.kind).toBe("internal");
-    expect(record.state).toBe("active");
-    expect(record.callback).toBe("watchdogMissedSchedules");
-    expect(record.definition.cron).toBe(SCHEDULE_WATCHDOG_DISPATCH_CRON);
-    expect(record.definition.cron).toBe("*/15 * * * *");
-    expect(record.definition.entryPoint).toBe("schedule-watchdog");
-    expect(record.provenance.origin).toBe("system");
-    expect(record.provenance.reason).toBe("schedule-watchdog");
+    expect(STALE_LEDGER_SWEEP_ORIGIN).toBe("sweep-stale-ledger-tasks");
+    expect(STALE_ASYNC_JOB_SWEEP_ORIGIN).toBe("sweep-stale-async-jobs");
     expect(SCHEDULE_WATCHDOG_ORIGIN).toBe("schedule-watchdog");
-    expect(record.createdAt).toBe(NOW);
-    expect(record.updatedAt).toBe(NOW);
+    // The ledger sweep seeds with its owner's login in the payload.
+    const ledger = await store.get("sweep-stale-ledger-tasks");
+    expect(
+      (ledger?.definition as unknown as Record<string, unknown>).payload,
+    ).toEqual({ userLogin: "mars" });
   });
 
-  it("reads each cadence from the firing interval, never re-literalized", () => {
+  it("the stored rows run monthly; the old firing intervals are retired", () => {
     const orchestrator = source("src/agents/orchestrator.ts");
-    expect(orchestrator).toContain("STALE_SWEEP_INTERVAL_SECONDS = 6 * 60 * 60");
-    expect(orchestrator).toContain("STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS = 15 * 60");
-    expect(orchestrator).toContain(
+    expect(orchestrator).not.toContain("STALE_SWEEP_INTERVAL_SECONDS = 6 * 60 * 60");
+    expect(orchestrator).not.toContain("STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS = 15 * 60");
+    expect(orchestrator).not.toContain(
       "SCHEDULE_WATCHDOG_INTERVAL_SECONDS = STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS",
     );
+    expect(orchestrator).not.toContain("scheduleEvery(STALE_SWEEP_INTERVAL_SECONDS");
+    expect(orchestrator).not.toContain("scheduleEvery(STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS");
+    expect(orchestrator).not.toContain("scheduleEvery(SCHEDULE_WATCHDOG_INTERVAL_SECONDS");
+    // The dispatch crons survive only as the retired firing rules'
+    // values (ledger history), never re-literalized elsewhere.
     expect(STALE_LEDGER_SWEEP_DISPATCH_CRON).toBe("0 */6 * * *");
     expect(STALE_ASYNC_JOB_SWEEP_DISPATCH_CRON).toBe("*/15 * * * *");
     expect(SCHEDULE_WATCHDOG_DISPATCH_CRON).toBe("*/15 * * * *");
@@ -198,16 +278,19 @@ describe("4242 derived sweep + watchdog records", () => {
     expect(UNIFIED_SCHEDULE_KINDS).not.toContain("schedule-watchdog");
   });
 
-  it("preserves createdAt across in-place updates (upsert, not recreate)", () => {
-    const first = staleLedgerSweepToRecord("2026-11-18T07:00:00.000Z");
-    const second = staleLedgerSweepToRecord(NOW, first);
-    expect(second.createdAt).toBe("2026-11-18T07:00:00.000Z");
-    expect(second.updatedAt).toBe(NOW);
-    expect(second.id).toBe(first.id);
-    const wFirst = scheduleWatchdogToRecord("2026-11-18T07:00:00.000Z");
-    const wSecond = scheduleWatchdogToRecord(NOW, wFirst);
-    expect(wSecond.createdAt).toBe("2026-11-18T07:00:00.000Z");
-    expect(wSecond.id).toBe(wFirst.id);
+  it("an in-place update preserves createdAt (upsert, not recreate)", async () => {
+    const store = new InMemoryUnifiedScheduleStore();
+    await store.save(storedDutyRecord("sweep-stale-ledger-tasks", "active", "2026-11-18T07:00:00.000Z"));
+    const paused = await pauseUnifiedSchedule({ store, alarms: alarmsStub() }, "sweep-stale-ledger-tasks", NOW);
+    expect(paused.ok).toBe(true);
+    const after = await store.get("sweep-stale-ledger-tasks");
+    expect(after?.createdAt).toBe("2026-11-18T07:00:00.000Z");
+    expect(after?.updatedAt).toBe(NOW);
+    expect(after?.id).toBe("sweep-stale-ledger-tasks");
+    await store.save(storedDutyRecord("schedule-watchdog", "active", "2026-11-18T07:00:00.000Z"));
+    const wPaused = await pauseUnifiedSchedule({ store, alarms: alarmsStub() }, "schedule-watchdog", NOW);
+    expect(wPaused.ok).toBe(true);
+    expect((await store.get("schedule-watchdog"))?.createdAt).toBe("2026-11-18T07:00:00.000Z");
   });
 });
 
@@ -253,7 +336,7 @@ describe("4242 sweep outcome mapping (the #3394 wrapper's delegate truth)", () =
 
 describe("4242 sweep + watchdog list items (Schedules home rows)", () => {
   it("carries the last run joined from the ledger, counts in detail", () => {
-    const item = staleLedgerSweepRecordToListItem(staleLedgerSweepToRecord(NOW), {
+    const item = staleLedgerSweepRecordToListItem(storedDutyRecord("sweep-stale-ledger-tasks", "active"), {
       started: RUN_STARTED,
       finished: RUN_FINISHED,
       outcome: "success",
@@ -262,26 +345,29 @@ describe("4242 sweep + watchdog list items (Schedules home rows)", () => {
     expect(item.id).toBe("sweep-stale-ledger-tasks");
     expect(item.kind).toBe("internal");
     expect(item.callback).toBe("sweepStaleLedgerTasks");
-    expect(item.cron).toBe("0 */6 * * *");
+    // The stored row is a monthly interval, not the old 6h cron.
+    expect(item.cron).toBeUndefined();
+    expect(item.intervalSeconds).toBe(MONTHLY_SECONDS);
     expect(item.lastRunAt).toBe(RUN_STARTED);
     expect(item.lastRunOutcome).toBe("success");
     expect(item.lastRunDetail).toBe("research swept=2 pruned=3; screener swept=1 pruned=0");
   });
 
   it("carries the async-job sweep's last run with its counts", () => {
-    const item = staleAsyncJobSweepRecordToListItem(staleAsyncJobSweepToRecord(NOW), {
+    const item = staleAsyncJobSweepRecordToListItem(storedDutyRecord("sweep-stale-async-jobs", "active"), {
       started: RUN_STARTED,
       finished: RUN_FINISHED,
       outcome: "success",
       detail: "examined=10 alerted=1 reaped=2",
     });
     expect(item.id).toBe("sweep-stale-async-jobs");
+    expect(item.intervalSeconds).toBe(MONTHLY_SECONDS);
     expect(item.lastRunAt).toBe(RUN_STARTED);
     expect(item.lastRunDetail).toBe("examined=10 alerted=1 reaped=2");
   });
 
   it("carries the watchdog's last heartbeat with its counts", () => {
-    const item = scheduleWatchdogRecordToListItem(scheduleWatchdogToRecord(NOW), {
+    const item = scheduleWatchdogRecordToListItem(storedDutyRecord("schedule-watchdog", "active"), {
       started: RUN_STARTED,
       finished: RUN_FINISHED,
       outcome: "success",
@@ -289,20 +375,21 @@ describe("4242 sweep + watchdog list items (Schedules home rows)", () => {
     });
     expect(item.id).toBe("schedule-watchdog");
     expect(item.callback).toBe("watchdogMissedSchedules");
-    expect(item.cron).toBe("*/15 * * * *");
+    expect(item.cron).toBeUndefined();
+    expect(item.intervalSeconds).toBe(MONTHLY_SECONDS);
     expect(item.lastRunAt).toBe(RUN_STARTED);
     expect(item.lastRunDetail).toBe("examined=0 missed=0 skippedUnrecorded=3");
   });
 
   it("carries no last run when a duty has never fired", () => {
     expect(
-      staleLedgerSweepRecordToListItem(staleLedgerSweepToRecord(NOW)).lastRunAt,
+      staleLedgerSweepRecordToListItem(storedDutyRecord("sweep-stale-ledger-tasks", "paused")).lastRunAt,
     ).toBeUndefined();
     expect(
-      staleAsyncJobSweepRecordToListItem(staleAsyncJobSweepToRecord(NOW)).lastRunAt,
+      staleAsyncJobSweepRecordToListItem(storedDutyRecord("sweep-stale-async-jobs", "paused")).lastRunAt,
     ).toBeUndefined();
     expect(
-      scheduleWatchdogRecordToListItem(scheduleWatchdogToRecord(NOW)).lastRunAt,
+      scheduleWatchdogRecordToListItem(storedDutyRecord("schedule-watchdog", "paused")).lastRunAt,
     ).toBeUndefined();
   });
 });
@@ -342,62 +429,107 @@ describe("4242 home naming + classifier + ledger join", () => {
   });
 });
 
-describe("4242 management refuses the derived records with coded errors", () => {
-  const alarms: any = {
-    list: async () => [],
-    get: async () => undefined,
-    cancel: async () => true,
-    arm: async () => ({ id: "new-1", callback: "sweepStaleLedgerTasks" }),
-  };
-
-  it.each(DERIVED_IDS)("pause / resume name the derived record %s", async (id) => {
+describe("4242 management works on the stored sweep + watchdog records (no derived refusal)", () => {
+  it.each(STORED_IDS)("pause pauses the stored %s row", async (id) => {
     const store = new InMemoryUnifiedScheduleStore();
-    const paused = await pauseUnifiedSchedule({ store, alarms }, id, NOW);
-    expect(paused.ok).toBe(false);
-    if (!paused.ok) {
-      expect(paused.status).toBe(400);
-      expect(paused.error).toContain(id);
-    }
-    const resumed = await resumeUnifiedSchedule({ store, alarms }, id, NOW);
-    expect(resumed.ok).toBe(false);
-    if (!resumed.ok) {
-      expect(resumed.status).toBe(400);
-      expect(resumed.error).toContain(id);
-    }
+    await store.save(storedDutyRecord(id, "active"));
+    const paused = await pauseUnifiedSchedule({ store, alarms: alarmsStub() }, id, NOW);
+    expect(paused.ok).toBe(true);
+    if (paused.ok) expect(paused.record.state).toBe("paused");
+    expect((await store.get(id))?.state).toBe("paused");
   });
 
-  it.each(DERIVED_IDS)("trigger / update name the derived record %s", async (id) => {
+  it.each(STORED_IDS)("resume re-arms the stored paused %s row from its own monthly timing", async (id) => {
     const store = new InMemoryUnifiedScheduleStore();
-    const triggered = await triggerUnifiedSchedule({ store, alarms }, id, async () => {});
-    expect(triggered.ok).toBe(false);
-    if (!triggered.ok) {
-      expect(triggered.status).toBe(400);
-      expect(triggered.error).toContain(id);
-      expect(triggered.error).not.toContain("Goal schedules");
-    }
-    const updated = await updateUnifiedSchedule(
-      { store, alarms },
+    await store.save(storedDutyRecord(id, "paused"));
+    const arm = vi.fn(async () => ({ id: "alarm-9", callback: CALLBACKS[id] }));
+    const resumed = await resumeUnifiedSchedule(
+      { store, alarms: alarmsStub({ arm }) },
       id,
-      { cron: "0 5 * * *" },
-      Date.now(),
+      NOW,
     );
-    expect(updated.ok).toBe(false);
-    if (!updated.ok) {
-      expect(updated.status).toBe(400);
-      expect(updated.error).toContain(id);
-      expect(updated.error).not.toContain("Goal schedules");
+    expect(resumed.ok).toBe(true);
+    if (resumed.ok) {
+      expect(resumed.record.state).toBe("active");
+      expect(resumed.record.alarmId).toBe("alarm-9");
+    }
+    expect(arm).toHaveBeenCalledTimes(1);
+    const [timing] = arm.mock.calls[0] as unknown as Array<Record<string, unknown>>;
+    expect(timing).toEqual({ type: "interval", intervalSeconds: MONTHLY_SECONDS });
+  });
+
+  it.each(STORED_IDS)("trigger runs the stored active %s row and stamps triggered", async (id) => {
+    const store = new InMemoryUnifiedScheduleStore();
+    await store.save({ ...storedDutyRecord(id, "active"), alarmId: "alarm-1" });
+    const seen: Array<{ callback: string; payload: unknown }> = [];
+    const triggered = await triggerUnifiedSchedule(
+      {
+        store,
+        alarms: alarmsStub({
+          get: async () => ({ id: "alarm-1", callback: CALLBACKS[id], payload: {} }),
+        }),
+      },
+      id,
+      async (callback: string, payload: unknown) => {
+        seen.push({ callback, payload });
+      },
+    );
+    expect(triggered.ok).toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].callback).toBe(CALLBACKS[id]);
+    expect((seen[0].payload as Record<string, unknown>).trigger).toBe("triggered");
+  });
+
+  it.each(STORED_IDS)("update re-times the stored paused %s row without an alarm", async (id) => {
+    const store = new InMemoryUnifiedScheduleStore();
+    await store.save(storedDutyRecord(id, "paused"));
+    const updated = await updateUnifiedSchedule(
+      { store, alarms: alarmsStub() },
+      id,
+      { intervalSeconds: MONTHLY_SECONDS * 2 },
+      Date.parse(NOW),
+    );
+    expect(updated.ok).toBe(true);
+    if (updated.ok) {
+      expect(updated.record.state).toBe("paused");
+      const def = updated.record.definition as unknown as Record<string, unknown>;
+      expect(def.intervalSeconds).toBe(MONTHLY_SECONDS * 2);
+      expect(updated.record.createdAt).toBe(NOW);
     }
   });
 
-  it.each(DERIVED_IDS)("delete refuses the derived record %s with a named error (#5891)", async (id) => {
+  it.each(STORED_IDS)("delete removes the stored %s row and it stays gone", async (id) => {
     const store = new InMemoryUnifiedScheduleStore();
-    const deleted = await deleteUnifiedSchedule({ store, alarms }, id);
-    expect(deleted.ok).toBe(false);
-    if (!deleted.ok) {
-      expect(deleted.status).toBe(400);
-      expect(deleted.error).toContain(id);
-      expect(deleted.error).toContain("derived record");
-      expect(deleted.error).not.toContain("Goal schedules");
+    await store.save(storedDutyRecord(id, "paused"));
+    const deleted = await deleteUnifiedSchedule({ store, alarms: alarmsStub() }, id);
+    expect(deleted.ok).toBe(true);
+    if (deleted.ok) expect(deleted.cancelled).toBe(true);
+    expect(await store.get(id)).toBeUndefined();
+  });
+
+  it.each(STORED_IDS)("a missing %s row 404s every verb, never a derived refusal", async (id) => {
+    const store = new InMemoryUnifiedScheduleStore();
+    // The strict alarms port: cancelling an unknown id is false
+    // (nothing was there), like the real port's contract.
+    const deps = { store, alarms: alarmsStub({ cancel: async () => false }) };
+    const cases: Array<{ result: Awaited<ReturnType<typeof pauseUnifiedSchedule>>; message: string }> = [
+      { result: await pauseUnifiedSchedule(deps, id, NOW), message: "not found" },
+      { result: await resumeUnifiedSchedule(deps, id, NOW), message: "is not paused" },
+      { result: await deleteUnifiedSchedule(deps, id), message: "not found" },
+      { result: await triggerUnifiedSchedule(deps, id, async () => {}), message: "not found" },
+      {
+        result: await updateUnifiedSchedule(deps, id, { intervalSeconds: MONTHLY_SECONDS }, Date.parse(NOW)),
+        message: "not found",
+      },
+    ];
+    for (const { result, message } of cases) {
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.status).toBe(404);
+        expect(result.error).toContain(id);
+        expect(result.error).toContain(message);
+        expect(result.error).not.toContain("derived");
+      }
     }
   });
 });
@@ -523,21 +655,28 @@ describe("4242 orchestrator methods record through the #3394 wrapper (source pin
     expect(cb).toContain("watchdogMissedSchedules(await this.scheduleWatchdogContext()");
   });
 
-  it("the slice adds no new firing: the three duties keep their existing arming", () => {
+  it("the three duties fire from their stored schedules, not SDK arms", () => {
     const text = source("src/agents/orchestrator.ts");
-    expect(text).toContain("scheduleEvery(STALE_SWEEP_INTERVAL_SECONDS");
-    expect(text).toContain("scheduleEvery(STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS");
-    expect(text).toContain("scheduleEvery(SCHEDULE_WATCHDOG_INTERVAL_SECONDS");
+    // The methods still exist and still record through the #3394
+    // wrapper (pinned above); the onStart scheduleEvery arms are
+    // retired — the stored schedule is the one arming mechanism.
+    expect(text).toContain("async sweepStaleLedgerTasks(");
+    expect(text).toContain("async sweepStaleAsyncJobs(");
+    expect(text).toContain("async watchdogMissedSchedules(");
+    expect(text).not.toContain("scheduleEvery(STALE_SWEEP_INTERVAL_SECONDS");
+    expect(text).not.toContain("scheduleEvery(STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS");
+    expect(text).not.toContain("scheduleEvery(SCHEDULE_WATCHDOG_INTERVAL_SECONDS");
   });
 });
 
-describe("4242 list route appends the three rows (best-effort)", () => {
+describe("4242 list route reads the three stored rows (no synthesis)", () => {
   let sql: SqliteTestStorage;
   let ctx: SchedulesRouteContext;
+  let d1: MockD1Database;
 
   function baseCtx(overrides: Partial<SchedulesRouteContext> = {}): SchedulesRouteContext {
     return {
-      env: {},
+      env: { AGENT_DB: d1 },
       agentCtx: { storage: { sql: sql.sql as never } } as never,
       audit: vi.fn(),
       listSchedules: vi.fn(async () => []),
@@ -562,9 +701,20 @@ describe("4242 list route appends the three rows (best-effort)", () => {
     seedRun(sql, SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID, "examined=0 missed=0 skippedUnrecorded=3");
   }
 
-  beforeEach(() => {
+  /** The three stored rows the list renders (D1 only, #6503 fail-closed). */
+  async function seedStoredDutyRows() {
+    const store = createD1UnifiedSchedulePorts({ d1: d1 as never }).unifiedSchedules;
+    // Paused: the seed default — and the list renders a stored row
+    // from the store only when paused (an active row renders
+    // through its live alarm, which this fixture has none of).
+    for (const id of STORED_IDS) await store.save(storedDutyRecord(id, "paused"));
+  }
+
+  beforeEach(async () => {
     sql = new SqliteTestStorage();
+    d1 = new MockD1Database();
     ctx = baseCtx();
+    await seedStoredDutyRows();
   });
 
   async function list() {
@@ -574,40 +724,46 @@ describe("4242 list route appends the three rows (best-effort)", () => {
     return (await res!.json()) as { schedules: Array<Record<string, unknown>> };
   }
 
-  it("appends all three rows with their last runs when the ledger has runs", async () => {
+  it("shows all three stored rows with their last runs when the ledger has runs", async () => {
     seedRuns();
     const body = await list();
     const ledger = body.schedules.find((s) => s.id === "sweep-stale-ledger-tasks");
     expect(ledger).toBeDefined();
     expect(ledger?.kind).toBe("internal");
     expect(ledger?.callback).toBe("sweepStaleLedgerTasks");
-    expect(ledger?.cron).toBe("0 */6 * * *");
-    expect(ledger?.state).toBe("active");
+    expect(ledger?.cron).toBeUndefined();
+    expect(ledger?.intervalSeconds).toBe(MONTHLY_SECONDS);
+    expect(ledger?.state).toBe("paused");
     expect(ledger?.lastRunAt).toBe(RUN_STARTED);
     expect(ledger?.lastRunOutcome).toBe("success");
     expect(ledger?.lastRunDetail).toBe("research swept=2 pruned=3; screener swept=1 pruned=0");
     const asyncJobs = body.schedules.find((s) => s.id === "sweep-stale-async-jobs");
     expect(asyncJobs).toBeDefined();
     expect(asyncJobs?.callback).toBe("sweepStaleAsyncJobs");
-    expect(asyncJobs?.cron).toBe("*/15 * * * *");
+    expect(asyncJobs?.cron).toBeUndefined();
+    expect(asyncJobs?.intervalSeconds).toBe(MONTHLY_SECONDS);
     expect(asyncJobs?.lastRunDetail).toBe("examined=10 alerted=1 reaped=2");
     const watchdog = body.schedules.find((s) => s.id === "schedule-watchdog");
     expect(watchdog).toBeDefined();
     expect(watchdog?.callback).toBe("watchdogMissedSchedules");
-    expect(watchdog?.cron).toBe("*/15 * * * *");
+    expect(watchdog?.cron).toBeUndefined();
+    expect(watchdog?.intervalSeconds).toBe(MONTHLY_SECONDS);
     expect(watchdog?.lastRunDetail).toBe("examined=0 missed=0 skippedUnrecorded=3");
   });
 
-  it("appends the rows with no last run when the duties have never fired", async () => {
+  it("shows the stored rows with no last run when the duties have never fired", async () => {
     const body = await list();
-    for (const id of DERIVED_IDS) {
+    for (const id of STORED_IDS) {
       const row = body.schedules.find((s) => s.id === id);
       expect(row).toBeDefined();
       expect(row?.lastRunAt).toBeUndefined();
     }
   });
 
-  it("omits the rows (list still 200) when the ledger read throws", async () => {
+  it("keeps the stored rows without a last run (list still 200) when the ledger read throws", async () => {
+    // The ledger read fails but the unified-store list still works:
+    // only job_run_records queries throw. The stored rows render
+    // without their last runs — a ledger failure never drops a row.
     const ledgerDownSql = {
       exec: (query: string, ...params: unknown[]) => {
         if (query.includes("job_run_records")) throw new Error("sql down");
@@ -621,8 +777,10 @@ describe("4242 list route appends the three rows (best-effort)", () => {
     const res = await handleSchedulesRoutes(req, new URL(req.url), "/api/schedules", "sess", throwing);
     expect(res?.status).toBe(200);
     const body = (await res!.json()) as { schedules: Array<Record<string, unknown>> };
-    for (const id of DERIVED_IDS) {
-      expect(body.schedules.find((s) => s.id === id)).toBeUndefined();
+    for (const id of STORED_IDS) {
+      const row = body.schedules.find((s) => s.id === id);
+      expect(row).toBeDefined();
+      expect(row?.lastRunAt).toBeUndefined();
     }
   });
 });
@@ -697,11 +855,14 @@ describe("4242 runs routes join the three records to their ledger rows", () => {
   });
 });
 
-describe("4242 detail route answers the three derived records", () => {
-  it.each(DERIVED_IDS)("GET /api/schedules/%s returns the derived detail, not 404", async (id) => {
+describe("4242 detail route answers the three stored records", () => {
+  it.each(STORED_IDS)("GET /api/schedules/%s returns the stored detail, not 404", async (id) => {
     const sql = new SqliteTestStorage();
+    const d1 = new MockD1Database();
+    const store = createD1UnifiedSchedulePorts({ d1: d1 as never }).unifiedSchedules;
+    await store.save(storedDutyRecord(id, "active"));
     const ctx = {
-      env: {},
+      env: { AGENT_DB: d1 },
       agentCtx: { storage: { sql: sql.sql as never } } as never,
       audit: vi.fn(),
       listSchedules: vi.fn(async () => []),

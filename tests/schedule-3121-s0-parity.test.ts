@@ -28,7 +28,6 @@ import {
 import { CREATABLE_SCHEDULE_CALLBACKS } from "../src/agents/orchestrator/scheduleCallbacks";
 import { DEFAULT_SCHEDULES, isDue } from "../src/schedule";
 import {
-  RESEARCH_SCHEDULED_LAST_RUN_KEY,
   researchTickDateKey,
   shouldFireResearchTick,
 } from "../src/services/researchScheduleGuard";
@@ -378,7 +377,9 @@ describe("S0-P10 tick evaluation (B-T3-01): goals are tick-polled inside the one
     // one recurring SDK alarm (`scheduleEvery`, `onCron` in-process),
     // not via the Worker cron. No goal gets its own SDK schedule.
     expect(agent).toContain("via the one recurring SDK alarm");
-    expect(agent).toContain("isDue(goal.cron, goal.lastRun, now, goal.timeZone, { subDailyOptIn: goal.subDailyOptIn === true })");
+    // Issue #6503 (G3) — the tick passes the stored state into the
+    // due-check, so isDue itself answers false for a paused row.
+    expect(agent).toContain("isDue(goal.cron, goal.lastRun, now, goal.timeZone, { subDailyOptIn: goal.subDailyOptIn === true, paused: !goal.enabled })");
   });
 });
 
@@ -519,7 +520,6 @@ describe("S0-P19 piggyback research guard (B-T1-04): exactly once per weekday at
   it("pins the guard constants", () => {
     // #6030 — the fire hour is one declaration: the research config.
     expect(DEFAULT_RESEARCH_JOB_CONFIG.scheduleUtcHour).toBe(21);
-    expect(RESEARCH_SCHEDULED_LAST_RUN_KEY).toBe("research_scheduled_last_run");
     expect(researchTickDateKey(new Date(Date.UTC(2026, 9, 19, 23, 59)))).toBe("2026-10-19");
   });
 
@@ -565,7 +565,14 @@ describe("S0-P21 chain graph and recovery (B-T4-02/04): graph columns, LIMIT 100
     expect(adapter).toContain("ORDER BY created_at ASC LIMIT 100");
     const jobs = read("src/agents/orchestrator/asyncJobs.ts");
     expect(jobs).toContain("30 * 24 * 60 * 60 * 1000");
-    expect(jobs).toContain("2 * 60 * 60 * 1000");
+    // Issue #6503 step 13 — the 2h reap backstop is externalized:
+    // the literal lives in the config module now (managed
+    // `asyncJob.staleRunningReapMs`, default 2h), and asyncJobs.ts
+    // resolves it per call instead of carrying the literal.
+    const reapConfig = read("src/config/staleAsyncJobReap.ts");
+    expect(reapConfig).toContain("2 * 60 * 60 * 1000");
+    expect(reapConfig).toContain("DEFAULT_STALE_RUNNING_REAP_MS");
+    expect(jobs).toContain("DEFAULT_STALE_RUNNING_REAP_MS");
     expect(jobs).toContain("retry: { maxAttempts: 1 }");
   });
 });
@@ -644,12 +651,19 @@ describe("S0-P25 provenance gap (B-L-04): S1 stamps provenance on the create rou
   });
 });
 
-describe("S0-P26 type-2 instances: pushTicks and the stale sweep ride scheduleEvery", () => {
-  it("pins the ticker callback name and the 6-hour stale sweep", () => {
+describe("S0-P26 type-2 instances: pushTicks rides scheduleEvery; the stale sweep is a stored schedule", () => {
+  it("pins the ticker callback name and the stored stale-sweep schedule", () => {
     expect(TICKER_PUSH_CALLBACK).toBe("pushTicks");
+    // Issue #6503 — the 6-hour ensure* arm is deleted: the
+    // stale-ledger sweep is a real stored schedule (monthly
+    // interval, created paused), seeded by the reconcile and fired
+    // through the one control plane — never by an onStart arm.
+    const management = read("src/services/unifiedScheduleManagement.ts");
+    expect(management).toContain("sweepStaleLedgerTasks");
+    expect(management).toContain("reconcileSystemScheduleRecords");
     const orchestrator = read("src/agents/orchestrator.ts");
-    expect(orchestrator).toContain("STALE_SWEEP_INTERVAL_SECONDS = 6 * 60 * 60");
-    expect(orchestrator).toContain('scheduleEvery(STALE_SWEEP_INTERVAL_SECONDS, "sweepStaleLedgerTasks"');
+    expect(orchestrator).not.toContain("STALE_SWEEP_INTERVAL_SECONDS");
+    expect(orchestrator).not.toContain("ensureStaleSweepSchedule");
   });
 });
 

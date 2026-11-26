@@ -8,7 +8,8 @@
  *
  * - 3124-P01 one scan per tick: a tick evaluates from one
  *   `listByKind("goal")` scan; the save step reuses the loaded
- *   snapshot instead of re-listing.
+ *   snapshot instead of re-listing. (#6503: the scan is counted on
+ *   the D1 unified store — the DO SqlStorage seam is retired.)
  * - 3124-P02 one scan per manual trigger: `triggerGoal` does one
  *   scan on the job path and one on the no-job restore path (the
  *   restore reuses the same snapshot); lastRun restore behavior
@@ -80,7 +81,6 @@ vi.mock("../src/security/etradeOAuth", () => ({
   isTokenExpiredEt: vi.fn(() => false),
 }));
 
-import type { SqlStorage } from "../src/orm";
 import { SqlUnifiedScheduleStore } from "../src/data/doSqliteUnifiedScheduleAdapter";
 import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
 import type { UnifiedScheduleRecord } from "../src/data/unifiedSchedulePorts";
@@ -88,6 +88,8 @@ import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 import type { JobRunRecord } from "../src/services/jobRunRecords";
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
 import { compileGoal } from "../src/orchestrate";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 
 function source(rel: string): string {
   return readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
@@ -112,29 +114,16 @@ function liveSrcFiles(): string[] {
   return out;
 }
 
-/** node:sqlite double for the SqlStorage seam (same shape as #2964). */
-class SqliteTestStorage {
-  readonly sqlite = new DatabaseSync(":memory:");
-  get sql(): SqliteTestStorage {
-    return this;
-  }
-  exec(query: string, ...params: unknown[]): unknown[] {
-    const stmt = this.sqlite.prepare(query);
-    if (/^\s*(SELECT|PRAGMA)/i.test(query)) {
-      return stmt.all(...(params as never[])) as unknown[];
-    }
-    stmt.run(...(params as never[]));
-    return [];
-  }
-}
-
-/**
- * Counting wrapper over the test storage: exact per-shape SELECT
- * counts on the two consolidated tables. A `listByKind("goal")` is
- * exactly one kind-scan exec; `list()` exactly one list-scan; the
- * ledger `listRecent` exactly one recent-scan. DDL, upserts, and
- * KV traffic never match these shapes.
- */
+/** The D1 statement shapes the adapter actually emits (verified
+ * against src/data/d1UnifiedScheduleAdapter.ts): `listByKind` is
+ * one `select ... where "kind" = ?`; `list()` one bare `select ...
+ * order by`; `save` one upsert `insert ... on conflict ... do
+ * update`; `remove` one `delete ... where "id" = ?`. Migration
+ * statements — CREATE / `_migrations` markers / the 0092 seed
+ * `INSERT OR IGNORE` with a bare table name — match none of them.
+ * (#6503: the DO SqlStorage counting seam is retired with the DO
+ * store; counts move to the D1 statements, same shapes as
+ * schedule-3121-4205-dirty-check.test.ts.) */
 type ScanCounts = {
   kindScan: number;
   listScan: number;
@@ -142,23 +131,53 @@ type ScanCounts = {
   recentScan: number;
   byJobScan: number;
 };
-class CountingStorage implements SqlStorage {
+class CountingD1 {
   counts: ScanCounts = { kindScan: 0, listScan: 0, stateScan: 0, recentScan: 0, byJobScan: 0 };
-  constructor(private inner: SqliteTestStorage) {}
-  get sqlite(): DatabaseSync {
-    return this.inner.sqlite;
-  }
+  constructor(private inner: MockD1Database) {}
   reset(): void {
     this.counts = { kindScan: 0, listScan: 0, stateScan: 0, recentScan: 0, byJobScan: 0 };
   }
-  exec(query: string, ...params: unknown[]): unknown[] {
-    const q = query.replace(/\s+/g, " ");
-    if (/SELECT \* FROM unified_schedules WHERE kind/.test(q)) this.counts.kindScan++;
-    else if (/SELECT \* FROM unified_schedules WHERE state/.test(q)) this.counts.stateScan++;
-    else if (/SELECT \* FROM unified_schedules ORDER BY/.test(q)) this.counts.listScan++;
-    else if (/SELECT \* FROM job_run_records ORDER BY started DESC/.test(q)) this.counts.recentScan++;
-    else if (/SELECT \* FROM job_run_records WHERE job_id/.test(q)) this.counts.byJobScan++;
-    return this.inner.exec(query, ...params);
+  prepare(sql: string) {
+    const stmt = this.inner.prepare(sql);
+    const norm = sql.replace(/\s+/g, " ");
+    const count = () => {
+      if (/^select .* from "unified_schedules" where "unified_schedules"\."kind" = \?/i.test(norm)) {
+        this.counts.kindScan++;
+      } else if (/^select .* from "unified_schedules" where "unified_schedules"\."state" = \?/i.test(norm)) {
+        this.counts.stateScan++;
+      } else if (/^select .* from "unified_schedules" order by/i.test(norm)) {
+        this.counts.listScan++;
+      }
+      // No D1 equivalent for recentScan/byJobScan: job run records
+      // live in the ctx.storage KV "jobRunRecords" key (#6503), so
+      // those counters stay 0 by construction.
+    };
+    return {
+      bind: (...params: unknown[]) => {
+        const bound = stmt.bind(...params);
+        return {
+          run: async () => {
+            count();
+            return bound.run();
+          },
+          all: async () => {
+            count();
+            return bound.all();
+          },
+          first: async () => {
+            count();
+            return bound.first();
+          },
+          raw: async () => {
+            count();
+            return bound.raw();
+          },
+        };
+      },
+    };
+  }
+  async batch(statements: any[]) {
+    return this.inner.batch(statements);
   }
 }
 
@@ -172,19 +191,28 @@ function makeEnv() {
   } as any;
 }
 
-/** A SQL-backed agent whose store scans are counted. */
-function makeCountedAgent() {
-  const counting = new CountingStorage(new SqliteTestStorage());
+/** A D1-backed agent whose store scans are counted. */
+async function makeCountedAgent() {
+  const counting = new CountingD1(new MockD1Database());
   const kv = new Map<string, unknown>();
   const ctx = {
     storage: {
       get: async (k: string) => (kv.has(k) ? kv.get(k) : undefined),
       put: async (k: string, v: unknown) => void kv.set(k, v),
-      sql: counting as never,
+      delete: async (k: string) => void kv.delete(k),
     },
   };
-  const agent = new (ScheduledAgent as any)(ctx, makeEnv());
-  const store = new SqlUnifiedScheduleStore(counting as never);
+  // #6503 — the unified store lives in D1 only (fail-closed without
+  // AGENT_DB); the counting D1 is the store. Job run records stay in
+  // the ctx.storage KV "jobRunRecords" key, unchanged.
+  const agent = new (ScheduledAgent as any)(ctx, { ...makeEnv(), AGENT_DB: counting as never });
+  const store = createD1UnifiedSchedulePorts({ d1: counting as never }).unifiedSchedules;
+  // The first store op lazily ensures the schema and migration
+  // 0092's seeds land (5 system rows + 9 goals); clear them so the
+  // fixtures below are the only rows (same pattern as the #6503 G3
+  // goals-tick file). The clear runs before any counting reset, so
+  // the ensure's statements never enter the pins.
+  await store.clear();
   return { agent, kv, counting, store };
 }
 
@@ -223,14 +251,14 @@ afterEach(() => {
 
 describe("3124-P01 one scan per tick", () => {
   it("a tick evaluates from one listByKind(goal) scan; not-due goals stay untouched", async () => {
-    const { agent, counting, store } = makeCountedAgent();
+    const { agent, counting, store } = await makeCountedAgent();
     const nowIso = new Date().toISOString();
     // Three goals, all not due (lastRun = now, so the 23h guard holds).
     for (let i = 0; i < 3; i++) {
-      store.save(goalToRecord(testGoal({ id: `goal-${i}`, lastRun: nowIso }) as any));
+      await store.save(goalToRecord(testGoal({ id: `goal-${i}`, lastRun: nowIso }) as any));
     }
     // One screen row: the evaluation must not scan other kinds.
-    store.save({
+    await store.save({
       id: "screen-1",
       kind: "screen",
       state: "active",
@@ -251,8 +279,8 @@ describe("3124-P01 one scan per tick", () => {
   });
 
   it("a tick that fires a due goal still costs one scan", async () => {
-    const { agent, counting, store } = makeCountedAgent();
-    store.save(goalToRecord(testGoal({ lastRun: null }) as any));
+    const { agent, counting, store } = await makeCountedAgent();
+    await store.save(goalToRecord(testGoal({ lastRun: null }) as any));
     counting.reset();
     const tick = await agent.onCron();
     expect(tick.goalsEvaluated).toBe(1);
@@ -266,8 +294,8 @@ describe("3124-P01 one scan per tick", () => {
 
 describe("3124-P02 one scan per manual trigger", () => {
   it("triggering a goal that creates a job costs one scan and stamps lastRun", async () => {
-    const { agent, counting, store } = makeCountedAgent();
-    store.save(goalToRecord(testGoal({ lastRun: null }) as any));
+    const { agent, counting, store } = await makeCountedAgent();
+    await store.save(goalToRecord(testGoal({ lastRun: null }) as any));
     counting.reset();
     const tick = await agent.triggerGoal("test-goal");
     expect(tick.jobsCreated).toBe(1);
@@ -290,10 +318,10 @@ describe("3124-P02 one scan per manual trigger", () => {
 
 describe("3124-P03 one scan per mutation", () => {
   it("addGoal costs one scan and the goal persists", async () => {
-    const { agent, counting, store } = makeCountedAgent();
+    const { agent, counting, store } = await makeCountedAgent();
     // Seed one goal first so the store is non-empty (an empty store
     // seeds DEFAULT_SCHEDULES on load — a load behavior, not a scan).
-    store.save(goalToRecord(testGoal({ id: "seed-goal" }) as any));
+    await store.save(goalToRecord(testGoal({ id: "seed-goal" }) as any));
     counting.reset();
     const created = await agent.addGoal(testGoal());
     expect(created.id).toBe("test-goal");
@@ -305,9 +333,9 @@ describe("3124-P03 one scan per mutation", () => {
   });
 
   it("removeGoal costs one scan and deletes only the removed row", async () => {
-    const { agent, counting, store } = makeCountedAgent();
-    store.save(goalToRecord(testGoal({ id: "keep" }) as any));
-    store.save(goalToRecord(testGoal({ id: "drop" }) as any));
+    const { agent, counting, store } = await makeCountedAgent();
+    await store.save(goalToRecord(testGoal({ id: "keep" }) as any));
+    await store.save(goalToRecord(testGoal({ id: "drop" }) as any));
     counting.reset();
     expect(await agent.removeGoal("drop")).toBe(true);
     expect(counting.counts.kindScan).toBe(1);
@@ -315,18 +343,18 @@ describe("3124-P03 one scan per mutation", () => {
   });
 
   it("setGoalEnabled costs one scan and flips state to paused", async () => {
-    const { agent, counting, store } = makeCountedAgent();
-    store.save(goalToRecord(testGoal() as any));
+    const { agent, counting, store } = await makeCountedAgent();
+    await store.save(goalToRecord(testGoal() as any));
     counting.reset();
     expect(await agent.setGoalEnabled("test-goal", false)).toBe(true);
     expect(counting.counts.kindScan).toBe(1);
-    const record = store.listByKind("goal")[0];
+    const record = (await store.listByKind("goal"))[0];
     expect(record.state).toBe("paused");
     expect((await agent.listGoals())[0].enabled).toBe(false);
   });
 
   it("materializeSynthesizedSchedule costs one scan", async () => {
-    const { agent, counting } = makeCountedAgent();
+    const { agent, counting } = await makeCountedAgent();
     const chain = compileGoal("Create a NASDAQ100 screen and send it to Slack", {
       budgetCents: 5000,
       budgetCapCents: 10000,
@@ -341,12 +369,12 @@ describe("3124-P03 one scan per mutation", () => {
   });
 
   it("re-saving preserves createdAt (the snapshot carries the stored row)", async () => {
-    const { agent, counting, store } = makeCountedAgent();
+    const { agent, counting, store } = await makeCountedAgent();
     const createdAt = "2026-11-01T06:00:00.000Z";
-    store.save(goalToRecord(testGoal({ lastRun: createdAt }) as any));
+    await store.save(goalToRecord(testGoal({ lastRun: createdAt }) as any));
     // Rewrite the stored createdAt to an older stamp than the save
     // would mint: the re-save must keep it, never reshuffle order.
-    store.save({
+    await store.save({
       ...goalToRecord(testGoal({ lastRun: createdAt }) as any),
       createdAt,
       updatedAt: createdAt,
@@ -354,13 +382,13 @@ describe("3124-P03 one scan per mutation", () => {
     counting.reset();
     await agent.onCron();
     expect(counting.counts.kindScan).toBe(1);
-    expect(store.listByKind("goal")[0].createdAt).toBe(createdAt);
+    expect((await store.listByKind("goal"))[0].createdAt).toBe(createdAt);
   });
 
   it("saveGoals with no snapshot still re-lists (fallback, never a break)", async () => {
-    const { agent, counting, store } = makeCountedAgent();
-    store.save(goalToRecord(testGoal({ id: "keep" }) as any));
-    store.save(goalToRecord(testGoal({ id: "drop" }) as any));
+    const { agent, counting, store } = await makeCountedAgent();
+    await store.save(goalToRecord(testGoal({ id: "keep" }) as any));
+    await store.save(goalToRecord(testGoal({ id: "drop" }) as any));
     const goals = await agent.listGoals();
     const kept = goals.filter((g: any) => g.id === "keep");
     counting.reset();
@@ -368,18 +396,18 @@ describe("3124-P03 one scan per mutation", () => {
     // No snapshot passed: the fallback re-list finds "drop" in the
     // store and deletes it — removal sync preserved.
     expect(counting.counts.kindScan).toBe(1);
-    expect(store.listByKind("goal").map((r) => r.id)).toEqual(["keep"]);
+    expect((await store.listByKind("goal")).map((r) => r.id)).toEqual(["keep"]);
   });
 });
 
 describe("3124-P04 behavior parity", () => {
   it("same firing times: due fires, not-due does not, in one tick", async () => {
-    const { agent, store } = makeCountedAgent();
-    store.save(goalToRecord(testGoal({ id: "due", lastRun: null }) as any));
+    const { agent, store } = await makeCountedAgent();
+    await store.save(goalToRecord(testGoal({ id: "due", lastRun: null }) as any));
     // Cron fires at 07:00, not yet — not due at the frozen 06:00,
     // with lastRun null so the assertion distinguishes stamped from
     // untouched without sharing a timestamp with the due goal.
-    store.save(goalToRecord(testGoal({ id: "not-due", cron: "0 7 * * *", lastRun: null }) as any));
+    await store.save(goalToRecord(testGoal({ id: "not-due", cron: "0 7 * * *", lastRun: null }) as any));
     const tick = await agent.onCron();
     expect(tick.goalsEvaluated).toBe(2);
     expect(tick.jobsCreated).toBe(1);
@@ -389,8 +417,8 @@ describe("3124-P04 behavior parity", () => {
   });
 
   it("same payloads: the fired goal's created job id rides the run record", async () => {
-    const { agent, store } = makeCountedAgent();
-    store.save(goalToRecord(testGoal({ lastRun: null }) as any));
+    const { agent, store } = await makeCountedAgent();
+    await store.save(goalToRecord(testGoal({ lastRun: null }) as any));
     await agent.onCron();
     const runs = await agent.listJobRuns("test-goal");
     expect(runs).toHaveLength(1);
@@ -561,9 +589,9 @@ describe("3124-P07 §9 map", () => {
 
 describe("3124-P08 after-counts", () => {
   it("five flows cost exactly five scans — one per flow", async () => {
-    const { agent, counting, store } = makeCountedAgent();
-    store.save(goalToRecord(testGoal({ id: "tick-goal", lastRun: new Date().toISOString() }) as any));
-    store.save(goalToRecord(testGoal({ id: "trig-goal", lastRun: null }) as any));
+    const { agent, counting, store } = await makeCountedAgent();
+    await store.save(goalToRecord(testGoal({ id: "tick-goal", lastRun: new Date().toISOString() }) as any));
+    await store.save(goalToRecord(testGoal({ id: "trig-goal", lastRun: null }) as any));
     counting.reset();
     await agent.onCron();
     await agent.triggerGoal("trig-goal");

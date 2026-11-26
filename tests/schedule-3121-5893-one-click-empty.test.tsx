@@ -10,9 +10,11 @@
  * instance only — KV is never touched, nothing platform-wide.
  *
  * The preview names what will go (alarms + paused records) and what
- * will come back on its own (derived rows re-derive from code,
- * declared tasks re-arm on the next Think reconcile, built-in goals
- * re-seed when the store is empty except goals the owner removed).
+ * will come back on its own (declared tasks re-arm on the next Think
+ * reconcile, built-in goals re-seed when the store is empty except
+ * goals the owner removed). Stored system rows go and stay gone —
+ * there is no derived class any more (#6503 step 14: no server row
+ * carries source `derived`, so nothing re-derives onto the list).
  * The action is platform-admin gated with the same overview probe
  * the queue view uses; a non-admin sees that said, not a button.
  *
@@ -22,7 +24,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { SchedulesPanel, emptyListComeback } from "../src/client/SchedulesPanel";
+import { SchedulesPanel, returningRows } from "../src/client/SchedulesPanel";
 import { ToastProvider } from "../src/client/components/ui/Toast";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -44,13 +46,13 @@ const pausedItem = {
   payload: { universe: "SP500", userLogin: "trader1", environment: "TEST" },
 };
 
-const derivedItem = {
+const systemItem = {
   id: "token-renewal",
   type: "cron",
   callback: "autoRenewETradeTokens",
   cron: "0 3 * * *",
   kind: "internal",
-  source: { kind: "derived", job: "token-renewal", origin: "code" },
+  source: { kind: "system", job: "auto-renew-etrade-tokens", origin: "system" },
   payload: { userLogin: "trader1", environment: "TEST" },
 };
 
@@ -122,11 +124,12 @@ function installFetch(schedules: any[]) {
             pausedPreserved: live.filter((s) => s.paused).length,
           });
         }
-        // Cancel the alarms; derived rows re-derive on the next list,
-        // so they stay listed. Declared tasks re-arm on the next Think
-        // reconcile, so they are gone from this re-fetch.
-        const cancelled = alarms.filter((s) => s.id !== "token-renewal");
-        live = live.filter((s) => s.paused || s.id === "token-renewal");
+        // Cancel the alarms; every cancelled row leaves the list.
+        // Declared tasks re-arm on the next Think reconcile, so
+        // they are gone from this re-fetch; stored system rows go
+        // and stay gone until the reconcile re-seeds them.
+        const cancelled = alarms;
+        live = live.filter((s) => s.paused);
         return Response.json({
           cancelled: cancelled.length,
           cancelledIds: cancelled.map((s) => s.id),
@@ -196,7 +199,7 @@ function buttonNamed(text: string): HTMLButtonElement | null {
   );
 }
 
-async function renderPanel(schedules: any[]) {
+async function renderPanel(schedules: any[], waitText = "Stock Market Screen") {
   installFetch(schedules);
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -209,7 +212,7 @@ async function renderPanel(schedules: any[]) {
     );
   });
   await flush(60);
-  await waitForText("Stock Market Screen");
+  await waitForText(waitText);
 }
 
 beforeEach(() => {
@@ -225,35 +228,46 @@ afterEach(async () => {
 });
 
 describe("5893 the comeback preview names what returns on its own", () => {
-  it("classifies derived rows, declared tasks, and seeded goals — and nothing else", () => {
-    const comeback = emptyListComeback([
+  it("classifies declared tasks and seeded goals — and nothing else", () => {
+    const comeback = returningRows([
       screenItem,
       pausedItem,
-      derivedItem,
+      systemItem,
       declaredItem,
       goalItem,
     ] as any);
-    expect(comeback.derived).toEqual(["token-renewal"]);
     expect(comeback.declaredTasks).toEqual(["declared-1"]);
     expect(comeback.seededGoals).toEqual(["goal-1"]);
   });
 
-  it("a derived row is recognised by its source kind even under a new id", () => {
-    const comeback = emptyListComeback([
-      { ...derivedItem, id: "derived-other", source: { kind: "derived", job: "derived-other", origin: "code" } },
+  it("a legacy row stamped source `derived` is not a comeback class", () => {
+    // Issue #6503 step 14 — `derived` left the source vocabulary:
+    // no server row carries it, so a stale stamp comes back as
+    // nothing, never as a row the list re-grows on its own.
+    const comeback = returningRows([
+      { ...systemItem, id: "legacy-derived", source: { kind: "derived", job: "legacy-derived", origin: "code" } },
     ] as any);
-    expect(comeback.derived).toEqual(["derived-other"]);
+    expect(comeback).toEqual({ declaredTasks: [], seededGoals: [] });
   });
 
   it("an empty list has no comeback", () => {
-    expect(emptyListComeback([])).toEqual({ derived: [], declaredTasks: [], seededGoals: [] });
+    expect(returningRows([])).toEqual({ declaredTasks: [], seededGoals: [] });
+  });
+
+  it("an empty store shows a plain empty state, with no comeback copy", async () => {
+    // No schedule rows, so no row title to wait for — the admin
+    // gate's Empty button is the loaded marker instead.
+    await renderPanel([], "Empty the list");
+    expect(document.body.textContent).not.toContain("derived row");
+    expect(document.body.textContent).not.toContain("Derived");
+    expect(document.body.textContent).not.toContain("come back on their own");
   });
 });
 
 describe("5893 the gate: platform admins see the action, others see it said", () => {
   it("a non-admin sees no Empty button and a plain note instead", async () => {
     overviewMode = "denied";
-    await renderPanel([screenItem, derivedItem]);
+    await renderPanel([screenItem, systemItem]);
     await waitForText("platform-admin");
     expect(buttonNamed("Empty the list")).toBeNull();
     expect(recorded.filter((r) => r.url === "/api/schedules/cancel-all")).toHaveLength(0);
@@ -261,7 +275,7 @@ describe("5893 the gate: platform admins see the action, others see it said", ()
   });
 
   it("a platform admin sees the Empty the list button", async () => {
-    await renderPanel([screenItem, derivedItem]);
+    await renderPanel([screenItem, systemItem]);
     await waitForText("Empty the list");
     expect(buttonNamed("Empty the list")).not.toBeNull();
   });
@@ -269,7 +283,7 @@ describe("5893 the gate: platform admins see the action, others see it said", ()
 
 describe("5893 preview → confirm → verify", () => {
   it("preview names what will go and what will come back, and never mentions KV as wiped", async () => {
-    await renderPanel([screenItem, pausedItem, derivedItem, declaredItem, goalItem]);
+    await renderPanel([screenItem, pausedItem, systemItem, declaredItem, goalItem]);
     await waitForText("Empty the list");
     await click(buttonNamed("Empty the list"));
     await waitFor(() => document.querySelector(".sched-confirm-modal") !== null, "empty modal");
@@ -277,7 +291,10 @@ describe("5893 preview → confirm → verify", () => {
     await waitFor(() => dialog.textContent?.includes("will be cancelled") ?? false, "preview copy");
     expect(dialog.textContent).toContain("4 alarm(s) will be cancelled");
     expect(dialog.textContent).toContain("1 paused record(s) will be deleted");
-    expect(dialog.textContent).toContain("token-renewal");
+    // The stored system row goes and stays gone — it names no
+    // comeback line any more.
+    expect(dialog.textContent).not.toContain("token-renewal");
+    expect(dialog.textContent).not.toContain("derived row");
     expect(dialog.textContent).toContain("declared-1");
     expect(dialog.textContent).toContain("goal-1");
     expect(dialog.textContent).toContain("Own instance only");
@@ -289,7 +306,7 @@ describe("5893 preview → confirm → verify", () => {
   });
 
   it("confirm cancels the alarms, clears the paused records, and verifies by re-fetch", async () => {
-    await renderPanel([screenItem, pausedItem, derivedItem, declaredItem, goalItem]);
+    await renderPanel([screenItem, pausedItem, systemItem, declaredItem, goalItem]);
     await waitForText("Empty the list");
     await click(buttonNamed("Empty the list"));
     await waitFor(() => document.querySelector(".sched-confirm-modal") !== null, "empty modal");
@@ -305,10 +322,11 @@ describe("5893 preview → confirm → verify", () => {
       "clear-table confirm",
     );
     await waitForText("Emptied the list");
-    expect(document.body.textContent).toContain("Cancelled 3 alarm(s)");
+    expect(document.body.textContent).toContain("Cancelled 4 alarm(s)");
     expect(document.body.textContent).toContain("deleted 1 paused record(s)");
-    expect(document.body.textContent).toContain("token-renewal");
-    // The wiped rows are gone from the re-fetched list.
+    // The wiped rows are gone from the re-fetched list — the stored
+    // system row included.
+    expect(document.body.textContent).not.toContain("token-renewal");
     expect(document.body.textContent).not.toContain("screen-1");
     expect(document.body.textContent).not.toContain("screen-paused");
     expect(document.body.textContent).not.toContain("declared-1");
@@ -316,7 +334,7 @@ describe("5893 preview → confirm → verify", () => {
   });
 
   it("a failed clear step reports the partial wipe honestly instead of claiming empty", async () => {
-    await renderPanel([screenItem, pausedItem, derivedItem]);
+    await renderPanel([screenItem, pausedItem, systemItem]);
     await waitForText("Empty the list");
     failClearConfirm = true;
     await click(buttonNamed("Empty the list"));
@@ -325,7 +343,7 @@ describe("5893 preview → confirm → verify", () => {
     await waitFor(() => dialog.textContent?.includes("will be cancelled") ?? false, "preview copy");
     await click(buttonIn(dialog, "Empty the list"));
     await waitForText("not fully emptied");
-    expect(document.body.textContent).toContain("Cancelled 1 alarm(s)");
+    expect(document.body.textContent).toContain("Cancelled 2 alarm(s)");
     expect(document.body.textContent).toContain("clear failed");
     expect(document.body.textContent).toContain("screen-paused");
   });

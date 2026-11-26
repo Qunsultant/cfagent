@@ -2556,7 +2556,14 @@ const BASELINE: Array<[string, string, number]> = [
   // They are data-bearing migration defaults, reproduced
   // byte-identically from the runner; neutralizing them would
   // falsify the migrations.
-  ["src/data/schemaComponent/d1Catalogue.ts", "etrade", 3],
+  // #6503 INTEGRATION: migration 0092's token-renewal seed INSERT
+  // names the `autoRenewETradeTokens` callback (the system
+  // token-renewal operation) — a data-bearing seed statement,
+  // reproduced byte-identically from the migration; neutralizing
+  // it would falsify the seed. 3 -> 4: the seed statement is one
+  // long line naming the callback twice (callback column +
+  // definition_json), so it adds exactly one matching line.
+  ["src/data/schemaComponent/d1Catalogue.ts", "etrade", 4],
   // #4441 HISTORICAL/INTEGRATION: the measured autopilot-capabilities
   // inventory names the broker integrations it measured (E*TRADE,
   // Alpaca). Naming the providers IS the document's subject — the rows

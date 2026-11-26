@@ -40,6 +40,9 @@ import { ScheduledAgent } from "../src/agents/scheduled-agent";
 import { createJob } from "../src/orchestrate";
 import { createSocialBriefStoreFromNamespace } from "../src/agents/social/briefStore";
 import { createSocialStoresFromNamespace } from "../src/agents/social/durableStores";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 
 // Monday 2026-10-26 09:00 EDT = 13:00Z.
 const MON_0900 = "2026-10-26T13:00:00Z";
@@ -57,9 +60,10 @@ function pipelineGoal(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeCtx(initialGoals?: unknown[]) {
+// #6503 — the "goals" KV key is dead: goals live in the D1 unified
+// store only (fail-closed without AGENT_DB). Fixtures plant via D1.
+function makeCtx() {
   const store = new Map<string, unknown>();
-  if (initialGoals) store.set("goals", initialGoals);
   return {
     storage: {
       get: async (k: string) => (store.has(k) ? store.get(k) : undefined),
@@ -113,6 +117,9 @@ function makeSessionStore() {
 
 function makeEnv(sessionStore: unknown, budgetSpy: { calls: number }, extra: Record<string, unknown> = {}) {
   return {
+    // #6503 — goals live in the D1 unified store only (fail-closed
+    // without AGENT_DB); the agent never reads the "goals" KV key.
+    AGENT_DB: new MockD1Database(),
     PAYMENTS_AGENT: {
       idFromName: () => "payments-default",
       get: () => ({
@@ -133,6 +140,32 @@ async function seedBrief(sessionStore: unknown, date: string, text: string) {
   await briefStore!.putBrief(date, text);
 }
 
+/** Plant `goals` into `mockD1`, sweeping migration-0092's seeds. */
+async function plantGoals(mockD1: MockD1Database, goals: any[]) {
+  const store = createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules;
+  for (const goal of goals) await store.save(goalToRecord(goal));
+  // The first store op lazily ensures the schema, and migration
+  // 0092's goals seed lands the 9 built-in goals — sweep them, so
+  // the tick sees ONLY the fixture goals (same pattern as the
+  // #6503 G3 goals-tick file).
+  const keep = new Set(goals.map((goal) => String(goal.id)));
+  for (const row of await store.listByKind("goal")) {
+    if (!keep.has(row.id)) await store.remove(row.id);
+  }
+}
+
+/** One agent over a fresh D1 with `goals` planted. */
+async function plantedAgent(
+  goals: any[],
+  ss: ReturnType<typeof makeSessionStore>,
+  budgetSpy: { calls: number },
+) {
+  const env = makeEnv(ss.namespace, budgetSpy);
+  await plantGoals(env.AGENT_DB as MockD1Database, goals);
+  const agent = new ScheduledAgent(makeCtx() as any, env);
+  return { agent, env };
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date(MON_0900));
@@ -145,11 +178,10 @@ afterEach(() => {
 
 describe("pipeline goals through ScheduledAgent", () => {
   it("runs the full pipeline in one firing: one budget check, one tick, lastRun set", async () => {
-    const ctx = makeCtx([pipelineGoal()]);
     const ss = makeSessionStore();
     await seedBrief(ss.namespace, "2026-10-26", "Morning brief.");
     const budgetSpy = { calls: 0 };
-    const agent = new ScheduledAgent(ctx as any, makeEnv(ss.namespace, budgetSpy));
+    const { agent } = await plantedAgent([pipelineGoal()], ss, budgetSpy);
     const tick = await agent.onCron(makeEnv(ss.namespace, budgetSpy));
     expect(budgetSpy.calls).toBe(1);
     expect(tick.jobsCreated).toBe(1);
@@ -165,10 +197,9 @@ describe("pipeline goals through ScheduledAgent", () => {
   });
 
   it("noBrief pipeline run is skipped, lastRun untouched, goal stays due", async () => {
-    const ctx = makeCtx([pipelineGoal()]);
     const ss = makeSessionStore();
     const budgetSpy = { calls: 0 };
-    const agent = new ScheduledAgent(ctx as any, makeEnv(ss.namespace, budgetSpy));
+    const { agent } = await plantedAgent([pipelineGoal()], ss, budgetSpy);
     const tick = await agent.onCron(makeEnv(ss.namespace, budgetSpy));
     expect(tick.jobsCreated).toBe(0);
     expect(tick.jobsSkipped).toBe(1);
@@ -178,12 +209,11 @@ describe("pipeline goals through ScheduledAgent", () => {
   });
 
   it("a failed pipeline run records a tick error and stays due for resume", async () => {
-    const ctx = makeCtx([pipelineGoal()]);
     const ss = makeSessionStore();
     await seedBrief(ss.namespace, "2026-10-26", "Morning brief.");
     ss.setFailBriefGets(true);
     const budgetSpy = { calls: 0 };
-    const agent = new ScheduledAgent(ctx as any, makeEnv(ss.namespace, budgetSpy));
+    const { agent } = await plantedAgent([pipelineGoal()], ss, budgetSpy);
     const tick = await agent.onCron(makeEnv(ss.namespace, budgetSpy));
     expect(tick.jobsCreated).toBe(0);
     expect(tick.jobsSkipped).toBe(1);
@@ -193,13 +223,11 @@ describe("pipeline goals through ScheduledAgent", () => {
   });
 
   it("re-fire after a mid-pipeline failure resumes at generate without re-reading the brief", async () => {
-    const ctx = makeCtx([pipelineGoal()]);
     const ss = makeSessionStore();
     await seedBrief(ss.namespace, "2026-10-26", "Morning brief.");
     ss.setFailDraftPuts(true);
     const budgetSpy = { calls: 0 };
-    const env = makeEnv(ss.namespace, budgetSpy);
-    const agent = new ScheduledAgent(ctx as any, env);
+    const { agent, env } = await plantedAgent([pipelineGoal()], ss, budgetSpy);
     const first = await agent.onCron(env);
     expect(first.jobsCreated).toBe(0);
     expect(first.errors.length).toBeGreaterThan(0);
@@ -218,12 +246,14 @@ describe("pipeline goals through ScheduledAgent", () => {
   });
 
   it("manual triggerGoal runs the full pipeline the same way as a cron firing", async () => {
-    const ctx = makeCtx([pipelineGoal({ lastRun: new Date(MON_0900).toISOString() })]);
     const ss = makeSessionStore();
     await seedBrief(ss.namespace, "2026-10-26", "Morning brief.");
     const budgetSpy = { calls: 0 };
-    const env = makeEnv(ss.namespace, budgetSpy);
-    const agent = new ScheduledAgent(ctx as any, env);
+    const { agent, env } = await plantedAgent(
+      [pipelineGoal({ lastRun: new Date(MON_0900).toISOString() })],
+      ss,
+      budgetSpy,
+    );
     // Not due (lastRun is today 09:00): a plain onCron would skip it.
     const skipped = await agent.onCron(env);
     expect(skipped.jobsCreated).toBe(0);
@@ -234,10 +264,11 @@ describe("pipeline goals through ScheduledAgent", () => {
   });
 
   it("addGoal accepts pipeline:social-daily and rejects unknown pipelines", async () => {
-    const ctx = makeCtx([]);
     const ss = makeSessionStore();
     const budgetSpy = { calls: 0 };
-    const agent = new ScheduledAgent(ctx as any, makeEnv(ss.namespace, budgetSpy));
+    // #6503 — no fixture goal to plant: addGoal loads the D1 store
+    // (migration-0092's nine built-ins) and appends.
+    const agent = new ScheduledAgent(makeCtx() as any, makeEnv(ss.namespace, budgetSpy));
     const created = await agent.addGoal({
       id: "my-pipeline",
       name: "My pipeline",
@@ -259,11 +290,14 @@ describe("pipeline goals through ScheduledAgent", () => {
   });
 
   it("an unknown pipeline operation seeded directly fails closed without createJob", async () => {
-    const ctx = makeCtx([pipelineGoal({ id: "weird", operation: "pipeline:nope" })]);
     const ss = makeSessionStore();
     await seedBrief(ss.namespace, "2026-10-26", "Morning brief.");
     const budgetSpy = { calls: 0 };
-    const agent = new ScheduledAgent(ctx as any, makeEnv(ss.namespace, budgetSpy));
+    const { agent } = await plantedAgent(
+      [pipelineGoal({ id: "weird", operation: "pipeline:nope" })],
+      ss,
+      budgetSpy,
+    );
     const tick = await agent.onCron(makeEnv(ss.namespace, budgetSpy));
     expect(tick.jobsCreated).toBe(0);
     expect(tick.jobsSkipped).toBe(1);
@@ -272,10 +306,13 @@ describe("pipeline goals through ScheduledAgent", () => {
   });
 
   it("single-operation goals still go through createJob, untouched by the pipeline branch", async () => {
-    const ctx = makeCtx([
-      pipelineGoal({ enabled: false }),
-      {
-        id: "hunt",
+    const ss = makeSessionStore();
+    const budgetSpy = { calls: 0 };
+    const { agent } = await plantedAgent(
+      [
+        pipelineGoal({ enabled: false }),
+        {
+          id: "hunt",
         name: "Hunt",
         // No timeZone → UTC read of all five fields (#4235). 13:00Z
         // matches now.
@@ -284,17 +321,21 @@ describe("pipeline goals through ScheduledAgent", () => {
         budgetCents: 100,
         enabled: true,
       },
-    ]);
-    const ss = makeSessionStore();
-    const budgetSpy = { calls: 0 };
-    const agent = new ScheduledAgent(ctx as any, makeEnv(ss.namespace, budgetSpy));
+      ],
+      ss,
+      budgetSpy,
+    );
     const tick = await agent.onCron(makeEnv(ss.namespace, budgetSpy));
     expect(createJob).toHaveBeenCalledTimes(1);
     expect(tick.jobsCreated).toBe(1);
   });
 
   it("does NOT rewire daily-social-post: it still runs the social.publish path", async () => {
-    const ctx = makeCtx([
+    const ss = makeSessionStore();
+    await seedBrief(ss.namespace, "2026-10-26", "Morning brief.");
+    const budgetSpy = { calls: 0 };
+    const { agent } = await plantedAgent(
+      [
       {
         id: "daily-social-post",
         name: "Daily social post",
@@ -304,11 +345,10 @@ describe("pipeline goals through ScheduledAgent", () => {
         budgetCents: 1,
         enabled: true,
       },
-    ]);
-    const ss = makeSessionStore();
-    await seedBrief(ss.namespace, "2026-10-26", "Morning brief.");
-    const budgetSpy = { calls: 0 };
-    const agent = new ScheduledAgent(ctx as any, makeEnv(ss.namespace, budgetSpy));
+      ],
+      ss,
+      budgetSpy,
+    );
     const tick = await agent.onCron(makeEnv(ss.namespace, budgetSpy));
     expect(tick.jobsCreated).toBe(1);
     expect(createJob).not.toHaveBeenCalled();
@@ -323,7 +363,6 @@ describe("pipeline goals through ScheduledAgent", () => {
     // 1 with no error and no row anywhere — the trigger looked like
     // a success while the ledger showed nothing.
     const store = new Map<string, unknown>();
-    store.set("goals", [pipelineGoal()]);
     const ctx = {
       storage: {
         get: async (k: string) => (store.has(k) ? store.get(k) : undefined),
@@ -337,7 +376,11 @@ describe("pipeline goals through ScheduledAgent", () => {
     const ss = makeSessionStore();
     await seedBrief(ss.namespace, "2026-10-26", "Morning brief.");
     const budgetSpy = { calls: 0 };
-    const agent = new ScheduledAgent(ctx as any, makeEnv(ss.namespace, budgetSpy));
+    // #6503 — the goal is planted in D1 (the "goals" KV key is dead);
+    // the failing write is the ctx.storage "jobRunRecords" put below.
+    const env = makeEnv(ss.namespace, budgetSpy);
+    await plantGoals(env.AGENT_DB as MockD1Database, [pipelineGoal()]);
+    const agent = new ScheduledAgent(ctx as any, env);
     const tick = await agent.onCron(makeEnv(ss.namespace, budgetSpy));
     expect(tick.jobsCreated).toBe(1);
     expect(tick.errors.join(" ")).toMatch(/run record did not land/);

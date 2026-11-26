@@ -34,6 +34,7 @@ import {
   type McpChatNlqRouteContext,
 } from "../src/agents/routes/mcpChatNlq";
 import { executeNaturalLanguageQuery } from "../src/agents/nlq";
+import { MockD1Database } from "./mock-d1";
 
 const src = (rel: string) => readFileSync(`src/${rel}`, "utf8");
 
@@ -41,7 +42,9 @@ const baseCtx = (overrides: Partial<McpChatNlqRouteContext> = {}): McpChatNlqRou
   ({
     getOrm: () => ({}) as any,
     getStorageSql: () => ({}),
-    env: {} as any,
+    // #6503 — the /nlq route builds the agent-schedule capability
+    // deps over the D1 unified store (fail-closed without AGENT_DB).
+    env: { AGENT_DB: new MockD1Database() } as any,
     audit: vi.fn(),
     submitAsyncJob: vi.fn(async () => ({
       jobId: "j1",

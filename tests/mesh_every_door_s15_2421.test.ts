@@ -68,6 +68,7 @@ import {
   type ReportAssetA2AExecutor,
 } from "../src/agents/reportAssetA2aDispatch";
 import { OrchestratorAgent } from "../src/agents/orchestrator";
+import { MockD1Database } from "./mock-d1";
 import { MockSqlStorage } from "./mock-sql";
 import type { Env } from "../src/types";
 
@@ -410,6 +411,9 @@ describe("OrchestratorAgent.handleA2A restored wiring (#2421)", () => {
       AI: {},
       APP_ENV: "TEST",
       ORCHESTRATOR_AGENT: {},
+      // #6503 — the dispatch builds the schedule capability over the
+      // D1 unified store (fail-closed without AGENT_DB).
+      AGENT_DB: new MockD1Database(),
     } as unknown as Env;
     return new OrchestratorAgent(ctx as never, env);
   }
