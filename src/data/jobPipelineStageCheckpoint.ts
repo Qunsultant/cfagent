@@ -23,22 +23,28 @@ import type {
 } from "../workflows/stageRunnerPorts";
 import type { JobInstanceStore } from "./jobPipelinePorts";
 
-/** A StageCheckpointStore over one job's instance record. */
+/**
+ * A StageCheckpointStore over one job's instance record — or,
+ * with a run key (#6555), over one run's own instance row, so
+ * concurrent runs of a run-per-row definition never share a
+ * stage checkpoint.
+ */
 export function createJobPipelineStageCheckpointStore(
   instances: JobInstanceStore,
   jobId: string,
+  runKey?: string | null,
 ): StageCheckpointStore {
   return {
     read: async (runId: string): Promise<StageRunnerCheckpoint | null> => {
-      const instance = await instances.getInstance(jobId);
+      const instance = await instances.getInstance(jobId, runKey ?? null);
       if (!instance?.stageCheckpoint) return null;
       return instance.stageCheckpoint.runId === runId ? instance.stageCheckpoint : null;
     },
     write: async (checkpoint: StageRunnerCheckpoint): Promise<void> => {
-      const instance = await instances.getInstance(jobId);
+      const instance = await instances.getInstance(jobId, runKey ?? null);
       if (!instance) {
         throw new Error(
-          `job pipeline stage checkpoint refused: no instance record for job "${jobId}" — a checkpoint write before the job's first dispatch has no unit store to land in.`,
+          `job pipeline stage checkpoint refused: no instance record for job "${jobId}"${runKey ? ` run "${runKey}"` : ""} — a checkpoint write before the job's first dispatch has no unit store to land in.`,
         );
       }
       await instances.saveInstance({
