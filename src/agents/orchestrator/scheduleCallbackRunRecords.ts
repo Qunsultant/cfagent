@@ -43,6 +43,8 @@ import {
   checkScheduleFiringRate,
   resolveEffectiveScheduleFiringEnabled,
 } from "../../services/scheduleControls";
+import { createD1UnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
+import { findStoredRecordForFiring } from "../../services/unifiedScheduleManagement";
 
 type OutcomeInput = ScheduledCallbackOutcome | void;
 
@@ -300,8 +302,9 @@ export async function recordScheduleCallbackRun(
   const started = new Date().toISOString();
   // Issue #3121 S1 — the §4 consolidated-ledger linkage, stamped at
   // this write site: the trigger resolves from the firing payload
-  // (the trigger route stamps `trigger: "manual"` + `scheduleId` on
-  // manual triggers; SDK firings carry the stored schedule payload),
+  // (the trigger route stamps `trigger: "triggered"` + `scheduleId`
+  // on Run-now triggers, #6503; SDK firings carry the stored
+  // schedule payload),
   // the schedule id is the real schedule id when one exists (the
   // `callback:<name>` job-id fallback is never laundered into a
   // schedule id), and asyncJobId/workflowId ride the payload when a
@@ -367,6 +370,72 @@ export async function recordScheduleCallbackRun(
           });
         } catch {
           // Reporting a halt must never break the callback either.
+        }
+      }
+      return;
+    }
+  }
+  // Issue #6503 (G3) — the paused gate, the second choke point
+  // every recorded schedule firing passes through (beside the
+  // kill-switch above). A SCHEDULED firing whose stored row is
+  // paused or deleted records a skipped run naming the pause and
+  // never invokes the callback: pause cancels the live alarm, but
+  // a stale alarm that survived the cancel must not fire the row.
+  // Only trigger "scheduled" is gated: an explicit dispatch —
+  // manual, Run Now ("triggered"), copilot, autopilot — is an
+  // operator/agent action, not the schedule firing on its own, so
+  // it is never blocked here. (The trigger route refuses a paused
+  // row with 409 before dispatch; the manual fallbacks
+  // trigger-renew / trigger-retention carry no schedule id at all,
+  // so no row resolves and they fire.) A firing with no stored
+  // row, or a store the gate cannot read (unbound AGENT_DB, a
+  // failed read), fires: the gate never breaks a firing it cannot
+  // attribute, the kill-switch precedent. The skipped record keeps
+  // the missed-schedule sweep quiet (it reads the latest ledger
+  // run per schedule) and the pause is observable in the ledger.
+  if (resolveScheduleRunTrigger(payload) === "scheduled") {
+    let pausedRecord: { id: string; state: string } | undefined;
+    try {
+      const d1 = (options?.env as { AGENT_DB?: unknown } | null | undefined)?.AGENT_DB;
+      if (d1) {
+        const store = createD1UnifiedSchedulePorts({ d1: d1 as never }).unifiedSchedules;
+        pausedRecord = await findStoredRecordForFiring(store, {
+          scheduleId: linkage.scheduleId,
+          alarmId: typeof schedule?.id === "string" ? schedule.id : null,
+        });
+      }
+    } catch {
+      pausedRecord = undefined;
+    }
+    if (pausedRecord && (pausedRecord.state === "paused" || pausedRecord.state === "deleted")) {
+      const pauseDetail =
+        `Schedule firing skipped: the stored schedule '${pausedRecord.id}' is ${pausedRecord.state} — resume it to fire on schedule. ` +
+        `A stale live alarm fired this callback after the pause cancelled the alarm; the stored state, not the alarm, decides.`;
+      storeRecord(
+        sql,
+        {
+          jobId,
+          operation: callback,
+          started,
+          finished: new Date().toISOString(),
+          outcome: "skipped",
+          triggeredBy: resolveScheduleRunTrigger(payload),
+          ...payloadProvenance(payload),
+          ...linkage,
+          detail: pauseDetail,
+        },
+        onRecordFailure,
+      );
+      if (options?.audit) {
+        try {
+          options.audit("schedule.firing_paused", "orchestrator", {
+            code: "schedule_firing_paused",
+            callback,
+            scheduleId: pausedRecord.id,
+            jobId,
+          });
+        } catch {
+          // Reporting a pause-skip must never break the callback either.
         }
       }
       return;

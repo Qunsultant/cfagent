@@ -41,8 +41,9 @@
  * no findings, no heartbeat.
  */
 import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
+import { createD1UnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
 import type { SqlStorage } from "../../orm";
-import { resolveMissedScheduleGraceMs } from "../../config/missedScheduleAlert";
+import { resolveEffectiveMissedScheduleGrace } from "../../services/scheduleControls";
 import { recordLedgerRun } from "../../services/unifiedLedger";
 import {
   findMissedDurableSchedule,
@@ -117,7 +118,17 @@ export async function watchdogMissedSchedules(
     missed: 0,
     skippedUnrecorded: 0,
   };
-  const graceMs = resolveMissedScheduleGraceMs(ctx.env as { MISSED_SCHEDULE_GRACE_MINUTES?: string });
+  // Issue #6503 step 13 — the grace is a managed setting
+  // (`schedule.missedScheduleGraceMinutes`): a managed value wins
+  // over the env carrier, which wins over the 60-minute default.
+  // ctx.sql is the orchestrator's storage, the same store the
+  // schedules-home controls write to, so the managed leg is live
+  // here. The ScheduledAgent's own goal watchdog
+  // (src/agents/scheduled-agent.ts runScheduleWatchdog) reads the
+  // same key from its own storage and cannot see this store, so
+  // that path keeps the env/default behavior until the cross-DO
+  // mirror follow-up lands.
+  const graceMs = resolveEffectiveMissedScheduleGrace(ctx.sql, ctx.env).ms;
   if (graceMs <= 0) return empty;
 
   const schedules = await ctx.listSchedules().catch(() => [] as ScheduleWatchdogSchedule[]);
@@ -150,6 +161,28 @@ export async function watchdogMissedSchedules(
   }
 
   const store = new SqlJobRunRecordStore(ctx.sql);
+  // Issue #6503 (G3) — the stored state behind the alarm list,
+  // read once before the loop: a paused (or deleted) row has no
+  // expected tick, so the sweep never flags it as missed. The alarm
+  // id is the lookup key for the six system rows (keyed by
+  // catalogue id, SDK id in alarmId); the record id is the key for
+  // screen/stage rows (id == alarm id). An unreadable store
+  // examines as before — the sweep's best-effort posture, and the
+  // pure finder still skips any row its caller marks paused.
+  const pausedById = new Map<string, boolean>();
+  try {
+    const d1 = (ctx.env as { AGENT_DB?: unknown } | null | undefined)?.AGENT_DB;
+    if (d1) {
+      const unified = createD1UnifiedSchedulePorts({ d1: d1 as never }).unifiedSchedules;
+      for (const record of await unified.list()) {
+        if (record.state !== "paused" && record.state !== "deleted") continue;
+        pausedById.set(record.id, true);
+        if (record.alarmId) pausedById.set(record.alarmId, true);
+      }
+    }
+  } catch {
+    // An unreadable store examines as before (see above).
+  }
   const result: ScheduleWatchdogSweepResult = { ...empty };
   for (const schedule of schedules) {
     if (typeof schedule.id !== "string" || !schedule.id) continue;
@@ -157,6 +190,10 @@ export async function watchdogMissedSchedules(
       result.skippedUnrecorded++;
       continue;
     }
+    // Issue #6503 (G3) — a paused row is not examined at all (the
+    // goals consumer's `if (!goal.enabled) continue` mirror): it
+    // has no expected tick, so there is nothing to miss.
+    if (pausedById.get(schedule.id) === true) continue;
     result.examined++;
     try {
       let latestRun: { started: string } | undefined;

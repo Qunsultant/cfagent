@@ -19,9 +19,11 @@
 
 import {
   isWithinResearchGuardWindow,
+  RESEARCH_SCHEDULE_UTC_HOUR_SETTING_KEY,
   resolveResearchJobConfig,
   type ResearchStorageMode,
 } from "../../config/researchJobConfig";
+import { createSettingsPort } from "../../data/createSettingsPorts";
 import type { SqlStorage } from "../../orm";
 import type { JobPipelineDeps, JobRunRecorder } from "../../services/jobPipelineEngine";
 import type { ResearchStepDeps } from "../../services/researchPipelineJobs";
@@ -90,7 +92,23 @@ export async function runDeterministicResearchViaDoor(input: {
     throw new Error(codedMessage("FAILURE_RESEARCH_OWNER_MISSING"));
   }
 
-  const config = resolveResearchJobConfig(input.env);
+  // Issue #6503 step 13 — the fire hour is a managed setting
+  // (`research.scheduleUtcHour`): when the caller passes the
+  // orchestrator's sql, a managed value wins over the env carrier,
+  // which wins over the 21:00 default. Fail-safe: an unreadable
+  // store reads as "no managed value", never a throw — the env /
+  // default still apply.
+  let managedHour: unknown;
+  if (input.sql) {
+    try {
+      managedHour = createSettingsPort(input.sql as never).get(
+        RESEARCH_SCHEDULE_UTC_HOUR_SETTING_KEY,
+      );
+    } catch {
+      managedHour = undefined;
+    }
+  }
+  const config = resolveResearchJobConfig(input.env, { scheduleUtcHour: managedHour });
   if (input.trigger === "scheduled") {
     const now = input.now ?? new Date();
     if (!isWithinResearchGuardWindow(now, config)) {

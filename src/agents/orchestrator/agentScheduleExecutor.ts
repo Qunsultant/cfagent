@@ -1,14 +1,19 @@
 import type { AgentContext } from "agents";
-import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
+import { createD1UnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
 import {
   createAgentScheduleExecutorDepsForDo,
   nlqPortToAgentSdkAdapter,
+  nlqPortToScheduleAlarms,
   type AgentScheduleExecutorDeps,
 } from "../../services/agentScheduleCapability";
 import {
   createWorkflowStageScheduleAdapter,
   type WorkflowStageRegistry,
 } from "../../services/workflowStageSchedule";
+import {
+  resolveEffectiveScheduleFloor,
+  resolveEffectiveScheduleStartPaused,
+} from "../../services/scheduleControls";
 import type { Env } from "../../types";
 import type { AgentScheduleLoopSettings } from "../../services/agentScheduleLoopSettings";
 import { getScheduledAgentDoor } from "./meshDoors";
@@ -35,9 +40,12 @@ export interface AgentScheduleExecutorInput {
 export function createOrchestratorAgentScheduleExecutorDeps(
   context: AgentScheduleExecutorInput,
 ): AgentScheduleExecutorDeps {
-  const unifiedStore = createUnifiedSchedulePorts({
-    sql: context.sql,
-    storage: context.storage,
+  // Issue #6503 — the one unified schedule store is D1 only (owner
+  // direction 2026-11-25): the executor's sdk + stages adapters both
+  // read/write the D1 store, fail-closed when AGENT_DB is unbound.
+  // The DO port (createUnifiedSchedulePorts) is legacy/retained-unused.
+  const unifiedStore = createD1UnifiedSchedulePorts({
+    d1: context.env.AGENT_DB,
   });
   const stageRegistry: WorkflowStageRegistry = {
     getDefinition: async (jobId) => {
@@ -59,6 +67,16 @@ export function createOrchestratorAgentScheduleExecutorDeps(
       sdk: nlqPortToAgentSdkAdapter(
         context.schedulingPort,
         unifiedStore.unifiedSchedules,
+        {
+          // Issue #6503 — the start-paused control, resolved here so
+          // a schedule created through chat/NLQ starts active when
+          // the control is off (resume arms it through the NLQ
+          // port's alarms).
+          startPaused: resolveEffectiveScheduleStartPaused(context.sql, context.env).paused,
+          alarms: nlqPortToScheduleAlarms(context.schedulingPort, () =>
+            resolveEffectiveScheduleFloor(context.sql, context.env).seconds,
+          ),
+        },
         {
           alarms: context.alarms,
           runCallback: context.runCallback,
@@ -101,7 +119,9 @@ export function createOrchestratorAgentScheduleExecutorDeps(
           scheduledAgent().triggerGoal(id, context.env, actor),
       },
       stages: createWorkflowStageScheduleAdapter({
-        store: unifiedStore.unifiedSchedulesSync,
+        // Issue #6503 — the stages adapter reads the same D1 store
+        // the sdk adoptions write (one store, not the DO sync store).
+        store: unifiedStore.unifiedSchedules,
         alarms: context.alarms,
         registry: stageRegistry,
         runCallback: context.runCallback,

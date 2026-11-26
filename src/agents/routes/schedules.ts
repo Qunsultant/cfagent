@@ -122,9 +122,11 @@ import {
 import {
   applyScheduleControlsPatch,
   resolveEffectiveScheduleFloor,
+  resolveEffectiveScheduleStartPaused,
   resolveScheduleControlsView,
 } from "../../services/scheduleControls";
 import { checkPlatformPermission } from "../../security/iaaaPdpSeam";
+import { isTenantAdminForTenant } from "../../data/referralCodePorts";
 import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
 import { createKvMembershipStore } from "../../security/iaaaMembershipStore";
 import { sessionStore } from "../../security/session";
@@ -150,6 +152,7 @@ import {
 import { ScheduledTasksService } from "../../services/scheduledTasks";
 import { pickFeedLoadParams } from "../../services/feedSnapshotStore";
 import {
+  activateCreatedSchedule,
   collapseScheduleListItems,
   deleteUnifiedSchedule,
   getUnifiedScheduleDetail,
@@ -168,19 +171,14 @@ import {
   STALE_LEDGER_SWEEP_RECORD_ID,
   STALE_ASYNC_JOB_SWEEP_RECORD_ID,
   SCHEDULE_WATCHDOG_RECORD_ID,
+  SYSTEM_SCHEDULE_RECORD_IDS,
   tickerPushRecordToListItem,
   tokenRenewalRecordToListItem,
-  tokenRenewalToRecord,
   retentionRecordToListItem,
-  retentionToRecord,
   nightlyResearchRecordToListItem,
-  nightlyResearchToRecord,
   staleLedgerSweepRecordToListItem,
-  staleLedgerSweepToRecord,
   staleAsyncJobSweepRecordToListItem,
-  staleAsyncJobSweepToRecord,
   scheduleWatchdogRecordToListItem,
-  scheduleWatchdogToRecord,
   triggerUnifiedSchedule,
   triggerSchedulesInScope,
   unifiedRecordToListItem,
@@ -193,11 +191,6 @@ import {
   type ScheduleAlarms,
   type ScheduleAlarmLike,
 } from "../../services/unifiedScheduleManagement";
-import {
-  DEFAULT_RESEARCH_JOB_CONFIG,
-  resolveResearchJobConfig,
-} from "../../config/researchJobConfig";
-import type { ResearchFireHourConfig } from "../../services/researchScheduleGuard";
 import { SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID } from "../../services/scheduleWatchdog";
 import {
   TICKER_INSTANCE_NAME,
@@ -205,7 +198,8 @@ import {
 } from "../ticker-agent";
 import { actorGateway } from "../../services/cloudflareActorGateway";
 import type { TickerPushRecordStub } from "../../services/actorGatewayPorts";
-import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
+import { createD1UnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
+import type { ScheduleStore, UnifiedScheduleRecord } from "../../data/unifiedSchedulePorts";
 import { recordLedgerRun } from "../../services/unifiedLedger";
 import { projectJobRunRecordBestEffort } from "../../services/runLedgerProjectionHooks";
 import { buildJobRunRecord, scheduleIdToLedgerJobId, type JobRunRecordInput } from "../../services/jobRunRecords";
@@ -236,6 +230,13 @@ import {
 } from "../../services/workflowStageSchedule";
 import { getScheduledAgentDoor } from "../orchestrator/meshDoors";
 import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
+import {
+  IAAA_AUDIT_POLICY_VERSION,
+  recordAuditEvent,
+  shouldBlockAction,
+  type AuditStore,
+} from "../../security/iaaaAudit";
+import { createWiredAuditStore } from "../../security/iaaaAuditStore";
 import { scheduleWebhookFollowupBodySchema } from "../../api/ingressSchemas";
 import {
   buildScheduleWebhookFollowupSubmission,
@@ -282,6 +283,15 @@ export interface SchedulesRouteContext {
     agent: AgentName | "judge" | "nlq" | "orchestrator",
     payload: Record<string, unknown>
   ): void;
+  /**
+   * Issue #6503 step 9 (G2) — test seam: use this IAAA audit store
+   * instead of createWiredAuditStore(env) for the audit-before-write
+   * record. Absent, the route records through the wired store (the
+   * SessionStore DO audit-append); a store that cannot append
+   * blocks the control op with the coded 503, never a silent
+   * unaudited write.
+   */
+  auditStore?: AuditStore | null;
   /** SDK schedule listing (owner: Agent base class - was `this.listSchedules`). */
   listSchedules(criteria?: ScheduleCriteria): Promise<Schedule<unknown>[]>;
   /** SDK schedule cancellation (owner: Agent base class - was `this.cancelSchedule`). */
@@ -545,176 +555,180 @@ export async function readTickerPushListItem(
 }
 
 /**
- * Issue #3121 #4239 — the token-renewal row for the Schedules
- * home list. The record is derived (tokenRenewalToRecord), never
- * stored, and the last renewal is joined from the ledger's own
- * renewal-dispatch rows (jobId = RENEWAL_DISPATCH_CRON), so the
- * row shows the duty's last firing — or none, when it has never
- * fired. Best-effort: a failed ledger read omits the row and logs
- * a warning — the list never fails because the ledger cannot be
- * read. The `sql` is the agent's SqlStorage (the same seam the
- * runs routes read through).
+ * Issue #6503 — the token-renewal row for the Schedules home
+ * list, from its STORED record: the last renewal is joined from
+ * the ledger's own renewal-dispatch rows (jobId =
+ * RENEWAL_DISPATCH_CRON), so the row shows the duty's last firing
+ * — or none, when it has never fired. No stored record means no
+ * row: nothing is synthesized. Best-effort on the ledger read: a
+ * failed ledger read renders the stored row without a last run and
+ * logs a warning — the list never fails, and the row never vanishes,
+ * because the ledger cannot be read. The `sql` is the agent's
+ * SqlStorage (the same seam the runs routes read through).
  */
 export async function readTokenRenewalListItem(
   sql: ConstructorParameters<typeof SqlJobRunRecordStore>[0],
+  record?: UnifiedScheduleRecord | null,
 ): Promise<ReturnType<typeof tokenRenewalRecordToListItem> | null> {
+  if (!record) return null;
   try {
     const lastRun = new SqlJobRunRecordStore(sql).latestByJob(RENEWAL_DISPATCH_CRON);
     return tokenRenewalRecordToListItem(
-      tokenRenewalToRecord(new Date().toISOString()),
+      record,
       lastRun ? { started: lastRun.started, finished: lastRun.finished, outcome: lastRun.outcome } : undefined,
     );
   } catch (err) {
     structuredLog.warn("schedules.token_renewal_read_failed", {
-      message: "[Schedules] token-renewal list read failed; the row is omitted:",
+      message: "[Schedules] token-renewal last-run read failed; the stored row renders without it:",
       error: err instanceof Error ? err.message : String(err),
     });
-    return null;
+    return tokenRenewalRecordToListItem(record);
   }
 }
 
 /**
- * Issue #3121 #4240 — the retention row for the Schedules
- * home list. The record is derived (retentionToRecord), never
- * stored, and the last pass is joined from the ledger's own
- * retention-dispatch rows (jobId = RETENTION_DISPATCH_CRON), so
- * the row shows the duty's last pass — or none, when it has never
- * fired. The pass-outcome summary rides the row's lastRunDetail
- * (the dispatch row's `detail`, rendered verbatim). Best-effort:
- * a failed ledger read omits the row and logs a warning — the
- * list never fails because the ledger cannot be read. The `sql`
- * is the agent's SqlStorage (the same seam the runs routes read
- * through).
+ * Issue #6503 — the retention row for the Schedules home list,
+ * from its STORED record: the last pass is joined from the
+ * ledger's own retention-dispatch rows (jobId =
+ * RETENTION_DISPATCH_CRON), so the row shows the duty's last pass
+ * — or none, when it has never fired. The pass-outcome summary
+ * rides the row's lastRunDetail (the dispatch row's `detail`,
+ * rendered verbatim). No stored record means no row. Best-effort
+ * on the ledger read, like the token-renewal row: the stored row
+ * renders without a last run when the ledger cannot be read.
  */
 export async function readRetentionListItem(
   sql: ConstructorParameters<typeof SqlJobRunRecordStore>[0],
+  record?: UnifiedScheduleRecord | null,
 ): Promise<ReturnType<typeof retentionRecordToListItem> | null> {
+  if (!record) return null;
   try {
     const lastRun = new SqlJobRunRecordStore(sql).latestByJob(RETENTION_DISPATCH_CRON);
     return retentionRecordToListItem(
-      retentionToRecord(new Date().toISOString()),
+      record,
       lastRun ? { started: lastRun.started, finished: lastRun.finished, outcome: lastRun.outcome, detail: lastRun.detail } : undefined,
     );
   } catch (err) {
     structuredLog.warn("schedules.retention_read_failed", {
-      message: "[Schedules] retention list read failed; the row is omitted:",
+      message: "[Schedules] retention last-run read failed; the stored row renders without it:",
       error: err instanceof Error ? err.message : String(err),
     });
-    return null;
+    return retentionRecordToListItem(record);
   }
 }
 
 /**
- * Issue #3121 #4241 — the nightly research row for the Schedules
- * home list. The record is derived (nightlyResearchToRecord), never
- * stored, and the last run is joined from the ledger's own
- * nightly-research rows (jobId = NIGHTLY_RESEARCH_RECORD_ID, the
- * row the scheduled-tick handler writes when the run fires), so
- * the row shows the duty's last run — or none, when it has never
- * fired. Best-effort: a failed ledger read omits the row and logs
- * a warning — the list never fails because the ledger cannot be
- * read. The `sql` is the agent's SqlStorage (the same seam the runs
- * routes read through).
+ * Issue #6503 — the nightly research row for the Schedules home
+ * list, from its STORED record: the last run is joined from the
+ * ledger's own nightly-research rows (jobId =
+ * NIGHTLY_RESEARCH_RECORD_ID, the row the scheduled-tick handler
+ * writes when the run fires), so the row shows the duty's last run
+ * — or none, when it has never fired. No stored record means no
+ * row. Best-effort on the ledger read, like its siblings.
  */
 export async function readNightlyResearchListItem(
   sql: ConstructorParameters<typeof SqlJobRunRecordStore>[0],
-  config: ResearchFireHourConfig = DEFAULT_RESEARCH_JOB_CONFIG,
+  record?: UnifiedScheduleRecord | null,
 ): Promise<ReturnType<typeof nightlyResearchRecordToListItem> | null> {
+  if (!record) return null;
   try {
     const lastRun = new SqlJobRunRecordStore(sql).latestByJob(NIGHTLY_RESEARCH_RECORD_ID);
     return nightlyResearchRecordToListItem(
-      nightlyResearchToRecord(new Date().toISOString(), null, config),
+      record,
       lastRun ? { started: lastRun.started, finished: lastRun.finished, outcome: lastRun.outcome } : undefined,
     );
   } catch (err) {
     structuredLog.warn("schedules.nightly_research_read_failed", {
-      message: "[Schedules] nightly research list read failed; the row is omitted:",
+      message: "[Schedules] nightly research last-run read failed; the stored row renders without it:",
       error: err instanceof Error ? err.message : String(err),
     });
-    return null;
+    return nightlyResearchRecordToListItem(record);
   }
 }
 
 /**
- * Issue #3121 #4242 — the stale-ledger-task sweep row for the
- * Schedules home list. The record is derived
- * (staleLedgerSweepToRecord), never stored, and the last run is
- * joined from the ledger's own sweep rows (jobId =
+ * Issue #6503 — the stale-ledger-task sweep row for the Schedules
+ * home list, from its STORED record: the last run is joined from
+ * the ledger's own sweep rows (jobId =
  * STALE_LEDGER_SWEEP_RECORD_ID, the row the #3394 wrapper writes
  * when the sweep fires), so the row shows the duty's last run with
- * its swept/pruned counts — or none, when it has never fired.
- * Best-effort: a failed ledger read omits the row and logs a
- * warning — the list never fails because the ledger cannot be
- * read. The `sql` is the agent's SqlStorage (the same seam the runs
- * routes read through).
+ * its swept/pruned counts — or none, when it has never fired. No
+ * stored record means no row. Best-effort on the ledger read, like
+ * its siblings.
  */
 export async function readStaleLedgerSweepListItem(
   sql: ConstructorParameters<typeof SqlJobRunRecordStore>[0],
+  record?: UnifiedScheduleRecord | null,
 ): Promise<ReturnType<typeof staleLedgerSweepRecordToListItem> | null> {
+  if (!record) return null;
   try {
     const lastRun = new SqlJobRunRecordStore(sql).latestByJob(STALE_LEDGER_SWEEP_RECORD_ID);
     return staleLedgerSweepRecordToListItem(
-      staleLedgerSweepToRecord(new Date().toISOString()),
+      record,
       lastRun ? { started: lastRun.started, finished: lastRun.finished, outcome: lastRun.outcome, detail: lastRun.detail } : undefined,
     );
   } catch (err) {
     structuredLog.warn("schedules.stale_ledger_sweep_read_failed", {
-      message: "[Schedules] stale-ledger sweep list read failed; the row is omitted:",
+      message: "[Schedules] stale ledger sweep last-run read failed; the stored row renders without it:",
       error: err instanceof Error ? err.message : String(err),
     });
-    return null;
+    return staleLedgerSweepRecordToListItem(record);
   }
 }
 
 /**
- * Issue #3121 #4242 — the stale-async-job sweep row for the
- * Schedules home list, the same shape as the ledger sweep: derived
- * record, last run joined from the ledger's own sweep rows (jobId
- * = STALE_ASYNC_JOB_SWEEP_RECORD_ID), counts in the row's detail.
- * Best-effort like its siblings.
+ * Issue #6503 — the stale-async-job sweep row for the Schedules
+ * home list, from its STORED record: the last run is joined from
+ * the ledger's own sweep rows (jobId =
+ * STALE_ASYNC_JOB_SWEEP_RECORD_ID), counts in the row's detail.
+ * No stored record means no row. Best-effort like its siblings.
  */
 export async function readStaleAsyncJobSweepListItem(
   sql: ConstructorParameters<typeof SqlJobRunRecordStore>[0],
+  record?: UnifiedScheduleRecord | null,
 ): Promise<ReturnType<typeof staleAsyncJobSweepRecordToListItem> | null> {
+  if (!record) return null;
   try {
     const lastRun = new SqlJobRunRecordStore(sql).latestByJob(STALE_ASYNC_JOB_SWEEP_RECORD_ID);
     return staleAsyncJobSweepRecordToListItem(
-      staleAsyncJobSweepToRecord(new Date().toISOString()),
+      record,
       lastRun ? { started: lastRun.started, finished: lastRun.finished, outcome: lastRun.outcome, detail: lastRun.detail } : undefined,
     );
   } catch (err) {
     structuredLog.warn("schedules.stale_async_job_sweep_read_failed", {
-      message: "[Schedules] stale async-job sweep list read failed; the row is omitted:",
+      message: "[Schedules] stale async-job sweep last-run read failed; the stored row renders without it:",
       error: err instanceof Error ? err.message : String(err),
     });
-    return null;
+    return staleAsyncJobSweepRecordToListItem(record);
   }
 }
 
 /**
- * Issue #3121 #4242 — the schedule-watchdog row for the Schedules
- * home list. The record is derived (scheduleWatchdogToRecord),
- * never stored, and the last run is joined from the ledger's
- * heartbeat rows (jobId = SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID, the
- * row the watchdog itself writes every sweep), so the row shows
+ * Issue #6503 — the schedule-watchdog row for the Schedules home
+ * list, from its STORED record: the last run is joined from the
+ * ledger's heartbeat rows (jobId = SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID,
+ * the row the watchdog itself writes every sweep), so the row shows
  * the duty's last sweep with its examined/missed/skipped counts —
- * or none, when it has never fired. Best-effort like its siblings.
+ * or none, when it has never fired. No stored record means no row.
+ * Best-effort like its siblings.
  */
 export async function readScheduleWatchdogListItem(
   sql: ConstructorParameters<typeof SqlJobRunRecordStore>[0],
+  record?: UnifiedScheduleRecord | null,
 ): Promise<ReturnType<typeof scheduleWatchdogRecordToListItem> | null> {
+  if (!record) return null;
   try {
     const lastRun = new SqlJobRunRecordStore(sql).latestByJob(SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID);
     return scheduleWatchdogRecordToListItem(
-      scheduleWatchdogToRecord(new Date().toISOString()),
+      record,
       lastRun ? { started: lastRun.started, finished: lastRun.finished, outcome: lastRun.outcome, detail: lastRun.detail } : undefined,
     );
   } catch (err) {
     structuredLog.warn("schedules.schedule_watchdog_read_failed", {
-      message: "[Schedules] schedule watchdog list read failed; the row is omitted:",
+      message: "[Schedules] schedule watchdog last-run read failed; the stored row renders without it:",
       error: err instanceof Error ? err.message : String(err),
     });
-    return null;
+    return scheduleWatchdogRecordToListItem(record);
   }
 }
 
@@ -784,6 +798,368 @@ async function resolveScheduleFlagsCaller(
   }
 }
 
+/**
+ * Issue #6503 step 8 (G1) — the single seam for schedule-control
+ * authorization (the level rule, Mars 2026-11-25). Every control
+ * route in this file authorizes through it; no route invents a
+ * second gate.
+ *
+ * Identity comes from the verified session only, via
+ * resolveTrustedScheduleIdentity (the Worker-established
+ * x-user-login header wins; the per-instance screener execution
+ * context is the fallback) — never from a client-supplied
+ * tenantId/userId. Roles come from the membership store, on the
+ * platform primitives: the flags-probe shape (login → internal id
+ * via the alias KV, then checkPlatformPermission with
+ * role:assign, the platform-privilege grant) plus the
+ * isTenantAdminForTenant composition for the tenant-admin leg.
+ * No new permission is invented and no ExecutionContext PDP
+ * resolution runs here: resolveExecutionContext requires a
+ * `permission: Permission` and no schedule permission exists yet
+ * (the mapping gap is CISO's, recorded for them). When the mapping
+ * lands, the swap is this one function.
+ *
+ * Levels, from the stored record alone (records carry no tenant
+ * field — #3122 F4 — so none is invented): platform-level is the
+ * six system rows, any `kind: "internal"` row, a `worker-duty`
+ * row, and the ticker-push live feed (system-owned, no owner);
+ * every other known kind (screen, goal, workflow-stage, followup)
+ * is user-level, owned by `ownerLogin`. An unknown kind has no
+ * level and refuses fail-closed. A user-level row with no
+ * ownerLogin is still user-level — it simply has no owning user,
+ * so only a platform-admin or a tenant-admin of the instance
+ * tenant may control it. The instance tenant
+ * (resolveIaaaTenant) is the user's tenant in this single-tenant
+ * deployment: a tenant-admin's leg is checked against it.
+ *
+ * Fail-closed throughout: no identity → unauthenticated (the
+ * route answers 401); a membership-store failure grants no admin
+ * role (the caller keeps plain-user standing — ownership compares
+ * logins, never memberships — and the route answers 403, never a
+ * bare 500, on a level the caller does not hold).
+ */
+export type ScheduleControlLevel = "platform" | "user";
+
+export type ScheduleControlCaller =
+  | { kind: "platform-admin"; login: string; internalUserId: string }
+  | { kind: "tenant-admin"; login: string; internalUserId: string; tenantId: string }
+  | { kind: "user"; login: string; internalUserId: string | null }
+  | { kind: "unauthenticated" };
+
+/** A resolved caller that passed the gate: identity is present, so `login` exists. */
+export type AuthenticatedScheduleControlCaller = Exclude<
+  ScheduleControlCaller,
+  { kind: "unauthenticated" }
+>;
+
+export async function resolveScheduleControlCaller(
+  request: Request,
+  // Issue #6503 step 8b — the seam takes only the fields it reads
+  // (identity + membership inputs), so other routes (maintenance
+  // clear-table) can authorize through it without building a full
+  // SchedulesRouteContext. A SchedulesRouteContext satisfies this
+  // Pick structurally; nothing about the resolution changes.
+  ctx: Pick<
+    SchedulesRouteContext,
+    "env" | "getScreenerExecutionContext" | "flagAliasKv" | "flagMembershipStore"
+  >,
+): Promise<ScheduleControlCaller> {
+  let context: ScreenerExecutionContext | undefined;
+  try {
+    context = (await ctx.getScreenerExecutionContext()) ?? undefined;
+  } catch {
+    context = undefined;
+  }
+  const trusted = resolveTrustedScheduleIdentity({
+    headerLogin: request.headers.get("x-user-login") || "",
+    headerEnvironment: (request.headers.get("x-environment") || "").toUpperCase(),
+    context,
+    configuredEnvironment: resolveEnvironmentConfig(ctx.env).name as ScheduleEnv,
+  });
+  if (!trusted.userLogin) {
+    return { kind: "unauthenticated" };
+  }
+  const login = trusted.userLogin;
+  try {
+    const kv = ctx.flagAliasKv ?? sessionStore(ctx.env);
+    const internalUserId = await lookupInternalUserIdByLogin(kv, login);
+    if (!internalUserId) {
+      return { kind: "user", login, internalUserId: null };
+    }
+    const store =
+      ctx.flagMembershipStore ?? createKvMembershipStore(sessionStore(ctx.env));
+    const decision = await checkPlatformPermission(store, {
+      internalUserId,
+      permission: "role:assign",
+      nowMs: Date.now(),
+    });
+    if (decision.decision === "allow") {
+      return { kind: "platform-admin", login, internalUserId };
+    }
+    const memberships = await store.getMembershipsByUser(internalUserId);
+    const tenantId = resolveIaaaTenant(ctx.env);
+    if (isTenantAdminForTenant(memberships, tenantId, Date.now())) {
+      return { kind: "tenant-admin", login, internalUserId, tenantId };
+    }
+    return { kind: "user", login, internalUserId };
+  } catch {
+    return { kind: "user", login, internalUserId: null };
+  }
+}
+
+/** The control level of a stored schedule record, or null when its kind names no level. */
+export function resolveScheduleControlLevel(
+  record: UnifiedScheduleRecord,
+): ScheduleControlLevel | null {
+  if (
+    SYSTEM_SCHEDULE_RECORD_IDS.has(record.id) ||
+    record.kind === "internal" ||
+    record.kind === "worker-duty" ||
+    record.kind === "ticker-push" ||
+    record.id === TICKER_PUSH_RECORD_ID
+  ) {
+    return "platform";
+  }
+  if (
+    record.kind === "screen" ||
+    record.kind === "goal" ||
+    record.kind === "workflow-stage" ||
+    record.kind === "followup"
+  ) {
+    return "user";
+  }
+  return null;
+}
+
+export type ScheduleControlAuthorization =
+  | { allowed: true }
+  | { allowed: false; status: 403; reason: string };
+
+/**
+ * The level rule for one stored record: platform-level →
+ * platform-admin only; user-level → platform-admin, tenant-admin
+ * of the user's tenant, or the owning user. A record whose level
+ * cannot be determined refuses fail-closed (403 naming the
+ * unknown kind), never allows.
+ */
+export function authorizeScheduleControl(
+  caller: ScheduleControlCaller,
+  record: UnifiedScheduleRecord,
+): ScheduleControlAuthorization {
+  const level = resolveScheduleControlLevel(record);
+  if (level === null) {
+    return {
+      allowed: false,
+      status: 403,
+      reason: `Forbidden: schedule '${record.id}' has an unknown kind '${record.kind}', so its control level cannot be determined.`,
+    };
+  }
+  if (level === "platform") {
+    if (caller.kind === "platform-admin") return { allowed: true };
+    return {
+      allowed: false,
+      status: 403,
+      reason: "Forbidden: platform-level schedules are controllable by platform-admin only.",
+    };
+  }
+  if (caller.kind === "platform-admin" || caller.kind === "tenant-admin") {
+    return { allowed: true };
+  }
+  if (caller.kind === "user" && record.ownerLogin && caller.login === record.ownerLogin) {
+    return { allowed: true };
+  }
+  if (caller.kind === "user" && !record.ownerLogin) {
+    return {
+      allowed: false,
+      status: 403,
+      reason: "Forbidden: this user-level schedule names no owning user, so only a platform-admin or a tenant-admin of the instance tenant may control it.",
+    };
+  }
+  return {
+    allowed: false,
+    status: 403,
+    reason: "Forbidden: user-level schedules are controllable by a platform-admin, a tenant-admin of the user's tenant, or the owning user.",
+  };
+}
+
+/**
+ * Authorize a control op addressed by id, with the stored record
+ * when one exists. The six system ids are platform-level by id
+ * even when no row is stored yet, so a non-admin is refused
+ * before the route's own not-found; a non-system id with no
+ * stored row returns null and the route answers with its own
+ * not-found/refusal — nothing is mutated either way.
+ */
+export function authorizeScheduleControlForId(
+  caller: ScheduleControlCaller,
+  id: string,
+  record: UnifiedScheduleRecord | undefined,
+): ScheduleControlAuthorization | null {
+  if (id === TICKER_PUSH_RECORD_ID) {
+    if (caller.kind === "platform-admin") return { allowed: true };
+    return {
+      allowed: false,
+      status: 403,
+      reason: "Forbidden: the ticker-push live feed is platform-level and controllable by platform-admin only.",
+    };
+  }
+  if (!record) {
+    if (SYSTEM_SCHEDULE_RECORD_IDS.has(id)) {
+      if (caller.kind === "platform-admin") return { allowed: true };
+      return {
+        allowed: false,
+        status: 403,
+        reason: "Forbidden: platform-level schedules are controllable by platform-admin only.",
+      };
+    }
+    return null;
+  }
+  return authorizeScheduleControl(caller, record);
+}
+
+/** The audit deps the step-9 (G2) helpers read: the env for the wired store, the test seam, and the funnel. */
+export interface ScheduleControlAuditDeps {
+  env: Env;
+  auditStore?: AuditStore | null;
+  audit: (type: string, agent: "orchestrator", payload: Record<string, unknown>) => void;
+}
+
+/** The caller level as the audit attribution names it. */
+export function scheduleControlCallerLevel(caller: ScheduleControlCaller): string {
+  return caller.kind;
+}
+
+/**
+ * Issue #6503 step 9 (G2) — audit-before-write for schedule control
+ * ops, the #5867 shape: ONE IAAA chain record BEFORE the store
+ * write, over the wired store (`createWiredAuditStore`) or the
+ * `auditStore` test seam. The record names the action (the existing
+ * `schedule.*` vocabulary, reused — no parallel names), the schedule
+ * id(s) as resourceId, and the resolved caller login as actor;
+ * outcome is "pending" (the write has not run yet) and the funnel
+ * annotation after the write carries the outcome, exactly as #5867
+ * keeps the funnel after the write. Schedule control ops are
+ * consequential, so a failed audit write BLOCKS: returns the coded
+ * 503 refusal (FAILURE_COMMERCIAL_AUDIT_REQUIRED, already in the
+ * outcome catalog at 503) and the caller must not write. Returns
+ * null when the record landed and the write may proceed.
+ *
+ * Residual (#5867, documented not solved): if the store write fails
+ * after this record lands, an audit record exists for a change that
+ * never landed — the chain has no rollback for this. A validation
+ * refusal (400) or a gate refusal (401/403) never reaches this
+ * helper, so those consume no chain record.
+ */
+export async function auditScheduleControlBeforeWrite(
+  deps: Pick<ScheduleControlAuditDeps, "env" | "auditStore">,
+  caller: ScheduleControlCaller,
+  action: string,
+  resourceId?: string,
+): Promise<Response | null> {
+  if (caller.kind === "unauthenticated") {
+    // No identity to attribute: every gate answers 401 before a
+    // control op reaches this helper, so a caller arriving here
+    // without one is a route bug — refused, never audited under
+    // "anonymous" (refusals are audited separately, below).
+    return Response.json(
+      { error: "Unauthorized: a signed-in session is required to control schedules." },
+      { status: 401 },
+    );
+  }
+  let recorded: Awaited<ReturnType<typeof recordAuditEvent>>;
+  try {
+    const store = deps.auditStore ?? createWiredAuditStore(deps.env);
+    recorded = await recordAuditEvent(store, {
+      timestamp: Date.now(),
+      type: "schedule-admin",
+      actorPrincipalId: caller.login,
+      actorType: "human",
+      initiatingPrincipalId: caller.login,
+      tenantId: resolveIaaaTenant(deps.env),
+      correlationId: crypto.randomUUID(),
+      action,
+      // The IAAA resourceId caps at 512 chars; a bulk id list is
+      // truncated here and carried in full on the funnel event.
+      ...(resourceId ? { resourceId: resourceId.slice(0, 512) } : {}),
+      decision: "allow",
+      policyVersion: IAAA_AUDIT_POLICY_VERSION,
+      outcome: "pending",
+    });
+  } catch {
+    recorded = {
+      ok: false,
+      code: "AUDIT_WRITE_FAILED",
+      error: "audit event could not be recorded; the action must not be reported as audited",
+    };
+  }
+  if (shouldBlockAction("consequential", !recorded.ok)) {
+    return Response.json(
+      {
+        error: "Schedule control refused: the audit record could not be written, so the change was not applied.",
+        code: "FAILURE_COMMERCIAL_AUDIT_REQUIRED",
+        action,
+        ...(resourceId ? { scheduleId: resourceId } : {}),
+      },
+      { status: 503 },
+    );
+  }
+  return null;
+}
+
+/**
+ * Issue #6503 step 9 (G2) — refusal auditing for the step-8/8b
+ * gates: every 401/403 writes a refusal audit event naming the
+ * attempted action, the schedule id (or scope/table), the reason,
+ * and the caller login (or "anonymous"). Best-effort ONLY, both
+ * emissions: the chain record (decision "deny", outcome "failed",
+ * the reason as errorCode) and the `schedule.control-refused`
+ * funnel annotation. Either failing must not change the 401/403
+ * response and must never let the refused op proceed — the gate
+ * has already refused it before this runs.
+ */
+export async function auditScheduleControlRefusal(
+  deps: ScheduleControlAuditDeps,
+  action: string,
+  resourceId: string | undefined,
+  reason: string,
+  caller: ScheduleControlCaller,
+  extraFunnel?: Record<string, unknown>,
+): Promise<void> {
+  const login = caller.kind === "unauthenticated" ? "anonymous" : caller.login;
+  try {
+    const store = deps.auditStore ?? createWiredAuditStore(deps.env);
+    await recordAuditEvent(store, {
+      timestamp: Date.now(),
+      type: "schedule-admin",
+      actorPrincipalId: login,
+      actorType: "human",
+      initiatingPrincipalId: login,
+      tenantId: resolveIaaaTenant(deps.env),
+      correlationId: crypto.randomUUID(),
+      action,
+      ...(resourceId ? { resourceId: resourceId.slice(0, 512) } : {}),
+      decision: "deny",
+      policyVersion: IAAA_AUDIT_POLICY_VERSION,
+      outcome: "failed",
+      errorCode: reason.slice(0, 512),
+    });
+  } catch {
+    // Best-effort: a refusal audit failing never changes the refusal.
+  }
+  try {
+    deps.audit("schedule.control-refused", "orchestrator", {
+      action,
+      ...(resourceId ? { scheduleId: resourceId } : {}),
+      ...(extraFunnel ?? {}),
+      reason,
+      callerLogin: login,
+      callerLevel: caller.kind === "unauthenticated" ? "anonymous" : caller.kind,
+    });
+  } catch {
+    // Best-effort funnel annotation; see above.
+  }
+}
+
 export async function handleSchedulesRoutes(
   request: Request,
   url: URL,
@@ -792,15 +1168,19 @@ export async function handleSchedulesRoutes(
   ctx: SchedulesRouteContext
 ): Promise<Response | null> {
     // Issue #3121 Phase 2 (#3123): the one schedule store — the
-    // unified DO-SQLite `unified_schedules` table — and the one
-    // management path behind every route in this file. Subpath ids
-    // come from the /schedules/<id>/<action> shape via regex (not a
-    // counted route condition).
+    // unified D1 `unified_schedules` table (#6503, D1 only) — and
+    // the one management path behind every route in this file.
+    // Subpath ids come from the /schedules/<id>/<action> shape via
+    // regex (not a counted route condition). The store is built
+    // once per request (one adapter, one lazy schema-ensure); the
+    // factory throws fail-closed when AGENT_DB is unbound, so the
+    // control plane refuses rather than silently reading a DO
+    // table that is no longer a live store.
+    let cachedStore: ScheduleStore | undefined;
     const unifiedStore = () =>
-      createUnifiedSchedulePorts({
-        sql: ctx.agentCtx.storage.sql,
-        storage: ctx.agentCtx.storage,
-      }).unifiedSchedulesSync;
+      (cachedStore ??= createD1UnifiedSchedulePorts({
+        d1: ctx.env.AGENT_DB,
+      }).unifiedSchedules);
     const alarms: ScheduleAlarms = makeScheduleAlarmsPort(ctx, {
       // Issue #6482 — the port resolves the effective floor per arm
       // (managed setting > env carrier > default), so a floor set in
@@ -823,9 +1203,50 @@ export async function handleSchedulesRoutes(
       }
     };
 
+    // Issue #6503 step 8 (G1) — the one gate every control route
+    // below answers through: no identity → 401; a level the caller
+    // does not hold → 403 naming the level. A missing stored row
+    // abstains (null) unless the id itself is a system id, so the
+    // route keeps its own not-found/refusal and nothing is mutated.
+    // The store read is best-effort here: a store failure leaves
+    // the record unknown and the route answers with its own error,
+    // exactly as before the gate.
+    //
+    // Issue #6503 step 9 (G2) — the gate also carries the audit
+    // attribution: on allow it returns the resolved caller and the
+    // stored record it loaded (the before-state for the audit), so
+    // the branch never re-resolves the caller; on refuse it audits
+    // the refusal (best-effort, never changing the 401/403) and
+    // returns the refusal Response. `action` is the schedule.*
+    // audit name for the op (e.g. "schedule.paused").
+    const authorizeControlOrRespond = async (
+      scheduleId: string,
+      action: string,
+    ): Promise<{ caller: AuthenticatedScheduleControlCaller; record: UnifiedScheduleRecord | undefined } | Response> => {
+      const caller = await resolveScheduleControlCaller(request, ctx);
+      if (caller.kind === "unauthenticated") {
+        const reason = "Unauthorized: a signed-in session is required to control schedules.";
+        await auditScheduleControlRefusal(ctx, action, scheduleId, reason, caller);
+        return Response.json({ error: reason }, { status: 401 });
+      }
+      let record: UnifiedScheduleRecord | undefined;
+      try {
+        record = await unifiedStore().get(scheduleId);
+      } catch {
+        record = undefined;
+      }
+      const decision = authorizeScheduleControlForId(caller, scheduleId, record);
+      if (decision && !decision.allowed) {
+        await auditScheduleControlRefusal(ctx, action, scheduleId, decision.reason, caller);
+        return Response.json({ error: decision.reason }, { status: decision.status });
+      }
+      return { caller, record };
+    };
+
     // Issue #5878 — the one schedule list, shared by the GET list
     // route and the bulk pause/resume/trigger routes: the unified
-    // items plus the ticker-push row and the six derived rows, under
+    // items (the store only — a stored row renders, no stored row
+    // means the id does not appear) plus the ticker-push row, under
     // the same ?type= filter. A bulk scope filters THESE rows (by
     // kind), so the bulk verb and the home the user sees can never
     // disagree about which rows a scope names.
@@ -841,48 +1262,30 @@ export async function handleSchedulesRoutes(
       if (tickerItem && (!typeParam || tickerItem.type === typeParam)) {
         items.push(tickerItem);
       }
-      // Issue #3121 #4239 — the token-renewal row is derived,
-      // not stored; append it with its last renewal joined from
-      // the ledger, under the same ?type= filter as the rest.
-      const renewalItem = await readTokenRenewalListItem(ctx.agentCtx.storage.sql);
-      if (renewalItem && (!typeParam || renewalItem.type === typeParam)) {
-        items.push(renewalItem);
+      // Issue #6503 — the last-run joins for the six stored system
+      // rows (#4239–#4242): a stored row renders from the store
+      // above; each join decorates that row in place with its last
+      // run from the ledger. No stored row means no join and no
+      // row — nothing is synthesized. The join readers return the
+      // stored row without a last run when the ledger cannot be
+      // read, so a ledger failure never drops a stored row.
+      const systemReaders = [
+        [TOKEN_RENEWAL_RECORD_ID, readTokenRenewalListItem],
+        [RETENTION_RECORD_ID, readRetentionListItem],
+        [NIGHTLY_RESEARCH_RECORD_ID, readNightlyResearchListItem],
+        [STALE_LEDGER_SWEEP_RECORD_ID, readStaleLedgerSweepListItem],
+        [STALE_ASYNC_JOB_SWEEP_RECORD_ID, readStaleAsyncJobSweepListItem],
+        [SCHEDULE_WATCHDOG_RECORD_ID, readScheduleWatchdogListItem],
+      ] as const;
+      for (const [id, reader] of systemReaders) {
+        const at = items.findIndex((item) => item.id === id);
+        if (at === -1) continue;
+        const record = await unifiedStore().get(id);
+        const joined = await reader(ctx.agentCtx.storage.sql, record);
+        if (joined) items[at] = joined;
       }
-      // Issue #3121 #4240 — the retention row is derived,
-      // not stored; append it with its last pass joined from
-      // the ledger, under the same ?type= filter as the rest.
-      const retentionItem = await readRetentionListItem(ctx.agentCtx.storage.sql);
-      if (retentionItem && (!typeParam || retentionItem.type === typeParam)) {
-        items.push(retentionItem);
-      }
-      // Issue #3121 #4241 — the nightly research row is derived,
-      // not stored; append it with its last run joined from
-      // the ledger, under the same ?type= filter as the rest.
-      const nightlyResearchItem = await readNightlyResearchListItem(
-        ctx.agentCtx.storage.sql,
-        resolveResearchJobConfig(ctx.env as unknown as Record<string, string | undefined>),
-      );
-      if (nightlyResearchItem && (!typeParam || nightlyResearchItem.type === typeParam)) {
-        items.push(nightlyResearchItem);
-      }
-      // Issue #3121 #4242 — the three sweep/watchdog rows are
-      // derived, not stored; append each with its last run joined
-      // from the ledger, under the same ?type= filter as the rest.
-      const staleLedgerSweepItem = await readStaleLedgerSweepListItem(ctx.agentCtx.storage.sql);
-      if (staleLedgerSweepItem && (!typeParam || staleLedgerSweepItem.type === typeParam)) {
-        items.push(staleLedgerSweepItem);
-      }
-      const staleAsyncJobSweepItem = await readStaleAsyncJobSweepListItem(ctx.agentCtx.storage.sql);
-      if (staleAsyncJobSweepItem && (!typeParam || staleAsyncJobSweepItem.type === typeParam)) {
-        items.push(staleAsyncJobSweepItem);
-      }
-      const scheduleWatchdogItem = await readScheduleWatchdogListItem(ctx.agentCtx.storage.sql);
-      if (scheduleWatchdogItem && (!typeParam || scheduleWatchdogItem.type === typeParam)) {
-        items.push(scheduleWatchdogItem);
-      }
-      // Issue #5890 — one row per job: the derived row and its live
-      // alarm are the same job (a sweep's derived record and the
-      // interval alarm the guard armed), so the appended rows collapse
+      // Issue #5890 — one row per job: a stored system record and
+      // its live alarm are the same job, so the rows collapse
       // through the same reader as the service list above — the home
       // and the bulk scopes built on this list can never disagree.
       return collapseScheduleListItems(items);
@@ -942,6 +1345,13 @@ export async function handleSchedulesRoutes(
     // trigger go through the TickerAgent's typed RPC, exactly as the
     // single-row route does them. Any other row returns undefined
     // and falls through to the standard per-row verb.
+    //
+    // Issue #6503 step 14b — unreachable from the bulk routes:
+    // handleBulkScheduleVerb drops the feed row before the bulk
+    // service runs, so the bulk verb never dispatches the feed;
+    // the single-row routes are the feed's control plane. The
+    // branch stays as the executor seam's row-level handler, never
+    // as a bulk path — do not re-admit the row to the bulk rows.
     const executeBulkRow: BulkScheduleRowExecutor = async (row, verb) => {
       if (row.id !== TICKER_PUSH_RECORD_ID) return undefined;
       const stub = tickerPushStub();
@@ -981,10 +1391,63 @@ export async function handleSchedulesRoutes(
           );
         }
         const scope = body.scope as BulkScheduleScope;
-        const rows = await readScheduleListItems();
+        // Issue #6503 step 8 (G1) — level-rule gate for bulk verbs:
+        // the 'all' and 'system' scopes touch platform-level rows,
+        // so they are platform-admin only; any other scope names
+        // user-level rows only, so a platform-admin or a
+        // tenant-admin of the instance tenant may run it. A plain
+        // user never bulk-controls rows they may not own.
+        const bulkAction =
+          verb === "pause" ? "schedule.bulk-paused" : verb === "resume" ? "schedule.bulk-resumed" : "schedule.bulk-triggered";
+        const bulkCaller = await resolveScheduleControlCaller(request, ctx);
+        if (bulkCaller.kind === "unauthenticated") {
+          const reason = "Unauthorized: a signed-in session is required to control schedules.";
+          await auditScheduleControlRefusal(ctx, bulkAction, undefined, reason, bulkCaller, { scope });
+          return Response.json({ error: reason }, { status: 401 });
+        }
+        const bulkTouchesPlatform = scope === "all" || scope === "system";
+        if (bulkTouchesPlatform && bulkCaller.kind !== "platform-admin") {
+          const reason = `Forbidden: bulk ${verb} over the '${scope}' scope touches platform-level schedules, which are controllable by platform-admin only.`;
+          await auditScheduleControlRefusal(ctx, bulkAction, undefined, reason, bulkCaller, { scope });
+          return Response.json({ error: reason }, { status: 403 });
+        }
+        if (
+          !bulkTouchesPlatform &&
+          bulkCaller.kind !== "platform-admin" &&
+          bulkCaller.kind !== "tenant-admin"
+        ) {
+          const reason = `Forbidden: bulk ${verb} over user-level schedules requires a platform-admin or a tenant-admin of the instance tenant.`;
+          await auditScheduleControlRefusal(ctx, bulkAction, undefined, reason, bulkCaller, { scope });
+          return Response.json({ error: reason }, { status: 403 });
+        }
+        // Issue #6503 step 14b — the ticker-push feed is not a
+        // schedule, so it is in NO bulk scope: the home the user
+        // sees renders it as a feed card outside the table, and
+        // the bulk verb must name the same rows the home shows.
+        // The filter is by the feed's stable id (it classifies as
+        // kind "system", so a kind filter alone would still match
+        // it) and it runs here, at the bulk verb's entry —
+        // readScheduleListItems itself is shared with the GET list
+        // route, which still appends the row for the feed card.
+        // The audit ids below and the summary counts therefore
+        // name schedules only.
+        const rows = (await readScheduleListItems()).filter(
+          (row) => row.id !== TICKER_PUSH_RECORD_ID,
+        );
         const callbackById = new Map(rows.map((r) => [r.id, r.callback]));
         const deps = { store: unifiedStore(), alarms, reconcileDeclared: ctx.reconcileScheduledTasks };
         const nowIso = new Date().toISOString();
+        // Issue #6503 step 9 (G2) — audit-before-write: ONE chain
+        // record for the bulk op (naming the scope and the ids in
+        // it) before the bulk service writes anything; a failed
+        // audit refuses with the coded 503 and runs nothing.
+        const bulkAuditRefusal = await auditScheduleControlBeforeWrite(
+          ctx,
+          bulkCaller,
+          bulkAction,
+          rows.map((r) => r.id).join(","),
+        );
+        if (bulkAuditRefusal) return bulkAuditRefusal;
         let summary: BulkScheduleSummary;
         if (verb === "pause") {
           summary = await pauseSchedulesInScope(deps, scope, rows, nowIso, executeBulkRow);
@@ -995,12 +1458,6 @@ export async function handleSchedulesRoutes(
         }
         const auditEvent =
           verb === "pause" ? "schedule.paused" : verb === "resume" ? "schedule.resumed" : "schedule.triggered";
-        const bulkAuditEvent =
-          verb === "pause"
-            ? "schedule.bulk-paused"
-            : verb === "resume"
-              ? "schedule.bulk-resumed"
-              : "schedule.bulk-triggered";
         for (const result of summary.results) {
           if (result.outcome !== "paused" && result.outcome !== "resumed" && result.outcome !== "triggered") {
             continue;
@@ -1008,14 +1465,22 @@ export async function handleSchedulesRoutes(
           ctx.audit(auditEvent, "orchestrator", {
             scheduleId: result.id,
             callback: callbackById.get(result.id),
+            // Issue #6503 step 9 (G2) — caller attribution on every
+            // event. These per-row annotations stay after the write:
+            // they name acted rows, knowable only from the outcome.
+            changedBy: bulkCaller.login,
+            callerLevel: bulkCaller.kind,
           });
         }
-        ctx.audit(bulkAuditEvent, "orchestrator", {
+        ctx.audit(bulkAction, "orchestrator", {
           scope,
+          scheduleIds: rows.map((r) => r.id),
           total: summary.total,
           applied: summary.applied,
           already: summary.already,
           refused: summary.refused,
+          changedBy: bulkCaller.login,
+          callerLevel: bulkCaller.kind,
         });
         return Response.json({
           success: true,
@@ -1241,6 +1706,10 @@ export async function handleSchedulesRoutes(
         registry,
         runCallback: (callback, payload) => ctx.runScheduleCallback(callback, payload),
         nowIso: () => new Date().toISOString(),
+        // Issue #6503 — the start-paused control, resolved here so a
+        // stage created through this adapter (direct or approved)
+        // starts active when the control is off.
+        startPaused: resolveEffectiveScheduleStartPaused(ctx.agentCtx.storage.sql, ctx.env).paused,
       });
     };
 
@@ -1254,7 +1723,7 @@ export async function handleSchedulesRoutes(
         // finding F14). A failure now surfaces as the 500 below.
         const typeParam = url.searchParams.get("type");
         // Issue #5878 — the one schedule list (unified items +
-        // ticker-push row + derived rows); see readScheduleListItems.
+        // ticker-push row); see readScheduleListItems.
         const items = await readScheduleListItems(typeParam ?? undefined);
         return Response.json({
           count: items.length,
@@ -1285,6 +1754,19 @@ export async function handleSchedulesRoutes(
         if (!scheduleId) {
           return Response.json({ error: "Schedule ID is required" }, { status: 400 });
         }
+        // Issue #6503 step 8 (G1) — level-rule gate, before any mutation.
+        const cancelGate = await authorizeControlOrRespond(scheduleId, "schedule.cancelled");
+        if (cancelGate instanceof Response) return cancelGate;
+        // Issue #6503 step 9 (G2) — audit-before-write: ONE chain
+        // record before the delete lands; a failed audit refuses
+        // with the coded 503 and deletes nothing.
+        const cancelAuditRefusal = await auditScheduleControlBeforeWrite(ctx, cancelGate.caller, "schedule.cancelled", scheduleId);
+        if (cancelAuditRefusal) return cancelAuditRefusal;
+        const cancelAttribution = {
+          changedBy: cancelGate.caller.login,
+          callerLevel: cancelGate.caller.kind,
+          ...(cancelGate.record?.state ? { fromState: cancelGate.record.state } : {}),
+        };
         if (scheduleId === TICKER_PUSH_RECORD_ID) {
           // Issue #4389 — Delete is every row's destructive control, and on a
           // live feed it means the only destructive thing there is: stop it.
@@ -1296,6 +1778,7 @@ export async function handleSchedulesRoutes(
             scheduleId,
             success: true,
             callback: "pushTicks",
+            ...cancelAttribution,
           });
           return Response.json({ scheduleId, cancelled: true });
         }
@@ -1309,10 +1792,11 @@ export async function handleSchedulesRoutes(
             scheduleId,
             success: false,
             error: deleted.error,
+            ...cancelAttribution,
           });
           return Response.json({ error: deleted.error }, { status: deleted.status });
         }
-        ctx.audit("schedule.cancelled", "orchestrator", { scheduleId, success: true });
+        ctx.audit("schedule.cancelled", "orchestrator", { scheduleId, success: true, ...cancelAttribution });
         return Response.json({ scheduleId, cancelled: deleted.cancelled });
       } catch (err: any) {
         return Response.json({ error: err.message || "Failed to cancel schedule" }, { status: 500 });
@@ -1429,12 +1913,45 @@ export async function handleSchedulesRoutes(
         return Response.json({ error: caller.reason }, { status: 403 });
       }
       const body = (await request.json().catch(() => null)) as unknown;
-      const patch = (body ?? {}) as { minIntervalSeconds?: unknown; firingEnabled?: unknown };
+      const patch = (body ?? {}) as {
+        minIntervalSeconds?: unknown;
+        firingEnabled?: unknown;
+        startPaused?: unknown;
+        firingRateAlertThreshold?: unknown;
+        firingRateAlertWindowMinutes?: unknown;
+        heartbeatIntervalSeconds?: unknown;
+        heartbeatWatchdogStaleAfterMinutes?: unknown;
+        missedScheduleGraceMinutes?: unknown;
+        dueGuardMs?: unknown;
+        staleRunningReapMs?: unknown;
+        staleSweepBatchLimit?: unknown;
+        researchScheduleUtcHour?: unknown;
+        jobRunRecordCap?: unknown;
+        tickHistoryCap?: unknown;
+      };
       const hasFloor = patch.minIntervalSeconds !== undefined;
       const hasFiring = patch.firingEnabled !== undefined;
-      if (!hasFloor && !hasFiring) {
+      const hasStartPaused = patch.startPaused !== undefined;
+      const hasRateThreshold = patch.firingRateAlertThreshold !== undefined;
+      const hasRateWindow = patch.firingRateAlertWindowMinutes !== undefined;
+      // Issue #6503 step 13 — the externalized remainder is settable
+      // through this same surface (no second settings mechanism).
+      const hasHeartbeatInterval = patch.heartbeatIntervalSeconds !== undefined;
+      const hasHeartbeatStaleAfter = patch.heartbeatWatchdogStaleAfterMinutes !== undefined;
+      const hasGrace = patch.missedScheduleGraceMinutes !== undefined;
+      const hasDueGuard = patch.dueGuardMs !== undefined;
+      const hasReapMs = patch.staleRunningReapMs !== undefined;
+      const hasReapBatch = patch.staleSweepBatchLimit !== undefined;
+      const hasResearchHour = patch.researchScheduleUtcHour !== undefined;
+      const hasJobRunCap = patch.jobRunRecordCap !== undefined;
+      const hasTickCap = patch.tickHistoryCap !== undefined;
+      if (!hasFloor && !hasFiring && !hasStartPaused && !hasRateThreshold && !hasRateWindow && !hasHeartbeatInterval && !hasHeartbeatStaleAfter && !hasGrace && !hasDueGuard && !hasReapMs && !hasReapBatch && !hasResearchHour && !hasJobRunCap && !hasTickCap) {
         return Response.json(
-          { error: "A minIntervalSeconds or firingEnabled value is required.", code: "INVALID_CONTROLS" },
+          {
+            error:
+              "A minIntervalSeconds, firingEnabled, startPaused, firingRateAlertThreshold, firingRateAlertWindowMinutes, heartbeatIntervalSeconds, heartbeatWatchdogStaleAfterMinutes, missedScheduleGraceMinutes, dueGuardMs, staleRunningReapMs, staleSweepBatchLimit, researchScheduleUtcHour, jobRunRecordCap or tickHistoryCap value is required.",
+            code: "INVALID_CONTROLS",
+          },
           { status: 400 },
         );
       }
@@ -1443,6 +1960,18 @@ export async function handleSchedulesRoutes(
         {
           ...(hasFloor ? { minIntervalSeconds: patch.minIntervalSeconds as never } : {}),
           ...(hasFiring ? { firingEnabled: patch.firingEnabled as never } : {}),
+          ...(hasStartPaused ? { startPaused: patch.startPaused as never } : {}),
+          ...(hasRateThreshold ? { firingRateAlertThreshold: patch.firingRateAlertThreshold as never } : {}),
+          ...(hasRateWindow ? { firingRateAlertWindowMinutes: patch.firingRateAlertWindowMinutes as never } : {}),
+          ...(hasHeartbeatInterval ? { heartbeatIntervalSeconds: patch.heartbeatIntervalSeconds as never } : {}),
+          ...(hasHeartbeatStaleAfter ? { heartbeatWatchdogStaleAfterMinutes: patch.heartbeatWatchdogStaleAfterMinutes as never } : {}),
+          ...(hasGrace ? { missedScheduleGraceMinutes: patch.missedScheduleGraceMinutes as never } : {}),
+          ...(hasDueGuard ? { dueGuardMs: patch.dueGuardMs as never } : {}),
+          ...(hasReapMs ? { staleRunningReapMs: patch.staleRunningReapMs as never } : {}),
+          ...(hasReapBatch ? { staleSweepBatchLimit: patch.staleSweepBatchLimit as never } : {}),
+          ...(hasResearchHour ? { researchScheduleUtcHour: patch.researchScheduleUtcHour as never } : {}),
+          ...(hasJobRunCap ? { jobRunRecordCap: patch.jobRunRecordCap as never } : {}),
+          ...(hasTickCap ? { tickHistoryCap: patch.tickHistoryCap as never } : {}),
         },
         new Date().toISOString(),
       );
@@ -1455,6 +1984,42 @@ export async function handleSchedulesRoutes(
           : {}),
         ...(applied.changed.firingEnabled !== undefined
           ? { firingEnabled: applied.changed.firingEnabled }
+          : {}),
+        ...(applied.changed.startPaused !== undefined
+          ? { startPaused: applied.changed.startPaused }
+          : {}),
+        ...(applied.changed.firingRateAlertThreshold !== undefined
+          ? { firingRateAlertThreshold: applied.changed.firingRateAlertThreshold }
+          : {}),
+        ...(applied.changed.firingRateAlertWindowMinutes !== undefined
+          ? { firingRateAlertWindowMinutes: applied.changed.firingRateAlertWindowMinutes }
+          : {}),
+        ...(applied.changed.heartbeatIntervalSeconds !== undefined
+          ? { heartbeatIntervalSeconds: applied.changed.heartbeatIntervalSeconds }
+          : {}),
+        ...(applied.changed.heartbeatWatchdogStaleAfterMinutes !== undefined
+          ? { heartbeatWatchdogStaleAfterMinutes: applied.changed.heartbeatWatchdogStaleAfterMinutes }
+          : {}),
+        ...(applied.changed.missedScheduleGraceMinutes !== undefined
+          ? { missedScheduleGraceMinutes: applied.changed.missedScheduleGraceMinutes }
+          : {}),
+        ...(applied.changed.dueGuardMs !== undefined
+          ? { dueGuardMs: applied.changed.dueGuardMs }
+          : {}),
+        ...(applied.changed.staleRunningReapMs !== undefined
+          ? { staleRunningReapMs: applied.changed.staleRunningReapMs }
+          : {}),
+        ...(applied.changed.staleSweepBatchLimit !== undefined
+          ? { staleSweepBatchLimit: applied.changed.staleSweepBatchLimit }
+          : {}),
+        ...(applied.changed.researchScheduleUtcHour !== undefined
+          ? { researchScheduleUtcHour: applied.changed.researchScheduleUtcHour }
+          : {}),
+        ...(applied.changed.jobRunRecordCap !== undefined
+          ? { jobRunRecordCap: applied.changed.jobRunRecordCap }
+          : {}),
+        ...(applied.changed.tickHistoryCap !== undefined
+          ? { tickHistoryCap: applied.changed.tickHistoryCap }
           : {}),
         changedBy: caller.login,
       });
@@ -1574,8 +2139,7 @@ export async function handleSchedulesRoutes(
           // (a live alarm wins when both name the same id).
           list: async () => {
             const live = (await ctx.listSchedules()).map(toItem);
-            const stored = unifiedStore()
-              .list()
+            const stored = (await unifiedStore().list())
               .filter((record) => record.kind === "screen")
               .map((record) => unifiedRecordToAgentSdkScheduleItem(record));
             const seen = new Set(live.map((item) => item.id));
@@ -1584,19 +2148,26 @@ export async function handleSchedulesRoutes(
           get: async (id) => {
             const found = await ctx.getScheduleById(id);
             if (found !== undefined) return toItem(found);
-            const record = unifiedStore().get(id);
+            const record = await unifiedStore().get(id);
             return record && record.kind === "screen"
               ? unifiedRecordToAgentSdkScheduleItem(record)
               : undefined;
           },
           // Issue #6482 — paused by default: an approved create
           // records a paused schedule and never arms the SDK; an
-          // explicit resume is the only activation.
+          // explicit resume is the only activation. Issue #6503 —
+          // when the start-paused control is off, the approved
+          // schedule starts active instead (resume arms it through
+          // the route's alarms port).
           create: async ({ timing, callback, payload }) =>
             createPausedAgentSdkScheduleRecord(
               unifiedStore(),
               { timing, callback, payload },
               new Date().toISOString(),
+              {
+                startPaused: resolveEffectiveScheduleStartPaused(ctx.agentCtx.storage.sql, ctx.env).paused,
+                alarms,
+              },
             ),
           cancel: async (id) => {
             const cancelled = await ctx.cancelSchedule(id);
@@ -1606,7 +2177,7 @@ export async function handleSchedulesRoutes(
             }
             // Issue #6482 — a paused schedule has no live alarm to
             // cancel: deleting it removes the record instead.
-            const existing = unifiedStore().get(id);
+            const existing = await unifiedStore().get(id);
             if (existing) {
               await removeAgentSdkScheduleRecord(unifiedStore(), id);
               return true;
@@ -1671,12 +2242,26 @@ export async function handleSchedulesRoutes(
     // (what would be cancelled) and cancels nothing.
     if (path.endsWith("/schedules/cancel-all") && request.method === "POST") {
       try {
+        // Issue #6503 step 8 (G1) — cancelling all touches every
+        // schedule including the platform-level system rows, so the
+        // whole route is platform-admin only (preview included).
+        const caller = await resolveScheduleControlCaller(request, ctx);
+        if (caller.kind === "unauthenticated") {
+          const reason = "Unauthorized: a signed-in session is required to control schedules.";
+          await auditScheduleControlRefusal(ctx, "schedules.cancelled.all", undefined, reason, caller);
+          return Response.json({ error: reason }, { status: 401 });
+        }
+        if (caller.kind !== "platform-admin") {
+          const reason = "Forbidden: cancelling all schedules touches platform-level schedules, which are controllable by platform-admin only.";
+          await auditScheduleControlRefusal(ctx, "schedules.cancelled.all", undefined, reason, caller);
+          return Response.json({ error: reason }, { status: 403 });
+        }
         const body = (await request.json().catch(() => ({}))) as any;
         const schedules = await ctx.listSchedules();
         const preview = schedules.map((s) => ({ id: s.id, callback: s.callback }));
         let pausedPreserved = 0;
         try {
-          pausedPreserved = unifiedStore().listByState("paused").length;
+          pausedPreserved = (await unifiedStore().listByState("paused")).length;
         } catch {
           pausedPreserved = 0;
         }
@@ -1689,6 +2274,17 @@ export async function handleSchedulesRoutes(
             pausedPreserved,
           });
         }
+        // Issue #6503 step 9 (G2) — audit-before-write: ONE chain
+        // record for the cancel-all (naming the ids to cancel)
+        // before any cancellation runs; a failed audit refuses
+        // with the coded 503 and cancels nothing.
+        const cancelAllAuditRefusal = await auditScheduleControlBeforeWrite(
+          ctx,
+          caller,
+          "schedules.cancelled.all",
+          preview.map((s) => s.id).join(","),
+        );
+        if (cancelAllAuditRefusal) return cancelAllAuditRefusal;
         const cancelledIds: string[] = [];
         const failed: Array<{ id: string; error: string }> = [];
         for (const item of preview) {
@@ -1705,6 +2301,9 @@ export async function handleSchedulesRoutes(
           cancelledIds,
           failedCount: failed.length,
           pausedPreserved,
+          // Issue #6503 step 9 (G2) — caller attribution on every event.
+          changedBy: caller.login,
+          callerLevel: caller.kind,
           // Issue #2457: cross-tenant delegation annotation only. These
           // headers are set solely by the admin tenant-queue route when
           // it fans out to this instance; they never change scope or
@@ -1738,7 +2337,7 @@ export async function handleSchedulesRoutes(
         const scheduleId = params.get("scheduleId") || undefined;
         const limit = Number(params.get("limit") || 50);
         const store = new SqlJobRunRecordStore(ctx.agentCtx.storage.sql);
-        // Issue #4239 — a derived record id reads its ledger rows
+        // Issue #6503 — a stored system id reads its ledger rows
         // under its dispatch job id (token-renewal → its cron).
         const runs = scheduleId ? store.listByJob(scheduleIdToLedgerJobId(scheduleId), limit) : store.listRecent(limit);
         return Response.json({ ok: true, runs });
@@ -1841,59 +2440,30 @@ export async function handleSchedulesRoutes(
             ),
           );
         }
-        // Issue #4239 — the renewal record is derived, not stored,
-        // so getUnifiedScheduleDetail would 404 it; answer it here
-        // from the same derived record + last-run join as the list.
-        if (scheduleId === TOKEN_RENEWAL_RECORD_ID) {
-          const renewalItem = await readTokenRenewalListItem(ctx.agentCtx.storage.sql);
-          if (!renewalItem) {
+        // Issue #6503 — a stored system row's detail is its list
+        // item with the last run joined from the ledger (the same
+        // join as the list); no stored row means 404 — nothing is
+        // synthesized. The generic detail below would return the
+        // raw alarm shape for an active row, without the join.
+        if (SYSTEM_SCHEDULE_RECORD_IDS.has(scheduleId)) {
+          const record = await unifiedStore().get(scheduleId);
+          if (!record) {
             return Response.json({ error: `Schedule '${scheduleId}' not found` }, { status: 404 });
           }
-          return Response.json(renewalItem);
-        }
-        // Issue #4240 — the retention record is derived, not stored,
-        // so getUnifiedScheduleDetail would 404 it; answer it here
-        // from the same derived record + last-pass join as the list.
-        if (scheduleId === RETENTION_RECORD_ID) {
-          const retentionItem = await readRetentionListItem(ctx.agentCtx.storage.sql);
-          if (!retentionItem) {
-            return Response.json({ error: `Schedule '${scheduleId}' not found` }, { status: 404 });
-          }
-          return Response.json(retentionItem);
-        }
-        // Issue #4241 — the nightly research record is derived, not stored,
-        // so getUnifiedScheduleDetail would 404 it; answer it here
-        // from the same derived record + last-run join as the list.
-        if (scheduleId === NIGHTLY_RESEARCH_RECORD_ID) {
-          const nightlyResearchItem = await readNightlyResearchListItem(ctx.agentCtx.storage.sql);
-          if (!nightlyResearchItem) {
-            return Response.json({ error: `Schedule '${scheduleId}' not found` }, { status: 404 });
-          }
-          return Response.json(nightlyResearchItem);
-        }
-        // Issue #4242 — the sweep/watchdog records are derived, not stored,
-        // so getUnifiedScheduleDetail would 404 them; answer each here
-        // from the same derived record + last-run join as the list.
-        if (scheduleId === STALE_LEDGER_SWEEP_RECORD_ID) {
-          const staleLedgerSweepItem = await readStaleLedgerSweepListItem(ctx.agentCtx.storage.sql);
-          if (!staleLedgerSweepItem) {
-            return Response.json({ error: `Schedule '${scheduleId}' not found` }, { status: 404 });
-          }
-          return Response.json(staleLedgerSweepItem);
-        }
-        if (scheduleId === STALE_ASYNC_JOB_SWEEP_RECORD_ID) {
-          const staleAsyncJobSweepItem = await readStaleAsyncJobSweepListItem(ctx.agentCtx.storage.sql);
-          if (!staleAsyncJobSweepItem) {
-            return Response.json({ error: `Schedule '${scheduleId}' not found` }, { status: 404 });
-          }
-          return Response.json(staleAsyncJobSweepItem);
-        }
-        if (scheduleId === SCHEDULE_WATCHDOG_RECORD_ID) {
-          const scheduleWatchdogItem = await readScheduleWatchdogListItem(ctx.agentCtx.storage.sql);
-          if (!scheduleWatchdogItem) {
-            return Response.json({ error: `Schedule '${scheduleId}' not found` }, { status: 404 });
-          }
-          return Response.json(scheduleWatchdogItem);
+          const reader =
+            scheduleId === TOKEN_RENEWAL_RECORD_ID
+              ? readTokenRenewalListItem
+              : scheduleId === RETENTION_RECORD_ID
+                ? readRetentionListItem
+                : scheduleId === NIGHTLY_RESEARCH_RECORD_ID
+                  ? readNightlyResearchListItem
+                  : scheduleId === STALE_LEDGER_SWEEP_RECORD_ID
+                    ? readStaleLedgerSweepListItem
+                    : scheduleId === STALE_ASYNC_JOB_SWEEP_RECORD_ID
+                      ? readStaleAsyncJobSweepListItem
+                      : readScheduleWatchdogListItem;
+          const item = await reader(ctx.agentCtx.storage.sql, record);
+          return Response.json(item ?? unifiedRecordToListItem(record));
         }
         const detail = await getUnifiedScheduleDetail({ store: unifiedStore(), alarms }, scheduleId);
         if (!detail.ok) {
@@ -1934,9 +2504,22 @@ export async function handleSchedulesRoutes(
         if (!scheduleId) {
           return Response.json({ error: "Schedule ID is required" }, { status: 400 });
         }
+        // Issue #6503 step 8 (G1) — level-rule gate, before any mutation.
+        const pauseGate = await authorizeControlOrRespond(scheduleId, "schedule.paused");
+        if (pauseGate instanceof Response) return pauseGate;
+        // Issue #6503 step 9 (G2) — audit-before-write: ONE chain
+        // record before the pause lands; a failed audit refuses
+        // with the coded 503 and pauses nothing.
+        const pauseAuditRefusal = await auditScheduleControlBeforeWrite(ctx, pauseGate.caller, "schedule.paused", scheduleId);
+        if (pauseAuditRefusal) return pauseAuditRefusal;
+        const pauseAttribution = {
+          changedBy: pauseGate.caller.login,
+          callerLevel: pauseGate.caller.kind,
+          ...(pauseGate.record?.state ? { fromState: pauseGate.record.state } : {}),
+        };
         if (scheduleId === TICKER_PUSH_RECORD_ID) {
           await tickerPushStub().pauseTickerPush();
-          ctx.audit("schedule.paused", "orchestrator", { scheduleId, callback: "pushTicks" });
+          ctx.audit("schedule.paused", "orchestrator", { scheduleId, callback: "pushTicks", ...pauseAttribution });
           const paused = await readTickerPushListItem(ctx.env);
           return Response.json({ success: true, schedule: paused });
         }
@@ -1944,7 +2527,7 @@ export async function handleSchedulesRoutes(
         if (!result.ok) {
           return Response.json({ error: result.error }, { status: result.status });
         }
-        ctx.audit("schedule.paused", "orchestrator", { scheduleId, callback: result.record.callback });
+        ctx.audit("schedule.paused", "orchestrator", { scheduleId, callback: result.record.callback, ...pauseAttribution });
         return Response.json({ success: true, schedule: unifiedRecordToListItem(result.record) });
       } catch (err: any) {
         return Response.json({ error: err.message || "Failed to pause schedule" }, { status: 500 });
@@ -1958,9 +2541,22 @@ export async function handleSchedulesRoutes(
         if (!scheduleId) {
           return Response.json({ error: "Schedule ID is required" }, { status: 400 });
         }
+        // Issue #6503 step 8 (G1) — level-rule gate, before any mutation.
+        const resumeGate = await authorizeControlOrRespond(scheduleId, "schedule.resumed");
+        if (resumeGate instanceof Response) return resumeGate;
+        // Issue #6503 step 9 (G2) — audit-before-write: ONE chain
+        // record before the resume lands; a failed audit refuses
+        // with the coded 503 and resumes nothing.
+        const resumeAuditRefusal = await auditScheduleControlBeforeWrite(ctx, resumeGate.caller, "schedule.resumed", scheduleId);
+        if (resumeAuditRefusal) return resumeAuditRefusal;
+        const resumeAttribution = {
+          changedBy: resumeGate.caller.login,
+          callerLevel: resumeGate.caller.kind,
+          ...(resumeGate.record?.state ? { fromState: resumeGate.record.state } : {}),
+        };
         if (scheduleId === TICKER_PUSH_RECORD_ID) {
           await tickerPushStub().resumeTickerPush();
-          ctx.audit("schedule.resumed", "orchestrator", { scheduleId, callback: "pushTicks" });
+          ctx.audit("schedule.resumed", "orchestrator", { scheduleId, callback: "pushTicks", ...resumeAttribution });
           const resumedFeed = await readTickerPushListItem(ctx.env);
           return Response.json({ success: true, schedule: resumedFeed });
         }
@@ -1972,7 +2568,7 @@ export async function handleSchedulesRoutes(
         if (!result.ok) {
           return Response.json({ error: result.error }, { status: result.status });
         }
-        ctx.audit("schedule.resumed", "orchestrator", { scheduleId, newScheduleId: result.alarm?.id, callback: result.record.callback });
+        ctx.audit("schedule.resumed", "orchestrator", { scheduleId, newScheduleId: result.alarm?.id, callback: result.record.callback, ...resumeAttribution });
         return Response.json({ success: true, previousId: result.previousId, schedule: result.alarm });
       } catch (err: any) {
         // Issue #6482 — a floor refusal from the re-arm is a client
@@ -1992,6 +2588,13 @@ export async function handleSchedulesRoutes(
         if (!scheduleId) {
           return Response.json({ error: "Schedule ID is required" }, { status: 400 });
         }
+        // Issue #6503 step 8 (G1) — level-rule gate, before any mutation.
+        const triggerGate = await authorizeControlOrRespond(scheduleId, "schedule.triggered");
+        if (triggerGate instanceof Response) return triggerGate;
+        const triggerAttribution = {
+          changedBy: triggerGate.caller.login,
+          callerLevel: triggerGate.caller.kind,
+        };
         // Issue #4389 — Trigger Now is every row's action: for the live feed it
         // pushes to the connected clients once, now, through its own DO.
         if (scheduleId === TICKER_PUSH_RECORD_ID) {
@@ -2002,10 +2605,19 @@ export async function handleSchedulesRoutes(
               { status: 409 },
             );
           }
+          // Issue #6503 step 9 (G2) — audit-before-write, after the
+          // paused check above (a 409 consumes no chain record).
+          const triggerAuditRefusal = await auditScheduleControlBeforeWrite(ctx, triggerGate.caller, "schedule.triggered", scheduleId);
+          if (triggerAuditRefusal) return triggerAuditRefusal;
           await tickerPushStub().triggerTickerPush();
-          ctx.audit("schedule.triggered", "orchestrator", { scheduleId, callback: "pushTicks" });
+          ctx.audit("schedule.triggered", "orchestrator", { scheduleId, callback: "pushTicks", ...triggerAttribution });
           return Response.json({ success: true, scheduleId, callback: "pushTicks" });
         }
+        // Issue #6503 step 9 (G2) — audit-before-write: ONE chain
+        // record before the trigger runs; a failed audit refuses
+        // with the coded 503 and triggers nothing.
+        const triggerStoreAuditRefusal = await auditScheduleControlBeforeWrite(ctx, triggerGate.caller, "schedule.triggered", scheduleId);
+        if (triggerStoreAuditRefusal) return triggerStoreAuditRefusal;
         const result = await triggerUnifiedSchedule(
           { store: unifiedStore(), alarms },
           scheduleId,
@@ -2017,7 +2629,7 @@ export async function handleSchedulesRoutes(
             { status: result.status },
           );
         }
-        ctx.audit("schedule.triggered", "orchestrator", { scheduleId: result.scheduleId, callback: result.callback });
+        ctx.audit("schedule.triggered", "orchestrator", { scheduleId: result.scheduleId, callback: result.callback, ...triggerAttribution });
         return Response.json({ success: true, scheduleId: result.scheduleId, callback: result.callback });
       } catch (err: any) {
         return Response.json({ error: err.message || "Failed to trigger schedule" }, { status: 500 });
@@ -2033,7 +2645,15 @@ export async function handleSchedulesRoutes(
         if (!scheduleId) {
           return Response.json({ error: "Schedule ID is required" }, { status: 400 });
         }
+        // Issue #6503 step 8 (G1) — level-rule gate, before any mutation.
+        const updateGate = await authorizeControlOrRespond(scheduleId, "schedule.updated");
+        if (updateGate instanceof Response) return updateGate;
         const body = (await request.json().catch(() => ({}))) as any;
+        const updateAttribution = {
+          changedBy: updateGate.caller.login,
+          callerLevel: updateGate.caller.kind,
+          ...(updateGate.record?.state ? { fromState: updateGate.record.state } : {}),
+        };
         if (scheduleId === TICKER_PUSH_RECORD_ID) {
           // Issue #4352 — the live feed's one editable fact is its cadence,
           // and its cadence is an interval (a live feed has no cron phase).
@@ -2046,15 +2666,25 @@ export async function handleSchedulesRoutes(
               { status: 400 },
             );
           }
+          // Issue #6503 step 9 (G2) — audit-before-write, after the
+          // cron check above (a 400 consumes no chain record).
+          const updateTickerAuditRefusal = await auditScheduleControlBeforeWrite(ctx, updateGate.caller, "schedule.updated", scheduleId);
+          if (updateTickerAuditRefusal) return updateTickerAuditRefusal;
           const seconds = Number(body?.intervalSeconds ?? 0);
           const applied = await tickerPushStub().setTickerPushInterval(seconds);
           ctx.audit("schedule.updated", "orchestrator", {
             scheduleId,
             callback: "pushTicks",
             intervalSeconds: applied.intervalSeconds,
+            ...updateAttribution,
           });
           return Response.json({ success: true, schedule: await readTickerPushListItem(ctx.env) });
         }
+        // Issue #6503 step 9 (G2) — audit-before-write: ONE chain
+        // record before the update lands; a failed audit refuses
+        // with the coded 503 and updates nothing.
+        const updateAuditRefusal = await auditScheduleControlBeforeWrite(ctx, updateGate.caller, "schedule.updated", scheduleId);
+        if (updateAuditRefusal) return updateAuditRefusal;
         const result = await updateUnifiedSchedule(
           { store: unifiedStore(), alarms },
           scheduleId,
@@ -2065,10 +2695,10 @@ export async function handleSchedulesRoutes(
           return Response.json({ success: false, error: result.error }, { status: result.status });
         }
         if (result.alarm) {
-          ctx.audit("schedule.updated", "orchestrator", { scheduleId, newScheduleId: result.alarm.id, callback: result.record.callback });
+          ctx.audit("schedule.updated", "orchestrator", { scheduleId, newScheduleId: result.alarm.id, callback: result.record.callback, ...updateAttribution, toState: result.record.state });
           return Response.json({ success: true, previousId: result.previousId, schedule: result.alarm });
         }
-        ctx.audit("schedule.updated", "orchestrator", { scheduleId, callback: result.record.callback, paused: true });
+        ctx.audit("schedule.updated", "orchestrator", { scheduleId, callback: result.record.callback, paused: true, ...updateAttribution, toState: result.record.state });
         return Response.json({ success: true, schedule: unifiedRecordToListItem(result.record) });
       } catch (err: any) {
         // Issue #6482 — a floor refusal from the re-arm is a client
@@ -2104,7 +2734,9 @@ export async function handleSchedulesRoutes(
           configuredEnvironment: resolveEnvironmentConfig(ctx.env).name as ScheduleEnv,
         });
         if (!trusted.userLogin) {
-          return Response.json({ error: "An authenticated user identity is required to create a stage-schedule." }, { status: 401 });
+          const reason = "An authenticated user identity is required to create a stage-schedule.";
+          await auditScheduleControlRefusal(ctx, "schedule.created", undefined, reason, { kind: "unauthenticated" });
+          return Response.json({ error: reason }, { status: 401 });
         }
         const validated = validateWorkflowStageScheduleInput({
           jobId: body.jobId,
@@ -2118,6 +2750,16 @@ export async function handleSchedulesRoutes(
           return Response.json({ error: validated.error }, { status: 400 });
         }
         const def = validated.value;
+        // Issue #6503 step 9 (G2) — the create caller resolved
+        // through the step-8 seam, so the audit names the resolved
+        // login + level (a stage create is a user-level control op
+        // owned by the caller).
+        const stageCreateCaller = await resolveScheduleControlCaller(request, ctx);
+        // Issue #6503 step 9 (G2) — audit-before-write: ONE chain
+        // record before the stage-schedule is created; a failed
+        // audit refuses with the coded 503 and creates nothing.
+        const stageCreateAuditRefusal = await auditScheduleControlBeforeWrite(ctx, stageCreateCaller, "schedule.created", def.stageId);
+        if (stageCreateAuditRefusal) return stageCreateAuditRefusal;
         const created = await workflowStageAdapter().create({
           jobId: def.jobId,
           nodePath: def.nodePath,
@@ -2135,6 +2777,11 @@ export async function handleSchedulesRoutes(
           nodePath: def.nodePath,
           stageId: def.stageId,
           origin: "api",
+          // The caller cannot be unauthenticated here (the 401
+          // above already returned), but the union still carries
+          // the kind, so the login falls back to the trusted one.
+          changedBy: stageCreateCaller.kind === "unauthenticated" ? trusted.userLogin : stageCreateCaller.login,
+          callerLevel: stageCreateCaller.kind,
         });
         return Response.json({ success: true, schedule: unifiedRecordToListItem(created) });
       } catch (err: any) {
@@ -2244,7 +2891,19 @@ export async function handleSchedulesRoutes(
         const trustedUserLogin = trusted.userLogin;
         const trustedEnvironment = trusted.environment;
         if (ctx.accountScopedScheduleCallbacks.has(callback) && !trustedUserLogin) {
-          return Response.json({ success: false, error: "An authenticated broker account is required to create screening schedules." }, { status: 401 });
+          const reason = "An authenticated broker account is required to create screening schedules.";
+          await auditScheduleControlRefusal(ctx, "schedule.created", undefined, reason, { kind: "unauthenticated" });
+          return Response.json({ success: false, error: reason }, { status: 401 });
+        }
+        // Issue #6503 step 8 (G1) — create is a control op on a
+        // user-level schedule owned by the caller: any authenticated
+        // user may schedule for themselves, but an anonymous create
+        // names no owner and is refused (401), not just the
+        // account-scoped callbacks above.
+        if (!trustedUserLogin) {
+          const reason = "An authenticated user identity is required to create a schedule.";
+          await auditScheduleControlRefusal(ctx, "schedule.created", undefined, reason, { kind: "unauthenticated" });
+          return Response.json({ success: false, error: reason }, { status: 401 });
         }
         // Issue #3655: the creation credential check follows the tenant
         // broker, not E*TRADE unconditionally. Broker etrade — or an
@@ -2540,8 +3199,7 @@ export async function handleSchedulesRoutes(
             { type: scheduleType, cron, intervalSeconds, delayInSeconds, date },
           ) as unknown as Schedule<unknown> | undefined;
           if (!duplicate) {
-            const stored = unifiedStore()
-              .list()
+            const stored = (await unifiedStore().list())
               .filter((record) => record.kind === "screen")
               .map((record) => {
                 const def = record.definition as Record<string, unknown>;
@@ -2562,7 +3220,7 @@ export async function handleSchedulesRoutes(
               screeningPayload,
               { type: scheduleType, cron, intervalSeconds, delayInSeconds, date },
             ) as unknown as { id: string } | undefined;
-            if (match) duplicateRecord = unifiedStore().get(match.id);
+            if (match) duplicateRecord = await unifiedStore().get(match.id);
           }
         } catch {
           duplicate = undefined;
@@ -2577,11 +3235,11 @@ export async function handleSchedulesRoutes(
         // Best-effort: the alarm is armed either way — a failed
         // record write must not fail the creation, and the schedule
         // adopts a record when it is next touched.
-        const adoptRecord = (armed: Schedule<unknown>) => {
+        const adoptRecord = async (armed: Schedule<unknown>) => {
           try {
             const store = unifiedStore();
-            if (!store.get(armed.id)) {
-              store.save(
+            if (!(await store.get(armed.id))) {
+              await store.save(
                 screenScheduleToRecord(
                   armed as unknown as ScheduleAlarmLike,
                   new Date().toISOString(),
@@ -2594,7 +3252,7 @@ export async function handleSchedulesRoutes(
           }
         };
         if (duplicate) {
-          adoptRecord(duplicate);
+          await adoptRecord(duplicate);
           ctx.audit("schedule.duplicate_suppressed", "orchestrator", {
             scheduleId: (duplicate as any).id,
             callback,
@@ -2695,14 +3353,41 @@ export async function handleSchedulesRoutes(
           );
         }
 
-        unifiedStore().save(record);
+        // Issue #6503 step 9 (G2) — the create caller resolved
+        // through the step-8 seam, so the audit names the resolved
+        // login + level; then ONE chain record before the save —
+        // a failed audit refuses with the coded 503 and creates
+        // nothing. Placed after all validation above (a 400 or a
+        // credential 409 consumes no chain record).
+        const createCaller = await resolveScheduleControlCaller(request, ctx);
+        const createAuditRefusal = await auditScheduleControlBeforeWrite(ctx, createCaller, "schedule.created", record.id);
+        if (createAuditRefusal) return createAuditRefusal;
+        await unifiedStore().save(record);
+        // Issue #6503 — the start-paused control: when it is off, the
+        // schedule starts active — resume (the one arming template)
+        // arms it immediately. An arm refusal fails the create as a
+        // whole (the activation removes the record), so the caller
+        // never sees a paused schedule it did not ask for.
+        let finalRecord = record;
+        if (!resolveEffectiveScheduleStartPaused(ctx.agentCtx.storage.sql, ctx.env).paused) {
+          const activated = await activateCreatedSchedule({ store: unifiedStore(), alarms }, record, nowIso);
+          if (!activated.ok) {
+            return Response.json({ success: false, error: activated.error }, { status: activated.status });
+          }
+          finalRecord = activated.record;
+        }
         ctx.audit("schedule.created", "orchestrator", {
-          scheduleId: record.id,
+          scheduleId: finalRecord.id,
           callback,
           scheduleType,
-          state: "paused",
+          state: finalRecord.state,
+          // The caller cannot be unauthenticated here (the 401s
+          // above already returned), but the union still carries
+          // the kind, so the login falls back to the trusted one.
+          changedBy: createCaller.kind === "unauthenticated" ? trustedUserLogin : createCaller.login,
+          callerLevel: createCaller.kind,
         });
-        return Response.json({ success: true, schedule: record, paused: true });
+        return Response.json({ success: true, schedule: finalRecord, paused: finalRecord.state === "paused" });
       } catch (err: any) {
         // A throwing store write created nothing, so it gets the
         // honest 503 {success:false, error} shape (#111), worded as what

@@ -71,7 +71,7 @@ import { BROKER_CATALOG, brokerCopilotCapability, diffScanRuns, isBrokerId, isCo
 import { ACCOUNT_BINDING_CONFIG, maskAccountId } from "../config/accountBindings";
 import { accountBindingAuditFields, getBrokerAssetAccountRegistry, resolveScheduleBindingDefaults, resolveValidatedExecutionAccountContext, type ExecutionAccountContext } from "../services/accountBindings";
 import { createOptionsDiscoveryPorts } from "../data/createOptionsDiscoveryPorts";
-import { createUnifiedSchedulePorts } from "../data/createUnifiedSchedulePorts";
+import { createD1UnifiedSchedulePorts } from "../data/createUnifiedSchedulePorts";
 
 import { createOrmPorts } from "../data/createOrmPorts";
 import { SqlLegacyChatStore } from "../data/doSqliteLegacyChatAdapter";
@@ -82,6 +82,7 @@ import {
   createAgentScheduleExecutorDepsForDo,
   executeAgentScheduleAction,
   nlqPortToAgentSdkAdapter,
+  nlqPortToScheduleAlarms,
   type AgentScheduleActionRequest,
   type AgentScheduleExecutorDeps,
 } from "../services/agentScheduleCapability";
@@ -91,7 +92,7 @@ import {
 } from "../services/agentScheduleLoopSettings";
 import { resolveAgentConfig } from "../services/agentConfigResolver";
 import { createOrchestratorAgentScheduleExecutorDeps } from "./orchestrator/agentScheduleExecutor";
-import { resolveEffectiveScheduleFloor } from "../services/scheduleControls";
+import { resolveEffectiveScheduleFloor, resolveEffectiveScheduleStartPaused } from "../services/scheduleControls";
 import {
   definePipelineJobFromSpecViaDoor,
   jobStatusRouteContext,
@@ -120,9 +121,10 @@ import {
   staleAsyncJobSweepOutcome,
 } from "../services/sweepWatchdogSchedule";
 import {
-  planGuardAlarm,
+  reconcileSystemScheduleRecords,
   supersededDeclaredTaskAlarmIds,
 } from "../services/unifiedScheduleManagement";
+import { runScheduledScreeningSteps } from "../services/scheduledScreeningSteps";
 import { nlqSchedulingPort, nlqSocialBriefPort, nlqStockScreenPort, type NlqPortsContext } from "./orchestrator/nlqPorts";
 import { formatTraceparent, newTraceContext, parseTraceparent } from "../observability/observabilityPorts";
 import { observeDoRouteDispatch } from "../observability/scheduledJobOutcomes";
@@ -136,7 +138,14 @@ import { codedMessage, renderChannelText } from "../outcomes/outcomeAspects";
 import type { DoNamespaceLike } from "../data/durableKv";
 import { createKvMembershipStore } from "../security/iaaaMembershipStore";
 import { readResearchConfig, writeResearchConfig } from "./orchestrator/researchConfigDoor";
-import { isLoginShaped } from "../security/serviceIdentity";
+import {
+  getServiceUserLogin,
+  isLoginShaped,
+  SHARED_ORCHESTRATOR_INSTANCE,
+} from "../security/serviceIdentity";
+import { backgroundDispatchHeaders } from "../security/backgroundAttribution";
+import { retentionPassSummary } from "../services/consolidatedCronEntries";
+import type { DoStubLike } from "../data/durableKv";
 import { sessionStore } from "../security/session";
 import {
   resolveAttributionEnvelope,
@@ -294,17 +303,6 @@ type ETradeEnvironment = "TEST" | "PROD";
 type ScreenerExecutionContext = { userLogin: string; environment?: ETradeEnvironment };
 const SCREENER_EXECUTION_CONTEXT_KEY = "screener:execution-context";
 const LEGACY_SCHEDULE_MIGRATION_KEY = "screener:legacy-baseline-migration:v3";
-/** Issue #618: interval between automatic stale-task sweeps (6 hours). */
-const STALE_SWEEP_INTERVAL_SECONDS = 6 * 60 * 60;
-/** Issue #3784: interval between automatic stale-async-job sweeps
- *  (15 minutes) — short enough that a run crossing the 30-min
- *  stuck threshold is flagged on the next tick, long enough that
- *  the sweep stays a cheap bounded scan (100 rows/tick). */
-const STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS = 15 * 60;
-/** Issue #3788: the missed-schedule watchdog rides the same 15-minute
- *  sweep tick as #3784 — one implementation of the tick consumed by
- *  both sweeps, not a second scheduler. */
-const SCHEDULE_WATCHDOG_INTERVAL_SECONDS = STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS;
 /**
  * Issue #275: the hourly full-catalog Strategy/Symbol Scanner run.
  * Minute :35 staggers it off the equity screens (commonly armed at
@@ -673,6 +671,7 @@ export class OrchestratorAgent extends PortThink {
   private scheduledTasksObserveContext(): ScheduledTasksObserveContext {
     return {
       agentCtx: this.ctx,
+      env: this.env,
       getScreenerExecutionContext: () => this.getScreenerExecutionContext(),
       audit: (type, agent, payload) => this.audit(type, agent, payload),
     };
@@ -1367,6 +1366,28 @@ export class OrchestratorAgent extends PortThink {
         return (outcome = { outcome: "skipped", detail: "unowned scheduled research run" });
       }
       const res = await this.runResearchAndPublish("scheduled", userLogin);
+      // Issue #6503 — the #1096 Phase 6 autonomous steps rode the
+      // retired scheduled-tick route; they are the nightly research
+      // job's work, so they run here after a successful scheduled
+      // run — the same ordering the route had (a failed run never
+      // ran them). A Run-now click (payload trigger "triggered") is
+      // not a scheduled firing, so it never runs them either, exactly
+      // as a manual research run never did. Best-effort: the steps
+      // never fail the callback run.
+      if (res.success && payload?.trigger !== "triggered") {
+        try {
+          await runScheduledScreeningSteps({
+            userLogin,
+            agent: this.getResearchAgent(userLogin),
+            orm: this.getOrm(),
+            readSetting: (key) => this.readSettingRaw(key),
+            writeSetting: (key, value) => this.writeSetting(key, value),
+            env: this.env as unknown as Record<string, string | undefined>,
+          });
+        } catch {
+          // Phase 6 steps are best-effort; the research run already succeeded.
+        }
+      }
       return (outcome = res.success
         ? {
             outcome: "success",
@@ -1537,12 +1558,13 @@ export class OrchestratorAgent extends PortThink {
 
     try {
       // Issue #618: on the same maintenance path, close any task
-      // records already stale for this user and arm the recurring
-      // sweep. Best-effort: a sweep problem never blocks startup.
+      // records already stale for this user. Best-effort: a sweep
+      // problem never blocks startup. The recurring sweep itself is
+      // a stored schedule now (issue #6503): the reconcile below
+      // seeds it, it does not arm here.
       const context = await this.getScreenerExecutionContext();
       if (context?.userLogin) {
         await this.sweepStaleLedgerTasks({ userLogin: context.userLogin });
-        await this.ensureStaleSweepSchedule(context.userLogin);
       }
     } catch (sweepErr) {
       structuredLog.warn("orchestrator.on_start_stale_task_sweep_failed", {
@@ -1552,13 +1574,13 @@ export class OrchestratorAgent extends PortThink {
     }
 
     try {
-      // Issue #3784: run the stale-async-job sweep once and arm the
-      // recurring 15-minute interval, on the same maintenance path
-      // as the #618 ledger sweep. Session-scoped (this instance's
-      // mas_async_jobs rows), so no screener context is needed.
-      // Best-effort: a sweep problem never blocks startup.
+      // Issue #3784: run the stale-async-job sweep once, on the same
+      // maintenance path as the #618 ledger sweep. Session-scoped
+      // (this instance's mas_async_jobs rows), so no screener context
+      // is needed. Best-effort: a sweep problem never blocks startup.
+      // The recurring sweep itself is a stored schedule now (issue
+      // #6503): the reconcile below seeds it, it does not arm here.
       await this.sweepStaleAsyncJobs();
-      await this.ensureStaleAsyncJobSweepSchedule();
     } catch (sweepErr) {
       structuredLog.warn("orchestrator.on_start_stale_async_job_sweep_failed", {
         message: "[OrchestratorAgent][onStart] Stale async-job sweep setup failed:",
@@ -1567,16 +1589,66 @@ export class OrchestratorAgent extends PortThink {
     }
 
     try {
-      // Issue #3788: run the missed-schedule watchdog once and arm
-      // the recurring 15-minute interval, on the same maintenance
-      // path as the #3784 sweep (one tick, two consumers).
-      // Best-effort: a watchdog problem never blocks startup.
+      // Issue #3788: run the missed-schedule watchdog once, on the
+      // same maintenance path as the #3784 sweep (one tick, two
+      // consumers). Best-effort: a watchdog problem never blocks
+      // startup. The recurring watchdog itself is a stored schedule
+      // now (issue #6503): the reconcile below seeds it, it does
+      // not arm here.
       await this.watchdogMissedSchedules();
-      await this.ensureScheduleWatchdogSchedule();
     } catch (watchdogErr) {
       structuredLog.warn("orchestrator.on_start_schedule_watchdog_failed", {
         message: "[OrchestratorAgent][onStart] Schedule watchdog setup failed:",
         error: watchdogErr instanceof Error ? watchdogErr.message : String(watchdogErr),
+      });
+    }
+
+    try {
+      // Issue #6503 — seed + reconcile the six stored system
+      // schedules (token-renewal, retention, nightly-research, the
+      // two sweeps, the watchdog): missing records are created
+      // paused on the monthly interval, stale sub-floor arms are
+      // cancelled, and an active record whose alarm died is
+      // re-armed at its stored timing. This replaces the deleted
+      // onStart ensure* arms — the one-shot runs above stay (the
+      // restart-recovery net), the arming path does not. Best-effort:
+      // a reconcile failure never blocks startup; the next start
+      // retries.
+      const context = await this.getScreenerExecutionContext().catch(() => undefined);
+      const floorSeconds = resolveEffectiveScheduleFloor(this.ctx.storage.sql, this.env).seconds;
+      const reconciled = await reconcileSystemScheduleRecords(
+        {
+          store: createD1UnifiedSchedulePorts({
+            d1: this.env.AGENT_DB,
+          }).unifiedSchedules,
+          alarms: makeScheduleAlarmsPort(
+            {
+              listSchedules: () => this.listSchedules(),
+              getScheduleById: (id) => this.getScheduleById(id),
+              cancelSchedule: (id) => this.cancelSchedule(id),
+              schedule: (when, callback, payload, options) =>
+                this.schedule(when, callback as keyof this, payload, options),
+              scheduleEvery: (intervalSeconds, callback, payload) =>
+                this.scheduleEvery(intervalSeconds, callback as keyof this, payload),
+            },
+            { resolveFloor: () => floorSeconds },
+          ),
+        },
+        new Date().toISOString(),
+        { userLogin: context?.userLogin ?? null, intervalSeconds: floorSeconds },
+      );
+      structuredLog.info("orchestrator.on_start_system_schedules_reconciled", {
+        message: "[OrchestratorAgent][onStart] System schedules reconciled.",
+        seeded: reconciled.seeded,
+        armed: reconciled.armed,
+        adopted: reconciled.adopted,
+        cancelledStaleAlarms: reconciled.cancelledStaleAlarms,
+        skippedLedgerSweepNoUser: reconciled.skippedLedgerSweepNoUser,
+      });
+    } catch (reconcileErr) {
+      structuredLog.warn("orchestrator.on_start_system_schedules_reconcile_failed", {
+        message: "[OrchestratorAgent][onStart] System schedule reconciliation failed:",
+        error: reconcileErr instanceof Error ? reconcileErr.message : String(reconcileErr),
       });
     }
 
@@ -1775,38 +1847,6 @@ export class OrchestratorAgent extends PortThink {
     return { userLogin, researchSwept, screenerSwept, researchPruned, screenerPruned };
   }
 
-  /** Issue #618: arm the recurring stale-sweep interval once per user. */
-  private async ensureStaleSweepSchedule(userLogin: string): Promise<void> {
-    // Issue #5890 — a failed list must not arm: arming blind mints a
-    // second alarm for the same callback with a new SDK id. And a list
-    // that already holds the duty cancels the surplus arms instead of
-    // leaving them listed beside it.
-    let existing: Schedule<unknown>[];
-    try {
-      existing = await this.listSchedules();
-    } catch (listError) {
-      structuredLog.warn("orchestrator.ensure_stale_sweep_list_failed", {
-        message: "[OrchestratorAgent] Could not list schedules; not arming the stale-ledger sweep:",
-        error: listError instanceof Error ? listError.message : String(listError),
-      });
-      return;
-    }
-    const plan = planGuardAlarm(
-      existing as unknown as Array<{ id: string; callback?: unknown; payload?: unknown }>,
-      "sweepStaleLedgerTasks",
-      (payload) => (payload as { userLogin?: unknown } | null)?.userLogin === userLogin,
-    );
-    for (const id of plan.cancelIds) {
-      try {
-        await this.cancelSchedule(id);
-      } catch {
-        // Best-effort: the next onStart retries.
-      }
-    }
-    if (!plan.arm) return;
-    await this.scheduleEvery(STALE_SWEEP_INTERVAL_SECONDS, "sweepStaleLedgerTasks", { userLogin });
-  }
-
   // Issue #992: extracted to ./orchestrator/scheduleMaintenance.ts (ensureStrategyScanSchedule);
   async ensureStrategyScanSchedule(context: ScreenerExecutionContext): Promise<void> {
     return ensureStrategyScanSchedule(this.scheduleMaintenanceContext(), context);
@@ -1941,6 +1981,55 @@ export class OrchestratorAgent extends PortThink {
       async () => {
         await autoRenewETradeTokens(this.scheduledCallbacksContext(), payload);
         return { outcome: "success", descriptor: "token renewal complete" };
+      },
+      { env: this.env, audit: (type, agent, payload) => this.audit(type, agent, payload) },
+    );
+  }
+
+  // Issue #6503 — the retention firing callback: a stored
+  // `retention` schedule fires through the SDK alarm plane like
+  // every other stored schedule. The retention pass's single
+  // implementation is the trigger-retention route; this method
+  // dispatches through it exactly like runRetentionEntryPoint
+  // does (same URL, same background headers) — no second pass
+  // implementation. The run is recorded once, by the
+  // recordScheduleCallbackRun wrapper keyed by schedule id, so
+  // the method never calls the entry point (which would record
+  // a second dispatch row for the same firing).
+  async retention(payload?: { userLogin?: string }, schedule?: { id?: unknown }): Promise<void> {
+    return recordScheduleCallbackRun(
+      this.ctx.storage.sql,
+      "retention",
+      payload,
+      schedule,
+      async () => {
+        const serviceUserLogin = getServiceUserLogin(this.env);
+        if (!serviceUserLogin) {
+          return {
+            outcome: "skipped",
+            detail:
+              "SERVICE_USER_LOGIN is not configured — retention skipped rather than running unattended work without a verified identity (#2331 slice 2)",
+          };
+        }
+        const stub = actorGateway.stub<DoStubLike>(
+          this.env.ORCHESTRATOR_AGENT,
+          SHARED_ORCHESTRATOR_INSTANCE,
+        );
+        const response = (await stub.fetch(
+          new Request("https://agent.internal/schedules/trigger-retention", {
+            method: "POST",
+            headers: { ...backgroundDispatchHeaders(serviceUserLogin) },
+          }),
+        )) as unknown as { status?: unknown; json?: () => Promise<unknown> };
+        const status = typeof response.status === "number" ? response.status : 0;
+        if (status < 200 || status >= 300) {
+          throw new Error(`retention dispatch returned non-2xx status ${status}`);
+        }
+        const body = typeof response.json === "function" ? await response.json().catch(() => null) : null;
+        return {
+          outcome: "success",
+          descriptor: retentionPassSummary(body) ?? "retention pass complete",
+        };
       },
       { env: this.env, audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
@@ -2621,68 +2710,6 @@ export class OrchestratorAgent extends PortThink {
     return watchdogMissedSchedules(await this.scheduleWatchdogContext(), {
       recordedCallbacks: RECORDED_SCHEDULE_CALLBACKS,
     });
-  }
-
-  /** Issue #3788: arm the recurring missed-schedule watchdog once per
-   *  instance (the #618/#3784 ensure-schedule pattern: list
-   *  schedules, skip when a watchdogMissedSchedules schedule exists). */
-  private async ensureScheduleWatchdogSchedule(): Promise<void> {
-    // Issue #5890 — a failed list must not arm (see ensureStaleSweepSchedule).
-    let existing: Schedule<unknown>[];
-    try {
-      existing = await this.listSchedules();
-    } catch (listError) {
-      structuredLog.warn("orchestrator.ensure_schedule_watchdog_list_failed", {
-        message: "[OrchestratorAgent] Could not list schedules; not arming the schedule watchdog:",
-        error: listError instanceof Error ? listError.message : String(listError),
-      });
-      return;
-    }
-    const plan = planGuardAlarm(
-      existing as unknown as Array<{ id: string; callback?: unknown; payload?: unknown }>,
-      "watchdogMissedSchedules",
-      () => true,
-    );
-    for (const id of plan.cancelIds) {
-      try {
-        await this.cancelSchedule(id);
-      } catch {
-        // Best-effort: the next onStart retries.
-      }
-    }
-    if (!plan.arm) return;
-    await this.scheduleEvery(SCHEDULE_WATCHDOG_INTERVAL_SECONDS, "watchdogMissedSchedules", {});
-  }
-
-  /** Issue #3784: arm the recurring stale-async-job sweep once per
-   *  instance (the #618 ensureStaleSweepSchedule pattern: list
-   *  schedules, skip when a sweepStaleAsyncJobs schedule exists). */
-  private async ensureStaleAsyncJobSweepSchedule(): Promise<void> {
-    // Issue #5890 — a failed list must not arm (see ensureStaleSweepSchedule).
-    let existing: Schedule<unknown>[];
-    try {
-      existing = await this.listSchedules();
-    } catch (listError) {
-      structuredLog.warn("orchestrator.ensure_stale_async_job_sweep_list_failed", {
-        message: "[OrchestratorAgent] Could not list schedules; not arming the stale-async-job sweep:",
-        error: listError instanceof Error ? listError.message : String(listError),
-      });
-      return;
-    }
-    const plan = planGuardAlarm(
-      existing as unknown as Array<{ id: string; callback?: unknown; payload?: unknown }>,
-      "sweepStaleAsyncJobs",
-      () => true,
-    );
-    for (const id of plan.cancelIds) {
-      try {
-        await this.cancelSchedule(id);
-      } catch {
-        // Best-effort: the next onStart retries.
-      }
-    }
-    if (!plan.arm) return;
-    await this.scheduleEvery(STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS, "sweepStaleAsyncJobs", {});
   }
 
   // Consolidation C3 (#1277): extracted to ./orchestrator/asyncJobs.ts (retryAsyncJob);
@@ -3820,7 +3847,17 @@ export class OrchestratorAgent extends PortThink {
             this.nlqSchedulingPort(),
             // Issue #3122 (store integration, #3123): the armed alarm is
             // adopted into the unified store (record id = alarm id).
-            createUnifiedSchedulePorts({ sql: this.ctx.storage.sql, storage: this.ctx.storage }).unifiedSchedules,
+            createD1UnifiedSchedulePorts({ d1: this.env.AGENT_DB }).unifiedSchedules,
+            {
+              // Issue #6503 — the start-paused control, resolved here so
+              // a schedule created through chat/NLQ starts active when
+              // the control is off (resume arms it through the NLQ
+              // port's alarms).
+              startPaused: resolveEffectiveScheduleStartPaused(this.ctx.storage.sql, this.env).paused,
+              alarms: nlqPortToScheduleAlarms(this.nlqSchedulingPort(), () =>
+                resolveEffectiveScheduleFloor(this.ctx.storage.sql, this.env).seconds,
+              ),
+            },
           ),
         },
       ),
