@@ -104,10 +104,12 @@ import { JobPipelineError } from "../services/jobPipelineConfig";
 import { createBuiltinStepRegistry } from "../services/jobPipelineSteps";
 import {
   buildOptionsChainJobDefinition,
+  chainRunProvenance,
   optionsChainJobId,
 } from "../services/optionsChainJobDefinition";
 import type { Env, ShardChainContext } from "../types";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
+import type { JobRunProvenance } from "../data/jobPipelinePorts";
 import {
   COMPARISON_JOB_ID_PREFIX,
   comparisonJobDefinition,
@@ -173,7 +175,7 @@ export interface StartOptionsScreenWorkflowInput {
 export interface StartOptionsScreenWorkflowOpts {
   startWorkflow?: (
     jobId: string,
-    params: { trigger: JobRunTrigger },
+    params: { trigger: JobRunTrigger; provenance?: JobRunProvenance },
   ) => Promise<{ instanceId: string }>;
   stores?: JobPipelineStores;
   runRecorder?: JobRunRecorder;
@@ -470,6 +472,9 @@ export async function startOptionsChainWorkflow(
   opts: StartOptionsScreenWorkflowOpts = {},
 ): Promise<{ instanceId: string; jobId: string }> {
   const trigger = input.trigger ?? "scheduled";
+  // Issue #6584 — the chain's own facts ride the payload, so the run
+  // record names the broker and mode whichever residency executed it.
+  const provenance = chainRunProvenance(input.chain, trigger);
   const definition = buildOptionsChainJobDefinition(input.chain);
   const jobId = optionsChainJobId(input.chain.chainId);
 
@@ -504,7 +509,10 @@ export async function startOptionsChainWorkflow(
   await defineControl.defineJob(definition);
 
   if (opts.startWorkflow) {
-    const started = await opts.startWorkflow(jobId, { trigger });
+    const started = await opts.startWorkflow(jobId, {
+      trigger,
+      ...(provenance ? { provenance } : {}),
+    });
     return { instanceId: started.instanceId, jobId };
   }
   const workflow = env.JOB_PIPELINE_WORKFLOW;
@@ -517,7 +525,7 @@ export async function startOptionsChainWorkflow(
   // deterministic id for this chain, as in startOptionsScreenWorkflow.
   const started = await startManagedWorkflowInstance(workflow, {
     id: workflowIdForJob(jobId),
-    params: { jobId, trigger },
+    params: { jobId, trigger, ...(provenance ? { provenance } : {}) },
     workflowName: "JOB_PIPELINE_WORKFLOW",
   });
   return { instanceId: started.workflowId, jobId };

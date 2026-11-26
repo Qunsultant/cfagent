@@ -154,7 +154,7 @@ import {
   createWikipediaIndexMembershipAdapter,
 } from "../trading";
 import { fetchAllUsStockListings } from "../services/nasdaqListings";
-import type { JobInstanceRecord } from "../data/jobPipelinePorts";
+import type { JobInstanceRecord, JobRunProvenance } from "../data/jobPipelinePorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
@@ -175,7 +175,7 @@ export interface ScheduledTasksPipelineContext {
   /** Composition seam (tests): the workflow starter. */
   startWorkflow?: (
     jobId: string,
-    opts: { trigger: JobRunTrigger; scopePath?: string },
+    opts: { trigger: JobRunTrigger; scopePath?: string; provenance?: JobRunProvenance },
   ) => Promise<{ instanceId: string }>;
 }
 
@@ -804,14 +804,25 @@ export async function dispatchScheduledPipelineJob(
 export async function startPipelineJobWorkflow(
   ctx: ScheduledTasksPipelineContext,
   jobId: string,
-  opts: { trigger?: JobRunTrigger; scopePath?: string } = {},
+  opts: {
+    trigger?: JobRunTrigger;
+    scopePath?: string;
+    /** Issue #6584 — the run's facts, when the caller resolved them. */
+    provenance?: JobRunProvenance | null;
+  } = {},
 ): Promise<{ instanceId: string }> {
+  // Issue #6584 — one carrier shape for every creator of a
+  // JobPipelineWorkflow instance; a caller that resolved no facts
+  // passes nothing and the record keeps explicit nulls.
+  const provenance =
+    opts.provenance && opts.provenance !== null ? opts.provenance : null;
   if (ctx.startWorkflow) {
     return ctx.startWorkflow(jobId, {
       // Issue #4767 — the workflow payload's trigger, all five
       // modes, fail-closed through normalize (absent ⇒ "manual").
       trigger: normalizeJobRunTrigger(opts.trigger),
       ...(opts.scopePath ? { scopePath: opts.scopePath } : {}),
+      ...(provenance ? { provenance } : {}),
     });
   }
   const workflow = ctx.env.JOB_PIPELINE_WORKFLOW;

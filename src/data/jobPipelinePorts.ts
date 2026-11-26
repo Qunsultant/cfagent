@@ -268,6 +268,36 @@ export interface JobRunProvenance {
 }
 
 /**
+ * Issue #6584 — the ONE field rule for a provenance carrier, whichever
+ * shape it arrives in: a workflow payload object (#6584) or the
+ * instance's stored JSON (#6557). A non-object reads as null; an object
+ * reads as all four fields, with an explicit null for every fact it did
+ * not name. Never a half-parsed object, never an inferred value.
+ */
+export function normalizeRunProvenance(
+  value: unknown,
+): JobRunProvenance | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const carrier = value as Record<string, unknown>;
+  const text = (field: unknown): string | null =>
+    typeof field === "string" && field.length > 0 ? field : null;
+  const mode =
+    carrier.mode === "live" || carrier.mode === "paper" ? carrier.mode : null;
+  const modeSource =
+    carrier.modeSource === "pin" ||
+    carrier.modeSource === "selection" ||
+    carrier.modeSource === "inference"
+      ? carrier.modeSource
+      : null;
+  return {
+    brokerId: text(carrier.brokerId),
+    dataProviderId: text(carrier.dataProviderId),
+    mode,
+    modeSource,
+  };
+}
+
+/**
  * Issue #6557 — parse the instance's provenance carrier. Unknown or
  * malformed values read as null (an explicit "the payload named none"),
  * never as an inferred fact: the carrier is written by this module's own
@@ -284,24 +314,7 @@ export function parseRunProvenance(
   } catch {
     return null;
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-  const value = parsed as Record<string, unknown>;
-  const text = (field: unknown): string | null =>
-    typeof field === "string" && field.length > 0 ? field : null;
-  const mode =
-    value.mode === "live" || value.mode === "paper" ? value.mode : null;
-  const modeSource =
-    value.modeSource === "pin" ||
-    value.modeSource === "selection" ||
-    value.modeSource === "inference"
-      ? value.modeSource
-      : null;
-  return {
-    brokerId: text(value.brokerId),
-    dataProviderId: text(value.dataProviderId),
-    mode,
-    modeSource,
-  };
+  return normalizeRunProvenance(parsed);
 }
 
 /** One job's live instance record (management state + checkpoint). */
