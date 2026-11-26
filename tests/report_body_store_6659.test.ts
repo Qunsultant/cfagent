@@ -13,6 +13,8 @@
  *  - 6659-P05 a successful write clears the remembered absence immediately.
  */
 import { beforeEach, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { BlobObject, BlobStore } from "../src/services/blobStorePorts";
 import {
   clearReportBodyNegativeCache,
@@ -157,5 +159,19 @@ describe("6659-P05 a write clears the remembered absence", () => {
 
     expect(after.outcome).toBe("body");
     if (after.outcome === "body") expect(after.body).toBe('{"ok":true}');
+  });
+});
+
+describe("6659-P06 the callers do not bypass the access point", () => {
+  it("scheduledReports.ts creates no blob store of its own", () => {
+    // The report-body module is the ONE place allowed to build a store for
+    // report bodies; a direct `createBlobStore(` here would reintroduce an
+    // unbounded, unmeasured access path.
+    const source = readFileSync(
+      join(process.cwd(), "src/services/scheduledReports.ts"),
+      "utf8",
+    );
+    expect(source).not.toContain("createBlobStore(");
+    expect(source).toContain('from "./reportBodyStore"');
   });
 });
