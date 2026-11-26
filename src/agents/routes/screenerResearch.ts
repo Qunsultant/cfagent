@@ -40,6 +40,7 @@ import {
   triggerScheduledResearch,
   runWithResearchRunId,
 } from "../../services/researchTriggers";
+import { createAgentResearchStepDeps } from "../../services/researchPipelineJobs";
 import {
   shouldFireResearchTick,
   RESEARCH_SCHEDULED_LAST_RUN_KEY,
@@ -740,49 +741,13 @@ export async function handleScreenerResearchRoutes(
           // job-pipeline workflow executes the run durably, one step per stage.
           durableEnv: ctx.env as unknown as Env,
           ...selection,
-          researchDeps: {
-            runFeedStage: async (input) => {
-              const agent = ctx.getResearchAgent(input.userLogin);
-              if (!agent) {
-                throw new Error(
-                  "research_stage_unavailable: the research agent is not configured.",
-                );
-              }
-              return agent.runFeedStage({
-                trigger: input.trigger,
-                userLogin: input.userLogin,
-                ...(input.runId ? { runId: input.runId } : {}),
-                ...(input.brokerId ? { brokerId: input.brokerId } : {}),
-                ...(input.mode ? { mode: input.mode } : {}),
-              });
-            },
-            runEnrichStage: async (input) => {
-              const agent = ctx.getResearchAgent(input.userLogin);
-              if (!agent) {
-                throw new Error(
-                  "research_stage_unavailable: the research agent is not configured.",
-                );
-              }
-              return agent.runEnrichStage(input.feed, {
-                trigger: input.trigger,
-                userLogin: input.userLogin,
-                ...(input.runId ? { runId: input.runId } : {}),
-              });
-            },
-            runGenerateStage: async (input) =>
-              ctx.runResearchAndPublish("manual", input.userLogin, {
-                runId: input.runId,
-                stage: "generate",
-                report: input.report,
-              }),
-            runDeliverStage: async (input) =>
-              ctx.runResearchAndPublish("manual", input.userLogin, {
-                runId: input.runId,
-                stage: "deliver",
-                report: input.report,
-                publication: input.publication,
-              }),
-          },
+          // Issue #6040 — the six stage bodies come from the ONE in-process
+          // builder the MCP host also uses; the route no longer carries its
+          // own copy of the OODA stage wiring.
+          researchDeps: createAgentResearchStepDeps({
+            getResearchAgent: (login) => ctx.getResearchAgent(login),
+            runResearchAndPublish: ctx.runResearchAndPublish,
+          }),
           execute: (runCtx) =>
             runCtx
               ? runWithResearchRunId(runCtx.runId, () =>
@@ -958,49 +923,13 @@ export async function handleScreenerResearchRoutes(
           // Issue #6035 (b) — the full env, so a deployment hosting the
           // job-pipeline workflow executes the run durably, one step per stage.
           durableEnv: ctx.env as unknown as Env,
-          researchDeps: {
-            runFeedStage: async (input) => {
-              const agent = ctx.getResearchAgent(input.userLogin);
-              if (!agent) {
-                throw new Error(
-                  "research_stage_unavailable: the research agent is not configured.",
-                );
-              }
-              return agent.runFeedStage({
-                trigger: input.trigger,
-                userLogin: input.userLogin,
-                ...(input.runId ? { runId: input.runId } : {}),
-                ...(input.brokerId ? { brokerId: input.brokerId } : {}),
-                ...(input.mode ? { mode: input.mode } : {}),
-              });
-            },
-            runEnrichStage: async (input) => {
-              const agent = ctx.getResearchAgent(input.userLogin);
-              if (!agent) {
-                throw new Error(
-                  "research_stage_unavailable: the research agent is not configured.",
-                );
-              }
-              return agent.runEnrichStage(input.feed, {
-                trigger: input.trigger,
-                userLogin: input.userLogin,
-                ...(input.runId ? { runId: input.runId } : {}),
-              });
-            },
-            runGenerateStage: async (input) =>
-              ctx.runResearchAndPublish("manual", input.userLogin, {
-                runId: input.runId,
-                stage: "generate",
-                report: input.report,
-              }),
-            runDeliverStage: async (input) =>
-              ctx.runResearchAndPublish("manual", input.userLogin, {
-                runId: input.runId,
-                stage: "deliver",
-                report: input.report,
-                publication: input.publication,
-              }),
-          },
+          // Issue #6040 — the six stage bodies come from the ONE in-process
+          // builder the MCP host also uses; the route no longer carries its
+          // own copy of the OODA stage wiring.
+          researchDeps: createAgentResearchStepDeps({
+            getResearchAgent: (login) => ctx.getResearchAgent(login),
+            runResearchAndPublish: ctx.runResearchAndPublish,
+          }),
           execute: (runCtx) =>
             triggerScheduledResearch(ctx.runResearchAndPublish, userLogin, runCtx?.feed, runCtx?.enrich, runCtx?.deferPublication),
         });

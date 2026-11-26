@@ -22,6 +22,10 @@ import { SHARED_ORCHESTRATOR_INSTANCE } from "../security/serviceIdentity";
 import type {
   ResearchStepDeps,
 } from "../services/researchPipelineJobs";
+import {
+  researchDispatchRefusal,
+  type ResearchDispatchTarget,
+} from "./researchScreenEngine";
 import type { ResearchFeedStageOutput } from "../services/researchFeedHandoff";
 import type { ResearchEnrichStageOutput } from "../services/researchEnrichHandoff";
 import type { ResearchEvaluation, ResearchReport } from "../services/researchPipeline";
@@ -119,5 +123,48 @@ export function createWorkflowResearchStepDeps(env: Env): ResearchStepDeps {
     },
     runEvaluateStage: async (input) =>
       door().runResearchEvaluate({ runId: input.runId, userLogin: input.userLogin }),
+  };
+}
+
+/**
+ * Issue #6040 — the dispatch target for a host that reaches the agent over the
+ * orchestrator door (the Worker's `/mcp` route). It reuses the stage deps above
+ * and adds the one thing the stage list cannot express: the whole-run publish
+ * entry the direct-rollback path executes. Both slots call the SAME
+ * `runResearchAndPublish` the manual route and the workflow residency call —
+ * no second dispatcher, and no literal receipt.
+ */
+export function createWorkflowResearchDispatch(
+  env: Env,
+  owner: {
+    userLogin: string;
+    trigger: "manual" | "scheduled";
+    brokerId?: string;
+    mode?: string;
+  },
+): ResearchDispatchTarget {
+  return {
+    researchDeps: createWorkflowResearchStepDeps(env),
+    execute: async (ctx) => {
+      if (!ctx?.runId) {
+        throw researchDispatchRefusal(
+          "the run id is required to dispatch a research run; nothing was started.",
+        );
+      }
+      const result = await actorGateway
+        .stub<OrchestratorResearchDoor>(
+          env.ORCHESTRATOR_AGENT,
+          SHARED_ORCHESTRATOR_INSTANCE,
+        )
+        .runResearchAndPublish(owner.trigger, owner.userLogin, {
+          runId: ctx.runId,
+          ...(owner.brokerId ? { brokerId: owner.brokerId } : {}),
+          ...(owner.mode ? { mode: owner.mode } : {}),
+          ...(ctx.feed ? { feed: ctx.feed } : {}),
+          ...(ctx.enrich ? { enrich: ctx.enrich } : {}),
+          ...(ctx.deferPublication ? { stage: "analyze" as const } : {}),
+        });
+      return { ...result };
+    },
   };
 }

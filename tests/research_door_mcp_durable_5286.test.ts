@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createInMemoryJobPipelineStores } from "../src/data/inMemoryJobPipelineAdapter";
 import { InMemoryJobRunRecordStore } from "../src/data/inMemoryJobRunRecordAdapter";
 import { jobRunRecorderFromStore } from "../src/services/jobPipelineEngine";
-import { runDeterministicResearchViaDoor } from "../src/agents/orchestrator/meshResearchDoor";
+import { runDeterministicResearchViaDoor } from "../src/agents/orchestrator/meshResearchDoor.deprecated";
 import { RunResearchJobCommand } from "../src/mcps/openaimp/researchJobCommands";
 import {
   dispatchResearchEngineRun,

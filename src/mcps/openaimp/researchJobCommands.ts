@@ -14,9 +14,12 @@ import {
   dispatchResearchEngineRun,
   executeResearchStageControl,
   readResearchStages,
+  researchDispatchRefusal,
   resolveResearchEngineAdapters,
+  type ResearchDispatchTarget,
   type ResearchStageOp,
 } from "../../workflows/researchScreenEngine";
+import { createWorkflowResearchDispatch } from "../../workflows/researchWorkflowStageDeps";
 import { RESEARCH_PIPELINE_STAGES } from "../../workflows/stageRuntimeIds";
 import { researchEngineJobId } from "../../workflows/researchDataPorts";
 import {
@@ -42,7 +45,7 @@ export interface RunResearchJobInput {
 export class RunResearchJobCommand implements IMcpToolCommand<RunResearchJobInput> {
   readonly name = "run_research_job";
   readonly description =
-    "Run the nightly OODA options-research engine job (`research:<runId>`) or control one stage (`feed`, `enrich`, `analyze`, `generate`, `deliver`, `evaluate`) by `(runId, stageId)`. Requires the chat turn's acting identity.";
+    "Run the nightly OODA options-research engine job (`research:<runId>`) or control one stage (`feed`, `enrich`, `analyze`, `generate`, `deliver`, `evaluate`) by `(runId, stageId)`. A dispatch returns the run it started (`runId`, the `research:<runId>` job id, and the six stage rows) — name that run id in the answer. Requires the chat turn's acting identity.";
 
   readonly jsonSchema = {
     type: "object" as const,
@@ -120,6 +123,21 @@ export class RunResearchJobCommand implements IMcpToolCommand<RunResearchJobInpu
     }
 
     const trigger = input.trigger ?? "manual";
+    // Issue #6040 — one dispatch, one receipt. The host either already holds
+    // the research handles (in-agent contexts) or has the ORCHESTRATOR_AGENT
+    // binding the door needs; a host with neither refuses by name instead of
+    // reporting a run that never happened.
+    const dispatchTarget: ResearchDispatchTarget | undefined =
+      context.researchDispatch ??
+      (context.env?.ORCHESTRATOR_AGENT
+        ? createWorkflowResearchDispatch(context.env, { userLogin: actingLogin, trigger })
+        : undefined);
+    if (!dispatchTarget) {
+      throw researchDispatchRefusal(
+        "this host has no research dispatch target (no ORCHESTRATOR_AGENT binding and no in-process research handles); the run was not dispatched.",
+      );
+    }
+
     const dispatched = await dispatchResearchEngineRun({
       runId: input.runId,
       userLogin: actingLogin,
@@ -130,18 +148,23 @@ export class RunResearchJobCommand implements IMcpToolCommand<RunResearchJobInpu
       // Issue #6035 (b) — the full env: a hosted deployment runs the job on
       // the workflow residency instead of the in-process sync invocation.
       ...(context.env ? { durableEnv: context.env as unknown as Env } : {}),
-      execute: async () => ({
-        dispatched: true,
-        trigger,
-        stages: RESEARCH_PIPELINE_STAGES,
-      }),
+      // Issue #6040 — the real six stage bodies and the real whole-run
+      // execute. The audit trail and the caller name the run that started.
+      researchDeps: dispatchTarget.researchDeps,
+      execute: dispatchTarget.execute,
     });
     context.audit("mcp.tool_called", "orchestrator", {
       tool: this.name,
-      engineJobId: dispatched.engineJobId,
+      runId: dispatched.runId,
+      jobId: dispatched.engineJobId,
       trigger,
+      storageMode: dispatched.storageMode,
     });
-    return dispatched;
+    return {
+      runId: dispatched.runId,
+      jobId: dispatched.engineJobId,
+      stages: dispatched.stageVisibility,
+    };
   }
 }
 

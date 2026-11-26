@@ -3,7 +3,7 @@ import {
   evaluateResearchDeliverHitlGate,
   runAgentComposedResearchViaDoor,
   runDeterministicResearchViaDoor,
-} from "../src/agents/orchestrator/meshResearchDoor";
+} from "../src/agents/orchestrator/meshResearchDoor.deprecated";
 import { codedMessage } from "../src/outcomes/outcomeAspects";
 
 describe("Issue #5123 (Sub-issue 6 of #5109) — Agentic Capabilities", () => {

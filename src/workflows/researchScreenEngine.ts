@@ -75,6 +75,29 @@ import type { FeatureFlagPort } from "../features/featureFlagPorts";
 
 export type ResearchStageOp = "status" | "run" | "rerun" | "stop" | "resume" | "cancel";
 
+/**
+ * Issue #6040 — the one refusal code a dispatch answers when its host cannot
+ * execute. A dispatch that cannot run refuses by this name; it never returns
+ * a success receipt for a run it did not start.
+ */
+export const RESEARCH_DISPATCH_UNAVAILABLE = "research_dispatch_unavailable";
+
+/** The coded refusal, naming the precondition the host is missing. */
+export function researchDispatchRefusal(missing: string): Error {
+  return new Error(`${RESEARCH_DISPATCH_UNAVAILABLE}: ${missing}`);
+}
+
+/**
+ * Issue #6040 — what a dispatching host must supply: the six real stage bodies
+ * AND the whole-run execute the direct-rollback path runs. A literal receipt in
+ * either slot is the defect this contract removes: a caller cannot reach
+ * `dispatchResearchEngineRun` with stage deps and no way to run them.
+ */
+export interface ResearchDispatchTarget {
+  researchDeps: ResearchStepDeps;
+  execute: DispatchResearchEngineInput["execute"];
+}
+
 export interface ResearchStageVisibility {
   stageId: ResearchPipelineStage;
   startedAt: string | null;

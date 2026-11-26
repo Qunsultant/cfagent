@@ -1,12 +1,22 @@
 /**
- * Issue #5123 (#5109 Sub-issue 6: Agentic capabilities) — Copilot door for the
- * nightly OODA research job (`research:<runId>`), supporting BOTH paths:
- *   1. Deterministic workflow (`runDeterministicResearchViaDoor`): runs the
- *      fixed `research:<runId>` pipeline with the 21:00–21:30 UTC schedule guard.
- *   2. Agent-composed MCP path (`runAgentComposedResearchViaDoor`): sequences
- *      individual per-stage controls over `(runId, stageId)`.
- *   3. HITL #277 hold as a `deliver`-stage gate (`evaluateResearchDeliverHitlGate`).
+ * DEPRECATED (issue #6040, 2026-11-25) — retired in place; do not add
+ * consumers. Superseded by `dispatchResearchEngineRun`
+ * (`src/workflows/researchScreenEngine.ts`) for a whole run and by the
+ * `run_research_job` MCP command's `(runId, stageId)` control for one stage.
+ *
+ * Why retired: this was the Copilot research door from #5123, but no
+ * production module ever imported it and its deterministic `execute`
+ * returned a literal `{mode: "deterministic"}` — a dispatched run that ran
+ * nothing (#6040). The Copilot surface it was built for is the
+ * `run_research_job` MCP command, which now dispatches through the one
+ * service with a real six-stage target; a second door beside it would be a
+ * second dispatcher. The HITL #277 deliver gate below stays here, frozen and
+ * still tested, until a production deliver-stage gate supersedes it.
+ *
+ * Original header — Issue #5123 (#5109 Sub-issue 6: Agentic capabilities):
+ * Copilot door for the nightly OODA research job (`research:<runId>`).
  */
+
 import {
   isWithinResearchGuardWindow,
   resolveResearchJobConfig,
@@ -30,7 +40,11 @@ export interface ResearchDeliverGateResult {
 }
 
 /**
- * HITL #277 hold landed as a `deliver`-stage gate (#5123):
+ * Issue #5123 — HITL #277 deliver gate. KEPT (not deprecated): the retired
+ * dispatch functions below consume it, and it is the only implementation of
+ * the deliver hold; it stays frozen with this file until a production
+ * deliver-stage gate replaces it. HITL #277 hold landed as a `deliver`-stage
+ * gate (#5123):
  * when `hitlHold` is enabled and `approved !== true`, delivery is held for
  * human confirmation instead of dispatching channels.
  */
@@ -52,6 +66,10 @@ export function evaluateResearchDeliverHitlGate(input: {
   };
 }
 
+/**
+ * @deprecated Issue #6040 — retired in place. Superseded by
+ * `dispatchResearchEngineRun` with a real `ResearchDispatchTarget`.
+ */
 export async function runDeterministicResearchViaDoor(input: {
   actingLogin: string | undefined;
   trigger: "manual" | "scheduled";
@@ -121,6 +139,10 @@ export async function runDeterministicResearchViaDoor(input: {
   };
 }
 
+/**
+ * @deprecated Issue #6040 — retired in place. Superseded by
+ * `run_research_job` staged control over `(runId, stageId)`.
+ */
 export function runAgentComposedResearchViaDoor(input: {
   actingLogin: string | undefined;
   runId: string;
@@ -167,6 +189,10 @@ export function runAgentComposedResearchViaDoor(input: {
  * Production async agent-composed door path (#5287): executes real
  * `executeResearchStageControl` operations with explicit `researchDeps` and
  * durable store threading (unlike the synchronous validation-only planner above).
+ */
+/**
+ * @deprecated Issue #6040 — retired in place. Superseded by
+ * `executeResearchStageControl` over `(runId, stageId)`.
  */
 export async function executeAgentComposedResearchViaDoor(input: {
   actingLogin: string | undefined;
