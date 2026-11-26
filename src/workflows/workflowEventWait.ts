@@ -16,6 +16,7 @@
  * rethrown untouched, so a real failure still fails the run.
  */
 import type {
+  JobDurableSleepHandler,
   JobEventWaitHandler,
   JobEventWaitOutcome,
   JobEventWaitRequest,
@@ -75,6 +76,15 @@ export async function waitForWorkflowEvent(
 }
 
 /**
+ * Issue #6393 — the structural step surface the park needs. The SDK's
+ * `WorkflowStep` satisfies it (`step.sleep(name, ms)` parks the instance
+ * and resumes it later); tests pass their own.
+ */
+export interface WorkflowDurableSleepStep {
+  sleep?: (name: string, durationMs: number) => Promise<void>;
+}
+
+/**
  * The deps fragment a flow injects. Present only when the host's step
  * can wait; a host without one keeps the engine's refusal by name
  * (`stage_port_unavailable`) instead of pretending the wait happened.
@@ -92,5 +102,25 @@ export function waitChannelFromStep(
         },
         request,
       ),
+  };
+}
+
+/**
+ * Issue #6393 — the platform half of the durable park, beside the event
+ * half. The engine owns the name and the bound (`WAIT_SLEEP_STEP`); this
+ * maps them onto the host's `step.sleep`, which parks the instance on the
+ * platform's own timer and resumes it later instead of holding the isolate.
+ *
+ * Same contract as `waitChannelFromStep`: absent ⇒ no seam, and the engine
+ * refuses by name rather than degrading a park into a hold.
+ */
+export function sleepChannelFromStep(
+  step: WorkflowDurableSleepStep,
+): { sleepFor?: JobDurableSleepHandler } {
+  const sleep = step.sleep;
+  if (typeof sleep !== "function") return {};
+  return {
+    sleepFor: (request) =>
+      sleep.call(step, request.stepName, request.durationMs),
   };
 }

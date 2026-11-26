@@ -993,6 +993,24 @@ The workflow residency wires both halves
 (`src/workflows/jobPipelineWorkflow.ts`, `workflowEventWait.ts`); a host
 that wires neither keeps the coded refusal.
 
+**The other half of the primitive: `wait.sleep` (#6393).** The event wait
+parks a run until something arrives; `wait.sleep` parks it for a declared
+duration (`params.durationMs`). It is the same reserved-step shape and the
+same three rules: it runs on the host's own durable timer
+(`JobPipelineDeps.sleepFor`, wired from the platform's `step.sleep` by
+`sleepChannelFromStep`), never inside `step.do` — a journaled sleep would
+replay as a completed step instead of re-arming; it is bounded by
+configuration, `pipeline.sleepMaxDurationMs` (settings beat env, default
+one day, clamped like the wait bound); and a host with no durable sleep
+refuses by name (`stage_port_unavailable`). A park that would silently
+become a hold is the defect the step exists to remove, so an unservable
+park refuses instead of degrading. The park resolves to
+`{ outcome: "slept", durationMs }`, which becomes the next step's input,
+and the name is computed once (`sleep:<step execution id>`) so a replay
+re-arms the same park. A duration past the bound refuses rather than being
+shortened: waking a run earlier than its job asked, silently, is a lie the
+record cannot show.
+
 ### 3.3 Chain
 
 A chain is a declarative composition of stages, defined once and run

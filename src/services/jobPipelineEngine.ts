@@ -295,6 +295,49 @@ export const identityJobStepJournal: JobStepJournal = {
  */
 export const WAIT_EVENT_STEP = "wait.event";
 
+/**
+ * Issue #6393 — the durable sleep stage: a step whose name is
+ * WAIT_SLEEP_STEP parks the run for ONE declared duration and continues
+ * on it. It is the second half of the wait primitive #3955 opened with
+ * the event wait, and it follows the same three rules for the same
+ * reasons:
+ *
+ *  - the park runs on the host's own durable timer (`step.sleep`),
+ *    NEVER inside `step.do` — a journaled sleep would replay as a
+ *    completed step instead of re-arming, and Rules of Workflows forbid
+ *    it inside `step.do`;
+ *  - the duration is the job's declaration, bounded by the configured
+ *    policy maximum (`pipeline.sleepMaxDurationMs`), never by a
+ *    hard-coded ceiling;
+ *  - a host with no durable sleep REFUSES BY NAME. A hold is not a park:
+ *    silently holding is the defect this step exists to remove.
+ *
+ * The park resolves to a declared outcome `{outcome: "slept"}` — the
+ * same contract shape the event wait uses — so a step after it can read
+ * how long the run parked without asking the platform.
+ */
+export const WAIT_SLEEP_STEP = "wait.sleep";
+
+/** One park request: where, how long, and under the engine's stable name. */
+export interface JobDurableSleepRequest {
+  jobId: string;
+  runId: string;
+  /** The node path the park belongs to (the stage boundary's identity). */
+  nodePath: string;
+  /**
+   * The park's stable platform name — the engine's ONE naming site, so a
+   * replay of the same run re-arms the same sleep instead of parking twice.
+   */
+  stepName: string;
+  /** The declared park duration in milliseconds (already bounded). */
+  durationMs: number;
+}
+
+/** The host's durable sleep. Absent ⇒ the step refuses by name. */
+export type JobDurableSleepHandler = (
+  request: JobDurableSleepRequest,
+) => Promise<void>;
+
 /** One wait request: what to wait for, where, and under what bound. */
 export interface JobEventWaitRequest {
   jobId: string;
@@ -400,6 +443,13 @@ export interface JobPipelineDeps {
    * per #5517.
    */
   waitForEvent?: JobEventWaitHandler;
+  /**
+   * Issue #6393 — the durable sleep a `wait.sleep` step parks on. Absent ⇒
+   * the step refuses by name (`stage_port_unavailable`) rather than holding
+   * the run in-process: a hold dies with the isolate, which is exactly what
+   * this seam exists to avoid.
+   */
+  sleepFor?: JobDurableSleepHandler;
   /**
    * Issue #3955 — the delivery half of the channel: hand a named event to
    * the run's durable host. Absent ⇒ `sendEvent` refuses by name.
@@ -4325,7 +4375,13 @@ export class JobPipelineControl {
     node: JobNodeConfig,
     fn: () => Promise<T>,
   ): Promise<T> {
-    if ((node.steps ?? []).some((step) => step.step === WAIT_EVENT_STEP)) return fn();
+    if (
+      (node.steps ?? []).some(
+        (step) => step.step === WAIT_EVENT_STEP || step.step === WAIT_SLEEP_STEP,
+      )
+    ) {
+      return fn();
+    }
     return this.withUnitDeadline(stage, fn);
   }
 
@@ -4405,6 +4461,68 @@ export class JobPipelineControl {
    * declared outcome. The request carries the engine's ONE wait name, so a
    * replay re-arms the same platform wait.
    */
+  /**
+   * Issue #6393 — validate and execute one declared park. The bound is
+   * policy (`pipeline.sleepMaxDurationMs`), and an over-long duration
+   * REFUSES rather than being silently shortened: waking a run earlier
+   * than its job asked, without saying so, is a lie the record cannot
+   * show.
+   */
+  private async awaitSleep(
+    ctx: RunContext,
+    path: string,
+    stepIndex: number,
+    shardKey: string | null,
+    itemIndex: number | null,
+    params: Record<string, unknown>,
+  ): Promise<{ outcome: "slept"; durationMs: number }> {
+    const raw = params.durationMs;
+    if (
+      raw === undefined ||
+      typeof raw !== "number" ||
+      !Number.isFinite(raw) ||
+      raw <= 0
+    ) {
+      throw new JobPipelineError(
+        "job_config_invalid",
+        `Step "${WAIT_SLEEP_STEP}" of node "${path || "root"}" has an invalid "durationMs" (${String(raw)}); it must be a positive number of milliseconds.`,
+      );
+    }
+    const max = this.policy.sleepMaxDurationMs;
+    if (raw > max) {
+      throw new JobPipelineError(
+        "job_config_invalid",
+        `Step "${WAIT_SLEEP_STEP}" of node "${path || "root"}" asks to park ${raw}ms, past the configured maximum of ${max}ms (pipeline.sleepMaxDurationMs); shorten the duration or raise the bound.`,
+      );
+    }
+    const park = this.deps.sleepFor;
+    if (!park) {
+      throw new JobPipelineError(
+        "stage_port_unavailable",
+        `Step "${WAIT_SLEEP_STEP}" of node "${path || "root"}" parks for ${raw}ms, but this host provides no durable sleep; a parked run needs the workflow residency.`,
+      );
+    }
+    const request: JobDurableSleepRequest = {
+      jobId: ctx.jobId,
+      runId: ctx.runId,
+      nodePath: path,
+      // The engine's ONE naming site: the same run, node, step and unit
+      // produce the same platform name on every replay.
+      stepName: `sleep:${stepExecutionId(ctx.runId, path, stepIndex, shardKey, itemIndex)}`,
+      durationMs: raw,
+    };
+    try {
+      await park(request);
+    } catch (error) {
+      if (error instanceof JobPipelineError) throw error;
+      throw new JobPipelineError(
+        "job_step_failed",
+        `Durable sleep of ${raw}ms at node "${path || "root"}" failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return { outcome: "slept", durationMs: raw };
+  }
+
   private async awaitEvent(
     ctx: RunContext,
     path: string,
@@ -4508,6 +4626,21 @@ export class JobPipelineControl {
         );
         ctx.stepExecutions += 1;
         return waited;
+      }
+      // Issue #6393 — the park runs on the host's durable timer, never in
+      // the journal, exactly as the event wait does (and for the same
+      // Rules-of-Workflows reason).
+      if (stepConfig.step === WAIT_SLEEP_STEP) {
+        const slept = await this.awaitSleep(
+          ctx,
+          path,
+          stepIndex,
+          eff.shardKey,
+          itemIndex,
+          stepConfig.params ?? {},
+        );
+        ctx.stepExecutions += 1;
+        return slept;
       }
       const handler = this.deps.steps.resolve(stepConfig.step);
       const stepCtx: JobStepContext = {

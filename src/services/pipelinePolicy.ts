@@ -74,6 +74,13 @@ export interface PipelinePolicy {
    * expiry stays the declared outcome #3955 defined.
    */
   waitDefaultTimeoutMs: number;
+  /**
+   * Issue #6393 — the longest a `wait.sleep` step may park the run. A park
+   * is a live instance, so the ceiling is configuration like the wait bound,
+   * not a constant in the engine. A longer declaration REFUSES by name
+   * rather than being silently shortened.
+   */
+  sleepMaxDurationMs: number;
 }
 
 export const DEFAULT_PIPELINE_POLICY: PipelinePolicy = {
@@ -99,6 +106,7 @@ export const DEFAULT_PIPELINE_POLICY: PipelinePolicy = {
   },
   fetchTimeoutMs: 15_000,
   waitDefaultTimeoutMs: 3_600_000,
+  sleepMaxDurationMs: 86_400_000,
 };
 
 const ATTEMPTS_MIN = 1;
@@ -143,6 +151,7 @@ export const PIPELINE_POLICY_DEFAULTS: Record<string, string> = {
     .join(","),
   "pipeline.fetchTimeoutMs": String(DEFAULT_PIPELINE_POLICY.fetchTimeoutMs),
   "pipeline.waitDefaultTimeoutMs": String(DEFAULT_PIPELINE_POLICY.waitDefaultTimeoutMs),
+  "pipeline.sleepMaxDurationMs": String(DEFAULT_PIPELINE_POLICY.sleepMaxDurationMs),
 };
 
 /**
@@ -383,7 +392,18 @@ export function resolvePipelinePolicy(
       "PIPELINE_WAIT_DEFAULT_TIMEOUT_MS",
     ) ?? DEFAULT_PIPELINE_POLICY.waitDefaultTimeoutMs;
 
-  return { retry, notifications, fetchTimeoutMs, waitDefaultTimeoutMs };
+  // Issue #6393 — the park bound, resolved with every other pipeline knob
+  // (settings beat env, both beat the default) and clamped to the same
+  // ceiling the wait bound uses.
+  const sleepMaxDurationMs =
+    parseIntClamped(
+      s("pipeline.sleepMaxDurationMs") ?? e("PIPELINE_SLEEP_MAX_DURATION_MS"),
+      WAIT_TIMEOUT_MIN_MS,
+      WAIT_TIMEOUT_MAX_MS,
+      "PIPELINE_SLEEP_MAX_DURATION_MS",
+    ) ?? DEFAULT_PIPELINE_POLICY.sleepMaxDurationMs;
+
+  return { retry, notifications, fetchTimeoutMs, waitDefaultTimeoutMs, sleepMaxDurationMs };
 }
 
 /**

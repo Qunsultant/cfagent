@@ -22,7 +22,12 @@ import {
   type JobPipelineDeps,
   type JobRunOutcome,
 } from "../services/jobPipelineEngine";
-import { waitChannelFromStep, type WorkflowEventWaitStep } from "./workflowEventWait";
+import {
+  sleepChannelFromStep,
+  waitChannelFromStep,
+  type WorkflowDurableSleepStep,
+  type WorkflowEventWaitStep,
+} from "./workflowEventWait";
 import { createJobPipelineControl } from "../services/jobPipelineControlFactory";
 import { JobPipelineError } from "../services/jobPipelineConfig";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
@@ -48,7 +53,7 @@ export interface JobPipelineWorkflowPayload {
 }
 
 /** Minimal structural step surface the flow needs (fakeable in tests). */
-export interface JobPipelineWorkflowStep {
+export interface JobPipelineWorkflowStep extends WorkflowDurableSleepStep {
   do<T>(name: string, fn: () => Promise<T>): Promise<T>;
   /**
    * Issue #3955 — the platform's step-level event wait. Optional at the
@@ -94,6 +99,9 @@ export async function runJobPipelineWorkflowFlow(
   // stay replay-safe through step.do.
   const control = createJobPipelineControl({
     ...waitChannelFromStep(step),
+    // Issue #6393 — the park channel beside the event channel: a
+    // `wait.sleep` step parks on the platform's timer, not in-process.
+    ...sleepChannelFromStep(step),
     ...deps,
     journal: {
       do: async <T>(name: string, fn: () => Promise<T>): Promise<T> => step.do(name, fn),
