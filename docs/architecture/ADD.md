@@ -145,7 +145,7 @@ decision is in [Packaging and deployment](#packaging-and-deployment).
   in use, the decided pieces, and the FOSS-first must-use rule.
 - SOLID / GRASP / GoF conformance anchor is issue #488.
 - Agentic patterns (ReAct, Reflection, Self-correction, Learning, Adaptive Router, Supervisor-Worker, Decentralized-Swarm, etc)
-- Security Models and Protocols (IAAA)
+- Security Models and Protocols (IAAA, RBAC, TBAC)
 - Protocols (OIDC, MCP, A2A, ACP, UCP, etc)
 - 15-factor methodology.
 - AOP (Exception Handling, Coded Messages, Logging, Externalized Configuration, Security, Transaction Management, etc)
