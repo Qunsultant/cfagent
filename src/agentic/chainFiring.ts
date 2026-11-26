@@ -92,6 +92,15 @@ export function materializeSynthesizedRecord(
     operation: CHAIN_EXECUTE_OPERATION,
     budgetCents: record.budgetCents,
     enabled: true,
+    // Issue #6503 / #6589 — a materialized goal is a stored goal: the
+    // record round-trip stamps the deterministic executionMode default
+    // (goalToRecord / recordToGoal), and addGoal stamps it on creation,
+    // so materialization stamps it too — the first materialize returns
+    // exactly what gets stored, and re-materialization returns the
+    // stored goal unchanged. The synthesized record carries no mode
+    // (SynthesizedSchedule has no executionMode field), so the
+    // deterministic default is the only correct value here.
+    executionMode: "deterministic",
     ...(record.timeZone ? { timeZone: record.timeZone } : {}),
   };
 }
