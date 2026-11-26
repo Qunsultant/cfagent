@@ -144,6 +144,7 @@ export interface WorkflowStageFiringPayload {
   jobId: string;
   nodePath: string;
   stageId: string;
+  executionMode?: "deterministic" | "agentic-loop";
   /** The schedule owner's login: the firing's run-as identity. */
   userLogin?: string;
   reason?: string;
@@ -237,6 +238,7 @@ export function createWorkflowStageScheduleAdapter(
         jobId: input.jobId,
         nodePath: input.nodePath,
         stageId: stage.stageId,
+        executionMode: input.executionMode ?? "deterministic",
         // The owner login rides the firing payload: the delegate's
         // dispatch gate resolves the run-as identity from it.
         ...(input.ownerLogin ? { userLogin: input.ownerLogin } : {}),

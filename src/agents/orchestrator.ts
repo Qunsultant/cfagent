@@ -82,6 +82,8 @@ import {
   createAgentScheduleExecutorDepsForDo,
   executeAgentScheduleAction,
   nlqPortToAgentSdkAdapter,
+  type AgentScheduleActionRequest,
+  type AgentScheduleExecutorDeps,
 } from "../services/agentScheduleCapability";
 import {
   createWorkflowStageScheduleAdapter,
@@ -904,6 +906,8 @@ export class OrchestratorAgent extends PortThink {
       // turn's userLogin from the turn stash (filled by the HTTP
       // driver before runTurn, or by portBeforeTurn for WS turns).
       turnUserLogin: () => this.pendingTurn?.userLogin,
+      agentScheduleExecute: (request: AgentScheduleActionRequest) =>
+        executeAgentScheduleAction(this.agentScheduleExecutorDeps(), request),
       // Issue #2428 (Agent Mesh S17): the mesh doors' and jobs'
       // trace carrier — the in-flight turn's traceparent, minted
       // lazily on the turn stash (see turnTraceparent()).
@@ -1378,59 +1382,9 @@ export class OrchestratorAgent extends PortThink {
     void origin; // reserved for per-origin policy (cfpay parity); unused in v1
     this.ensureTables();
     const sessionId = this.sessionKey();
-    // Issue #3122 — one capability instance for this turn: the NLQ
-    // executor and the schedule.* A2A ops share it (same PDP,
-    // thresholds, ledger, pending approvals — never two enforcement
-    // paths). No principal is passed to the A2A ops: A2A actions
-    // carry no principal login today (#4143), so they refuse
-    // fail-closed until the envelope carries one.
-    // Issue #3121 #3310 — the stages adapter joins the same
-    // capability instance: the schedule.* ops accept kind
-    // "workflow-stage" (with jobId + nodePath) on the same PDP /
-    // approval / ledger path as the sdk ops, never a second one.
-    const stageRegistry: WorkflowStageRegistry = {
-      getDefinition: async (jobId) => {
-        try {
-          const door = getScheduledAgentDoor(this.env);
-          const view = await door.getPipelineJobStatus(jobId);
-          return view.definition ?? null;
-        } catch {
-          return null;
-        }
-      },
-    };
-    const unifiedStore = createUnifiedSchedulePorts({
-      sql: this.ctx.storage.sql,
-      storage: this.ctx.storage,
-    });
-    const agentScheduleCapability = createAgentScheduleExecutorDepsForDo(
-      this.env,
-      this.ctx.storage.sql,
-      (type, payload) => this.audit(type, "orchestrator", payload),
-      {
-        sdk: nlqPortToAgentSdkAdapter(
-          this.nlqSchedulingPort(),
-          // Issue #3122 (store integration, #3123): the armed alarm is
-          // adopted into the unified store (record id = alarm id).
-          unifiedStore.unifiedSchedules,
-        ),
-        stages: createWorkflowStageScheduleAdapter({
-          // The management service's store (the sync one, as the
-          // routes use) — the same table the sdk adoptions write.
-          store: unifiedStore.unifiedSchedulesSync,
-          alarms: makeScheduleAlarmsPort(this, {
-            // Issue #6482 — the port resolves the effective floor per
-            // arm (managed setting > env carrier > default), so a
-            // floor set in the schedules home governs stage arms
-            // without a redeploy.
-            resolveFloor: () => resolveEffectiveScheduleFloor(this.ctx.storage.sql, this.env).seconds,
-          }),
-          registry: stageRegistry,
-          runCallback: makeRunScheduleCallback(this),
-          nowIso: () => new Date().toISOString(),
-        }),
-      },
-    );
+    // A2A and direct Think tools share the same adapters and executor.
+    // A2A still refuses when its envelope has no trusted principal.
+    const agentScheduleCapability = this.agentScheduleExecutorDeps();
     const data = await dispatchOrchestratorA2A(this.env, body, {
       sessionId,
       sql: this.ctx.storage.sql,
@@ -1449,6 +1403,87 @@ export class OrchestratorAgent extends PortThink {
       },
     });
     return orchestratorA2AOutcome(data);
+  }
+
+  private agentScheduleExecutorDeps(): AgentScheduleExecutorDeps {
+    const unifiedStore = createUnifiedSchedulePorts({
+      sql: this.ctx.storage.sql,
+      storage: this.ctx.storage,
+    });
+    const alarms = makeScheduleAlarmsPort(this, {
+      resolveFloor: () =>
+        resolveEffectiveScheduleFloor(this.ctx.storage.sql, this.env).seconds,
+    });
+    const runCallback = makeRunScheduleCallback(this);
+    const stageRegistry: WorkflowStageRegistry = {
+      getDefinition: async (jobId) => {
+        try {
+          const view = await getScheduledAgentDoor(this.env).getPipelineJobStatus(jobId);
+          return view.definition ?? null;
+        } catch {
+          return null;
+        }
+      },
+    };
+    const scheduledAgent = getScheduledAgentDoor(this.env);
+    return createAgentScheduleExecutorDepsForDo(
+      this.env,
+      this.ctx.storage.sql,
+      (type, payload) => this.audit(type, "orchestrator", payload),
+      {
+        sdk: nlqPortToAgentSdkAdapter(
+          this.nlqSchedulingPort(),
+          unifiedStore.unifiedSchedules,
+          {
+            alarms,
+            runCallback,
+            nowIso: () => new Date().toISOString(),
+            nowMs: () => Date.now(),
+          },
+        ),
+        goals: {
+          list: async () => (await scheduledAgent.listGoals()) as unknown as Array<Record<string, unknown>>,
+          add: async (goal, actor) => {
+            if (
+              typeof goal.id !== "string" ||
+              typeof goal.name !== "string" ||
+              typeof goal.cron !== "string" ||
+              typeof goal.operation !== "string" ||
+              typeof goal.budgetCents !== "number"
+            ) {
+              throw new Error("Goal schedules require id, name, cron, operation, and budgetCents.");
+            }
+            return (await scheduledAgent.addGoal({
+              id: goal.id,
+              name: goal.name,
+              cron: goal.cron,
+              operation: goal.operation,
+              budgetCents: goal.budgetCents,
+              ...(typeof goal.enabled === "boolean" ? { enabled: goal.enabled } : {}),
+              ...(goal.executionMode === "deterministic" || goal.executionMode === "agentic-loop"
+                ? { executionMode: goal.executionMode }
+                : {}),
+              ...(typeof goal.timeZone === "string" ? { timeZone: goal.timeZone } : {}),
+              ...(goal.provenance !== undefined ? { provenance: goal.provenance } : {}),
+              ...(goal.subDailyOptIn === true ? { subDailyOptIn: true } : {}),
+              ...(actor ? { actor } : {}),
+            })) as unknown as Record<string, unknown>;
+          },
+          remove: (id, actor) => scheduledAgent.removeGoal(id, actor),
+          setEnabled: (id, enabled, actor) =>
+            scheduledAgent.setGoalEnabled(id, enabled, actor),
+          trigger: (id, actor) =>
+            scheduledAgent.triggerGoal(id, this.env, actor),
+        },
+        stages: createWorkflowStageScheduleAdapter({
+          store: unifiedStore.unifiedSchedulesSync,
+          alarms,
+          registry: stageRegistry,
+          runCallback,
+          nowIso: () => new Date().toISOString(),
+        }),
+      },
+    );
   }
 
   // Issue #2496 (Mesh Improvement S1): the in-flight openaimp MCP

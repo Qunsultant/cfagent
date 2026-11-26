@@ -103,6 +103,7 @@ import type {
   BrowserInspectResult,
 } from "../../types";
 import type { ScheduledGoal, ScheduleTick } from "../../schedule";
+import type { ScheduledAgent } from "../scheduled-agent";
 import {
   AGENTIC_SPEND_AGENT_ID,
   type PaymentRecord,
@@ -251,6 +252,9 @@ export function requireActingLogin(
 
 export interface ScheduledAgentDoorStub {
   listGoals(): Promise<ScheduledGoal[]>;
+  addGoal(goal: Parameters<ScheduledAgent["addGoal"]>[0]): Promise<ScheduledGoal>;
+  removeGoal(id: string, actor?: string | null): Promise<boolean>;
+  setGoalEnabled(id: string, enabled: boolean, actor?: string | null): Promise<boolean>;
   triggerGoal(id: string, env?: unknown, actor?: string | null): Promise<ScheduleTick>;
   // Issue #3535 (Pipeline J2): the job-pipeline door — the
   // ScheduledAgent host's control-plane RPC surface (#3543).

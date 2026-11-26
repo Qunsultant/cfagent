@@ -38,6 +38,9 @@ import {
   executeWithPermissionGate,
 } from "../mcps/openaimp/mcpPermissionPorts";
 import { isSynchronousMcpTool } from "../config/asyncJobModes";
+import type { AgentScheduleActionRequest } from "../services/agentScheduleCapability";
+import { resolveAgentScheduleTenant } from "../services/agentScheduleCapability";
+import { AGENTIC_SPEND_AGENT_ID } from "../payments/ledger";
 
 export class McpAgentToolAdapter {
   /**
@@ -278,6 +281,154 @@ export function createAgentMcpTools(context: McpToolContext) {
   });
   tools["compareValuations"] = tools["compare_stock_valuations"];
   tools["compareStocks"] = tools["compare_stock_valuations"];
+
+  const agentScheduleExecute = context.agentScheduleExecute;
+  if (agentScheduleExecute) {
+    const scheduleTimingSchema = z.discriminatedUnion("type", [
+      z.object({ type: z.literal("cron"), cron: z.string().min(1) }),
+      z.object({ type: z.literal("interval"), intervalSeconds: z.number().int().positive() }),
+      z.object({ type: z.literal("scheduled"), time: z.number().finite() }),
+      z.object({ type: z.literal("delayed"), delayInSeconds: z.number().int().positive() }),
+    ]);
+    const goalSchema = z.object({
+      id: z.string().min(1),
+      name: z.string().min(1),
+      cron: z.string().min(1),
+      operation: z.string().min(1),
+      budgetCents: z.number().positive(),
+      enabled: z.boolean().optional(),
+      timeZone: z.string().optional(),
+      subDailyOptIn: z.boolean().optional(),
+    }).strict();
+    const scheduleInputSchema = z.object({
+      action: z.enum(["create", "list", "update", "pause", "resume", "trigger", "delete"]),
+      kind: z.enum(["sdk", "goal", "workflow-stage"]),
+      executionMode: z.enum(["deterministic", "agentic-loop"]).optional(),
+      scheduleId: z.string().min(1).optional(),
+      callback: z.string().min(1).optional(),
+      timing: scheduleTimingSchema.optional(),
+      payload: z.record(z.string(), z.unknown()).optional(),
+      goal: goalSchema.optional(),
+      jobId: z.string().min(1).optional(),
+      nodePath: z.string().min(1).optional(),
+      reason: z.string().optional(),
+      budgetCents: z.number().nonnegative().optional(),
+    }).strict();
+
+    tools["manage_agent_schedule"] = tool({
+      description:
+        "Create, list, update, pause, resume, trigger, or delete a tenant-owned schedule through the governed scheduler. The server derives the principal and tenant; excluded callbacks and unauthorized or approval-bound actions are refused.",
+      inputSchema: scheduleInputSchema,
+      execute: async (input) => {
+        const login = context.actingLogin?.()?.trim();
+        if (!login) {
+          return {
+            ok: false,
+            code: "denied",
+            reason: "A trusted acting login is required for agent schedule management.",
+          };
+        }
+        const base = {
+          principal: { login, agentId: AGENTIC_SPEND_AGENT_ID },
+          tenantId: resolveAgentScheduleTenant(context.env),
+        };
+        let request: AgentScheduleActionRequest;
+        if (input.action === "list") {
+          request = { ...base, action: "list", kind: input.kind };
+        } else if (input.action === "create" && input.kind === "sdk") {
+          if (!input.executionMode) throw new Error("Creating a schedule requires an explicit executionMode.");
+          if (!input.callback || !input.timing) {
+            throw new Error("Creating an SDK schedule requires callback and timing.");
+          }
+          request = {
+            ...base,
+            action: "create",
+            kind: "sdk",
+            executionMode: input.executionMode,
+            callback: input.callback,
+            timing: input.timing,
+            ...(input.payload ? { payload: input.payload } : {}),
+            ...(input.budgetCents !== undefined ? { budgetCents: input.budgetCents } : {}),
+          };
+        } else if (input.action === "create" && input.kind === "goal") {
+          if (!input.executionMode) throw new Error("Creating a schedule requires an explicit executionMode.");
+          if (!input.goal) throw new Error("Creating a goal schedule requires a goal definition.");
+          request = {
+            ...base,
+            action: "create",
+            kind: "goal",
+            operation: input.goal.operation,
+            goal: { ...input.goal, executionMode: input.executionMode },
+          };
+        } else if (input.action === "create" && input.kind === "workflow-stage") {
+          if (!input.executionMode) throw new Error("Creating a schedule requires an explicit executionMode.");
+          if (!input.jobId || !input.nodePath || !input.timing) {
+            throw new Error("Creating a workflow-stage schedule requires jobId, nodePath, and timing.");
+          }
+          request = {
+            ...base,
+            action: "create",
+            kind: "workflow-stage",
+            executionMode: input.executionMode,
+            jobId: input.jobId,
+            nodePath: input.nodePath,
+            timing: input.timing,
+            ...(input.reason !== undefined ? { reason: input.reason } : {}),
+            ...(input.budgetCents !== undefined ? { budgetCents: input.budgetCents } : {}),
+          };
+        } else if (input.action === "update" && input.kind === "sdk") {
+          if (input.executionMode !== undefined) {
+            throw new Error("Changing executionMode is not supported on SDK schedule updates.");
+          }
+          if (!input.scheduleId) throw new Error("Updating a schedule requires scheduleId.");
+          request = {
+            ...base,
+            action: "update",
+            kind: "sdk",
+            scheduleId: input.scheduleId,
+            ...(input.timing ? { timing: input.timing } : {}),
+            ...(input.payload ? { payload: input.payload } : {}),
+          };
+        } else if (input.action === "update" && input.kind === "goal") {
+          if (!input.scheduleId || !input.goal || !input.executionMode) {
+            throw new Error("Updating a goal schedule requires scheduleId, goal, and executionMode.");
+          }
+          request = {
+            ...base,
+            action: "update",
+            kind: "goal",
+            scheduleId: input.scheduleId,
+            goal: { ...input.goal, executionMode: input.executionMode },
+          };
+        } else if (input.action === "update" && input.kind === "workflow-stage") {
+          if (input.executionMode !== undefined) {
+            throw new Error("Changing executionMode is not supported on workflow-stage updates.");
+          }
+          if (!input.scheduleId) throw new Error("Updating a schedule requires scheduleId.");
+          request = {
+            ...base,
+            action: "update",
+            kind: "workflow-stage",
+            scheduleId: input.scheduleId,
+            ...(input.timing ? { timing: input.timing } : {}),
+            ...(input.reason !== undefined ? { reason: input.reason } : {}),
+          };
+        } else {
+          if (input.action === "create" || input.action === "update") {
+            throw new Error(`Action '${input.action}' is not supported for kind '${input.kind}'.`);
+          }
+          if (!input.scheduleId) throw new Error(`Action '${input.action}' requires scheduleId.`);
+          request = {
+            ...base,
+            action: input.action,
+            kind: input.kind,
+            scheduleId: input.scheduleId,
+          };
+        }
+        return agentScheduleExecute(request);
+      },
+    });
+  }
 
   return tools;
 }

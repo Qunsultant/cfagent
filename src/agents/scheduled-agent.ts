@@ -39,6 +39,7 @@ import {
 } from "../services/feedJobs";
 
 import {
+  AGENTIC_LOOP_UNAVAILABLE_REASON,
   type ScheduledGoal,
   type ScheduleTick,
 } from "../schedule";
@@ -2164,6 +2165,13 @@ export class ScheduledAgent extends PortThink {
         });
       };
 
+      if (goal.executionMode === "agentic-loop") {
+        tick.errors.push(`${goal.id}: ${AGENTIC_LOOP_UNAVAILABLE_REASON}`);
+        tick.jobsSkipped++;
+        await recordGoalRun("skipped", { detail: AGENTIC_LOOP_UNAVAILABLE_REASON });
+        continue;
+      }
+
       // #2840: in-flight firing guard (the screen-lock pattern,
       // extended to goals). A second submission — manual trigger
       // from another browser session, or a cron tick landing
@@ -3253,6 +3261,7 @@ export class ScheduledAgent extends PortThink {
     operation: string;
     budgetCents: number;
     enabled?: boolean;
+    executionMode?: "deterministic" | "agentic-loop";
     timeZone?: string;
     provenance?: unknown;
     /**
@@ -3271,6 +3280,9 @@ export class ScheduledAgent extends PortThink {
      */
     actor?: unknown;
   }): Promise<ScheduledGoal> {
+    if (goal.executionMode === "agentic-loop") {
+      throw new Error(AGENTIC_LOOP_UNAVAILABLE_REASON);
+    }
     const id = goal.id.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
     if (!id) throw new Error("Goal id is required.");
     if (!goal.name.trim()) throw new Error("Goal name is required.");
@@ -3322,6 +3334,7 @@ export class ScheduledAgent extends PortThink {
       operation: goal.operation,
       budgetCents: Math.floor(goal.budgetCents),
       enabled: goal.enabled !== false,
+      executionMode: goal.executionMode ?? "deterministic",
       ...(timeZone ? { timeZone } : {}),
       ...(provenance ? { provenance } : {}),
       // Issue #4235 — the opt-in is recorded only when it was

@@ -59,6 +59,7 @@ import {
   type ExecutionAccountContext,
 } from "../../services/accountBindings";
 import { TradingPlatformRegistry, tradingTypeFor } from "../../trading";
+import { AGENTIC_LOOP_UNAVAILABLE_REASON } from "../../schedule";
 import type { BrokerAccount } from "../../types";
 // Issue #5104 (DEFAULT part of B1): the brokerCatalog helpers are
 // re-exported by the trading barrel (src/trading/index.ts), which is
@@ -382,6 +383,15 @@ export function makeRunScheduleCallback(
   host: unknown
 ): SchedulesRouteContext["runScheduleCallback"] {
   return async (callback: string, payload: unknown) => {
+    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+      const executionMode = (payload as Record<string, unknown>).executionMode;
+      if (executionMode === "agentic-loop") {
+        throw new Error(AGENTIC_LOOP_UNAVAILABLE_REASON);
+      }
+      if (executionMode !== undefined && executionMode !== "deterministic") {
+        throw new Error(`Unsupported schedule executionMode: ${String(executionMode)}.`);
+      }
+    }
     const fn = (host as Record<string, unknown>)[callback];
     if (typeof fn !== "function") {
       throw new Error(`Schedule callback '${callback}' is not callable on the orchestrator.`);

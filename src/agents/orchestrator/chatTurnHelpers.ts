@@ -16,6 +16,10 @@ import type {
   AsyncJobSubmission,
   Env,
 } from "../../types";
+import type {
+  AgentScheduleActionRequest,
+  AgentScheduleActionResult,
+} from "../../services/agentScheduleCapability";
 import { createOrmPorts } from "../../data/createOrmPorts";
 import { VectorMemory } from "../../memory/vector-memory";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
@@ -54,6 +58,10 @@ export interface ChatTurnHelpersContext {
    * which may run after the tool set is built.
    */
   turnUserLogin?: () => string | undefined;
+  /** Direct Think schedule tools use the same governed capability as A2A/NLQ. */
+  agentScheduleExecute?: (
+    request: AgentScheduleActionRequest,
+  ) => Promise<AgentScheduleActionResult>;
   /**
    * #3922: optional per-login settings reader (the hosting
    * instance's mas_settings read), forwarded into the turn's
@@ -133,6 +141,9 @@ export function createTurnTools(ctx: ChatTurnHelpersContext, requestId: string):
     // The principal above is unchanged; this carrier exists so a
     // door can name the acting user, not just the instance.
     actingLogin: ctx.turnUserLogin,
+    ...(ctx.agentScheduleExecute
+      ? { agentScheduleExecute: ctx.agentScheduleExecute }
+      : {}),
     // #2428 (Agent Mesh S17): the trace carrier the door/job
     // paths resolve through (see McpToolContext.traceparent).
     traceparent: ctx.turnTraceparent,

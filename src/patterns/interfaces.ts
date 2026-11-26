@@ -200,6 +200,14 @@ export interface McpToolContext {
    */
   actingLogin?: () => string | undefined;
   /**
+   * Issue #3122: the trusted host-side schedule capability for direct
+   * Think tool calls. The tool schema never accepts principal or tenant
+   * identity; the host derives both before invoking this callback.
+   */
+  agentScheduleExecute?: (
+    request: import("../services/agentScheduleCapability").AgentScheduleActionRequest,
+  ) => Promise<import("../services/agentScheduleCapability").AgentScheduleActionResult>;
+  /**
    * #2428 (Agent Mesh S17): resolver for the current mesh
    * trace's W3C traceparent, populated ONLY by a server-side
    * context owner — the chat turn (minted on the turn stash)

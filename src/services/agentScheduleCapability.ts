@@ -42,7 +42,10 @@ import {
   CREATABLE_SCHEDULE_CALLBACKS,
   INTERNAL_RECORDED_SCHEDULE_CALLBACKS,
 } from "../agents/orchestrator/scheduleCallbacks";
-import type { ScheduleProvenance } from "../schedule";
+import {
+  AGENTIC_LOOP_UNAVAILABLE_REASON,
+  type ScheduleProvenance,
+} from "../schedule";
 import type { Permission } from "../security/authorization";
 import {
   authorize,
@@ -59,12 +62,23 @@ import type { AgentScheduleItem } from "../types";
 import type { Env } from "../types";
 import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
 import { createPendingScheduleApprovalPort } from "../data/doSqlitePendingScheduleApprovalsAdapter";
-import type { UnifiedStoreLike } from "./unifiedScheduleManagement";
+import type {
+  UnifiedOpResult,
+  UnifiedStoreLike,
+} from "./unifiedScheduleManagement";
 import type { UnifiedScheduleRecord } from "../data/unifiedSchedulePorts";
 import type { JobNodeConfig } from "../data/jobPipelinePorts";
 import { isExternalSendStage } from "./workflowStageSchedule";
 import type { ResolvedWorkflowStage } from "./workflowStageSchedule";
-import { pausedScreenScheduleToRecord, screenScheduleToRecord } from "./unifiedScheduleManagement";
+import {
+  pauseUnifiedSchedule,
+  pausedScreenScheduleToRecord,
+  resumeUnifiedSchedule,
+  screenScheduleToRecord,
+  triggerUnifiedSchedule,
+  updateUnifiedSchedule,
+  type ScheduleAlarms,
+} from "./unifiedScheduleManagement";
 import { resolveEnvironmentConfig } from "../config/environment";
 import {
   DEFAULT_SCHEDULE_MIN_INTERVAL_SECONDS,
@@ -577,12 +591,19 @@ export interface AgentSdkScheduleAdapter {
   update?(id: string, input: { timing?: AgentSdkTiming; payload?: unknown }): Promise<AgentScheduleItem>;
 }
 
+export interface AgentSdkScheduleManagement {
+  alarms: ScheduleAlarms;
+  runCallback(callback: string, payload: unknown): Promise<void>;
+  nowIso(): string;
+  nowMs(): number;
+}
+
 export interface AgentGoalScheduleAdapter {
   list(): Promise<Array<Record<string, unknown>>>;
-  add(goal: Record<string, unknown>): Promise<Record<string, unknown>>;
-  remove(id: string): Promise<boolean>;
-  setEnabled(id: string, enabled: boolean): Promise<boolean>;
-  trigger(id: string): Promise<unknown>;
+  add(goal: Record<string, unknown>, actor?: string): Promise<Record<string, unknown>>;
+  remove(id: string, actor?: string): Promise<boolean>;
+  setEnabled(id: string, enabled: boolean, actor?: string): Promise<boolean>;
+  trigger(id: string, actor?: string): Promise<unknown>;
 }
 
 /**
@@ -604,6 +625,7 @@ export interface AgentWorkflowStageScheduleAdapter {
     jobId: string;
     nodePath: string;
     timing: AgentSdkTiming;
+    executionMode?: "deterministic" | "agentic-loop";
     reason?: string;
     ownerLogin?: string;
     provenance?: ScheduleProvenance;
@@ -652,6 +674,7 @@ export type AgentScheduleActionRequest =
       kind: "sdk";
       principal: AgentSchedulePrincipal;
       tenantId: string;
+      executionMode?: "deterministic" | "agentic-loop";
       callback: string;
       timing: AgentSdkTiming;
       payload?: unknown;
@@ -683,6 +706,7 @@ export type AgentScheduleActionRequest =
       jobId: string;
       nodePath: string;
       timing: AgentSdkTiming;
+      executionMode?: "deterministic" | "agentic-loop";
       reason?: string;
       budgetCents?: number;
       isExternalSend?: boolean;
@@ -900,6 +924,23 @@ export async function executeAgentScheduleAction(
     classifyAgentScheduleRequest(input, deps.config, { arming: isArmingAction });
 
   try {
+    let requestedExecutionMode: unknown;
+    if (
+      (request.action === "create" || request.action === "update") &&
+      request.kind === "goal"
+    ) {
+      requestedExecutionMode = (request.goal as Record<string, unknown>).executionMode;
+    } else if (request.action === "create") {
+      requestedExecutionMode = request.executionMode;
+    }
+    if (requestedExecutionMode === "agentic-loop") {
+      return deny(
+        AGENTIC_LOOP_UNAVAILABLE_REASON,
+        request.action === "update" ? request.scheduleId : null,
+        "unsupported",
+      );
+    }
+
     // --- Load the target for non-create actions (existence + ownership + classification inputs).
     let targetSdk: AgentScheduleItem | undefined;
     let targetGoal: Record<string, unknown> | undefined;
@@ -1207,6 +1248,7 @@ export async function executeAgentScheduleAction(
         jobId: request.jobId,
         nodePath: request.nodePath,
         timing: request.timing,
+        executionMode: request.executionMode ?? "deterministic",
         reason: request.reason,
         ownerLogin: principal.login,
         provenance,
@@ -1231,8 +1273,15 @@ export async function executeAgentScheduleAction(
       if (!deps.stores.sdk) return deny("No SDK schedule store is available on this channel.", null);
       const payload =
         request.payload && typeof request.payload === "object" && !Array.isArray(request.payload)
-          ? { ...(request.payload as Record<string, unknown>), provenance }
-          : { provenance };
+          ? {
+              ...(request.payload as Record<string, unknown>),
+              executionMode: request.executionMode ?? "deterministic",
+              provenance,
+            }
+          : {
+              executionMode: request.executionMode ?? "deterministic",
+              provenance,
+            };
       const created = await deps.stores.sdk.create({ timing: request.timing, callback: request.callback, payload });
       await recordOutcome("success", created.id, `agent ${principal.agentId} (${principal.login}) created schedule ${created.id}`);
       const event = auditEventFor(action);
@@ -1242,7 +1291,7 @@ export async function executeAgentScheduleAction(
     if (request.action === "create" && request.kind === "goal") {
       if (!deps.stores.goals) return deny("No goal schedule store is available on this channel.", null);
       const goal = { ...(request.goal as Record<string, unknown>), provenance };
-      const created = await deps.stores.goals.add(goal);
+      const created = await deps.stores.goals.add(goal, principal.login);
       const createdId = typeof created.id === "string" ? created.id : String((request.goal as Record<string, unknown>).id ?? "");
       await recordOutcome("success", createdId, `agent ${principal.agentId} (${principal.login}) created goal ${createdId}`);
       return { ok: true, scheduleId: createdId, schedule: created };
@@ -1283,7 +1332,28 @@ export async function executeAgentScheduleAction(
       if (request.action === "update") {
         const updateReq = request as Extract<AgentScheduleActionRequest, { action: "update"; kind: "sdk" }>;
         if (sdk.update) {
-          const updated = await sdk.update(scheduleId, { timing: updateReq.timing, payload: updateReq.payload });
+          const priorPayload =
+            targetSdk?.payload && typeof targetSdk.payload === "object" && !Array.isArray(targetSdk.payload)
+              ? targetSdk.payload as Record<string, unknown>
+              : {};
+          const suppliedPayload =
+            updateReq.payload && typeof updateReq.payload === "object" && !Array.isArray(updateReq.payload)
+              ? updateReq.payload as Record<string, unknown>
+              : {};
+          const payload = {
+            ...priorPayload,
+            ...suppliedPayload,
+            ...(priorPayload.provenance !== undefined
+              ? { provenance: priorPayload.provenance }
+              : {}),
+            ...(priorPayload.executionMode !== undefined
+              ? { executionMode: priorPayload.executionMode }
+              : {}),
+          };
+          const updated = await sdk.update(scheduleId, {
+            timing: updateReq.timing,
+            payload: Object.keys(payload).length > 0 ? payload : updateReq.payload,
+          });
           await recordOutcome("success", scheduleId, `agent ${principal.agentId} (${principal.login}) updated schedule ${scheduleId}`);
           deps.audit("schedule.updated", { scheduleId, agentId: principal.agentId, principal: principal.login, origin: "agent" });
           return { ok: true, scheduleId, schedule: updated };
@@ -1350,34 +1420,34 @@ export async function executeAgentScheduleAction(
       const goals = deps.stores.goals;
       if (!goals) return deny("No goal schedule store is available on this channel.", scheduleId);
       if (request.action === "delete") {
-        const removed = await goals.remove(scheduleId);
+        const removed = await goals.remove(scheduleId, principal.login);
         if (!removed) return { ok: false, code: "not-found", reason: `Goal '${scheduleId}' was not found.` };
         await recordOutcome("success", scheduleId, `agent ${principal.agentId} (${principal.login}) deleted goal ${scheduleId}`);
         return { ok: true, scheduleId };
       }
       if (request.action === "pause") {
-        const ok = await goals.setEnabled(scheduleId, false);
+        const ok = await goals.setEnabled(scheduleId, false, principal.login);
         if (!ok) return { ok: false, code: "not-found", reason: `Goal '${scheduleId}' was not found.` };
         await recordOutcome("success", scheduleId, `agent ${principal.agentId} (${principal.login}) paused goal ${scheduleId}`);
         return { ok: true, scheduleId };
       }
       if (request.action === "resume") {
-        const ok = await goals.setEnabled(scheduleId, true);
+        const ok = await goals.setEnabled(scheduleId, true, principal.login);
         if (!ok) return { ok: false, code: "not-found", reason: `Goal '${scheduleId}' was not found.` };
         await recordOutcome("success", scheduleId, `agent ${principal.agentId} (${principal.login}) resumed goal ${scheduleId}`);
         return { ok: true, scheduleId };
       }
       if (request.action === "trigger") {
-        await goals.trigger(scheduleId);
+        await goals.trigger(scheduleId, principal.login);
         await recordOutcome("success", scheduleId, `agent ${principal.agentId} (${principal.login}) triggered goal ${scheduleId}`);
         return { ok: true, scheduleId };
       }
       // update (goal): remove + re-add under the same id (cancel+recreate, #273 shape).
       if (request.action === "update") {
         const updateReq = request as Extract<AgentScheduleActionRequest, { action: "update"; kind: "goal" }>;
-        await goals.remove(scheduleId);
+        await goals.remove(scheduleId, principal.login);
         const goal = { ...(updateReq.goal as Record<string, unknown>), provenance };
-        const created = await goals.add(goal);
+        const created = await goals.add(goal, principal.login);
         const createdId = typeof created.id === "string" ? created.id : scheduleId;
         await recordOutcome("success", createdId, `agent ${principal.agentId} (${principal.login}) updated goal ${scheduleId}`);
         return { ok: true, scheduleId: createdId, schedule: created };
@@ -1537,7 +1607,18 @@ export async function removeAgentSdkScheduleRecord(
 export function nlqPortToAgentSdkAdapter(
   port: NLQSchedulingPort,
   store?: UnifiedStoreLike,
+  management?: AgentSdkScheduleManagement,
 ): AgentSdkScheduleAdapter {
+  const managementDeps = management && store
+    ? { store, alarms: management.alarms }
+    : undefined;
+  const managedRecord = async (
+    operation: Promise<UnifiedOpResult>,
+  ): Promise<AgentScheduleItem> => {
+    const result = await operation;
+    if (!result.ok) throw new Error(result.error);
+    return unifiedRecordToAgentSdkScheduleItem(result.record);
+  };
   // Issue #6482 — paused schedules have no live alarm, so list/get
   // union the port's live alarms with the store's records (a live
   // alarm wins when both name the same id).
@@ -1580,6 +1661,47 @@ export function nlqPortToAgentSdkAdapter(
       }
       return false;
     },
+    ...(managementDeps && management
+      ? {
+          pause: (id: string) =>
+            managedRecord(pauseUnifiedSchedule(managementDeps, id, management.nowIso())),
+          resume: (id: string) =>
+            managedRecord(resumeUnifiedSchedule(managementDeps, id, management.nowIso())),
+          trigger: async (id: string) => {
+            const result = await triggerUnifiedSchedule(
+              managementDeps,
+              id,
+              management.runCallback,
+            );
+            if (!result.ok) throw new Error(result.error);
+            return { scheduleId: result.scheduleId, callback: result.callback };
+          },
+          update: async (
+            id: string,
+            input: { timing?: AgentSdkTiming; payload?: unknown },
+          ) => {
+            const timing = input.timing;
+            if (timing && timing.type !== "cron" && timing.type !== "interval") {
+              throw new Error("Schedule updates support cron and interval timing only.");
+            }
+            return managedRecord(
+              updateUnifiedSchedule(
+                managementDeps,
+                id,
+                {
+                  ...(timing
+                    ? timing.type === "cron"
+                      ? { scheduleType: "cron", cron: timing.cron }
+                      : { scheduleType: "interval", intervalSeconds: timing.intervalSeconds }
+                    : {}),
+                  ...(input.payload !== undefined ? { payload: input.payload } : {}),
+                },
+                management.nowMs(),
+              ),
+            );
+          },
+        }
+      : {}),
   };
 }
 
