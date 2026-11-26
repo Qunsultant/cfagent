@@ -577,11 +577,15 @@ describe("rule of three: margins and layout containers (#4913)", () => {
     // audience, ttl, label), the ApiKeysPanel mint-row pattern again —
     // plus issue #6482: the ScheduleControlsPanel's three Stack
     // wrappers (floor control, firing control, rate-alert control),
-    // the same grow-to-fill-a-Flex-row pattern.
+    // the same grow-to-fill-a-Flex-row pattern — plus #6503: the
+    // ScheduleControlsPanel's fourth Stack wrapper, the
+    // missed-schedule grace display (schedule.missedScheduleGraceMinutes),
+    // the same grow-to-fill-a-Flex-row pattern (label grows, value sits
+    // at the row end).
     const attrs = classAttrTokens4913(clientTsx());
     const grow = attrs.filter((a) => a.tokens.includes("ui-grow")).length;
     const clip = attrs.filter((a) => a.tokens.includes("ui-clip")).length;
-    expect(grow).toBe(16);
+    expect(grow).toBe(17);
     expect(clip).toBe(1);
   });
 });

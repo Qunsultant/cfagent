@@ -1104,7 +1104,8 @@ const EXPECTED_INVENTORY = [
   "handleScreenerResearchRoutes :: endsWith(\"/research/report.xlsx\")",
   "handleScreenerResearchRoutes :: endsWith(\"/research/report.csv\")",
   "handleScreenerResearchRoutes :: endsWith(\"/research/run\")",
-  "handleScreenerResearchRoutes :: endsWith(\"/research/scheduled-tick\")",
+  // Issue #6503: POST /research/scheduled-tick is retired — nightly
+  // research is a stored schedule fired through runResearchSchedule.
   "handleScreenerResearchRoutes :: endsWith(\"/research/latest\")",
   "handleScreenerResearchRoutes :: endsWith(\"/research/history\")",
   "handleScreenerResearchRoutes :: endsWith(\"/research/track-record\")",

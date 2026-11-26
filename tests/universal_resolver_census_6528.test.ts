@@ -12,7 +12,7 @@
  *    function — a 6th fails);
  *  - a new definition whose NAME already exists in the baseline at another
  *    file fails as a same-question duplicate;
- *  - the resolver definition total above its baselined 596 fails;
+ *  - the resolver definition total above its baselined 622 fails;
  *  - decreases and vanished rows pass — that is the shrink the programme
  *    wants, and retiring a duplicate means lowering or removing its
  *    baseline entry in the same PR.
@@ -110,6 +110,42 @@
  * Disposition: CANONICAL — it is the single home for the
  * instance-scope question, the one the engine resolves against.
  *
+ * Issue #6503 (2026-11-26) raises the baseline 597 → 622 with 29 new
+ * rows and removes 4 rows (net +25). The 29 are the no-derived
+ * consolidation's externalized scheduling resolvers, each the single
+ * home for a NEW question no existing resolver answers (a managed
+ * setting's managed > env > default cascade, or the G1 level-rule
+ * gate): step-13 externalization — `resolveHeartbeatIntervalSecondsFrom`,
+ * `resolveHeartbeatWatchdogStaleAfterMsFrom`,
+ * `resolveHeartbeatWatchdogConfigFrom` (`src/config/heartbeatWatchdog.ts`),
+ * `resolveMissedScheduleGraceMinutesFrom` /
+ * `resolveMissedScheduleGraceMsFrom` (`src/config/missedScheduleAlert.ts`),
+ * `resolveResearchScheduleUtcHour` (`src/config/researchJobConfig.ts`),
+ * `resolveScheduleDueGuardMs` / `resolveScheduleDueGuardMsFromEnv`
+ * (`src/config/scheduleDueGuard.ts`), `resolveScheduleStartPaused`
+ * (`src/config/scheduleStartPaused.ts`), `resolveStaleRunningReapMs` /
+ * `resolveStaleSweepBatchLimit` / `resolveStaleAsyncJobReapPolicy`
+ * (`src/config/staleAsyncJobReap.ts`), `resolveGoalRunJobRunRecordCap` /
+ * `resolveGoalRunTickHistoryCap` / `resolveGoalRunRetention`
+ * (`src/config/goalRunRetention.ts`), `resolveStaleReapPolicy`
+ * (`src/agents/orchestrator/asyncJobs.ts`), and the nine
+ * `resolveEffective*` managed-leg resolvers in
+ * `src/services/scheduleControls.ts` (one per managed key, delegating
+ * to the config `*From` resolvers above); G1 gate —
+ * `resolveScheduleControlCaller` / `resolveScheduleControlLevel`
+ * (`src/agents/routes/schedules.ts`); firing-rate alert —
+ * `resolveEffectiveScheduleFiringRateAlertThreshold` /
+ * `resolveEffectiveScheduleFiringRateAlertWindowMinutes`
+ * (`src/config/scheduleFiringRateAlert.ts`). All 29 are CANONICAL.
+ * The 4 removed rows are the retired heartbeat due-hour mechanism
+ * (`resolveDueHourUtc`, `resolveHeartbeatDueCheckConfig`,
+ * `resolveHeartbeatRenewalDueHourUtc`,
+ * `resolveHeartbeatRetentionDueHourUtc` in
+ * `src/config/heartbeatWatchdog.ts`): step 13 retires the renewal /
+ * retention due-hour checks — the duties are stored monthly
+ * schedules now, not daily due-checks inside the heartbeat tick —
+ * so those questions no longer exist.
+ *
  * Exclusions (recorded as data, not follow-up notes — #3786 Scope):
  * - Aliases (0 definitions): `resolveTradeEnvironmentFromSettings`
  *   (`brokerEnvironment.ts:105`), `resolveCanonicalWorkspacePath`
@@ -179,6 +215,7 @@ const BASELINE: Array<[string, string, Kind, number, Disposition]> = [
   ["src/agents/orchestrator/asyncJobs.ts", "resolveFeedDispatchPipelineRunId", "standalone", 1, "CANONICAL"],
   ["src/agents/orchestrator/asyncJobs.ts", "resolveJobFailureCode", "standalone", 1, "CANONICAL"],
   ["src/agents/orchestrator/asyncJobs.ts", "resolveJobProvenance", "standalone", 1, "CANONICAL"],
+  ["src/agents/orchestrator/asyncJobs.ts", "resolveStaleReapPolicy", "standalone", 1, "CANONICAL"],
   ["src/agents/orchestrator/asyncJobs.ts", "resolveSubmissionTenant", "standalone", 1, "CANONICAL"],
   ["src/agents/orchestrator/chatAwaitBudget.ts", "resolveChatAwaitDeadlineMs", "standalone", 1, "CANONICAL"],
   ["src/agents/orchestrator/chatAwaitBudget.ts", "resolveChatAwaitPollMs", "standalone", 1, "CANONICAL"],
@@ -230,6 +267,8 @@ const BASELINE: Array<[string, string, Kind, number, Disposition]> = [
   ["src/agents/routes/premium.ts", "resolvePremiumRouteMode", "standalone", 1, "CANONICAL"],
   ["src/agents/routes/premium.ts", "resolvePremiumTier", "standalone", 1, "CANONICAL"],
   ["src/agents/routes/schedules.ts", "resolveFlagManagedBy", "standalone", 1, "CANONICAL"],
+  ["src/agents/routes/schedules.ts", "resolveScheduleControlCaller", "standalone", 1, "CANONICAL"],
+  ["src/agents/routes/schedules.ts", "resolveScheduleControlLevel", "standalone", 1, "CANONICAL"],
   ["src/agents/routes/schedules.ts", "resolveScheduleFlagsCaller", "standalone", 1, "CANONICAL"],
   ["src/agents/routes/schedules.ts", "resolveTrustedScheduleIdentity", "standalone", 1, "CANONICAL"],
   ["src/agents/routes/screenerResearch.ts", "resolveResearchD1", "standalone", 1, "CANONICAL"],
@@ -290,13 +329,15 @@ const BASELINE: Array<[string, string, Kind, number, Disposition]> = [
   ["src/config/etradeModes.ts", "resolveSwitch", "standalone", 1, "DUPLICATE-NAME"],
   ["src/config/goalChainModes.ts", "resolveGoalCompileMode", "standalone", 1, "CANONICAL"],
   ["src/config/goalChainModes.ts", "resolveSwitch", "standalone", 1, "DUPLICATE-NAME"],
-  ["src/config/heartbeatWatchdog.ts", "resolveDueHourUtc", "standalone", 1, "CANONICAL"],
-  ["src/config/heartbeatWatchdog.ts", "resolveHeartbeatDueCheckConfig", "standalone", 1, "CANONICAL"],
+  ["src/config/goalRunRetention.ts", "resolveGoalRunJobRunRecordCap", "standalone", 1, "CANONICAL"],
+  ["src/config/goalRunRetention.ts", "resolveGoalRunRetention", "standalone", 1, "CANONICAL"],
+  ["src/config/goalRunRetention.ts", "resolveGoalRunTickHistoryCap", "standalone", 1, "CANONICAL"],
   ["src/config/heartbeatWatchdog.ts", "resolveHeartbeatIntervalSeconds", "standalone", 1, "CANONICAL"],
-  ["src/config/heartbeatWatchdog.ts", "resolveHeartbeatRenewalDueHourUtc", "standalone", 1, "CANONICAL"],
-  ["src/config/heartbeatWatchdog.ts", "resolveHeartbeatRetentionDueHourUtc", "standalone", 1, "CANONICAL"],
+  ["src/config/heartbeatWatchdog.ts", "resolveHeartbeatIntervalSecondsFrom", "standalone", 1, "CANONICAL"],
   ["src/config/heartbeatWatchdog.ts", "resolveHeartbeatWatchdogConfig", "standalone", 1, "CANONICAL"],
+  ["src/config/heartbeatWatchdog.ts", "resolveHeartbeatWatchdogConfigFrom", "standalone", 1, "CANONICAL"],
   ["src/config/heartbeatWatchdog.ts", "resolveHeartbeatWatchdogStaleAfterMs", "standalone", 1, "CANONICAL"],
+  ["src/config/heartbeatWatchdog.ts", "resolveHeartbeatWatchdogStaleAfterMsFrom", "standalone", 1, "CANONICAL"],
   ["src/config/ibkr.ts", "resolveIbkrMcpUrl", "standalone", 1, "CANONICAL"],
   ["src/config/jobDefinitionCatalog.ts", "resolveJobDefinitionSpec", "standalone", 1, "CANONICAL"],
   ["src/config/jobDefinitionCatalog.ts", "resolveNumberField", "standalone", 1, "CANONICAL"],
@@ -317,7 +358,9 @@ const BASELINE: Array<[string, string, Kind, number, Disposition]> = [
   ["src/config/marketDataModes.ts", "resolveMarketDataRestSwitch", "standalone", 1, "CANONICAL"],
   ["src/config/marketDataModes.ts", "resolveMarketDataSnapshotMode", "standalone", 1, "CANONICAL"],
   ["src/config/marketDataModes.ts", "resolveSwitch", "standalone", 1, "DUPLICATE-NAME"],
+  ["src/config/missedScheduleAlert.ts", "resolveMissedScheduleGraceMinutesFrom", "standalone", 1, "CANONICAL"],
   ["src/config/missedScheduleAlert.ts", "resolveMissedScheduleGraceMs", "standalone", 1, "CANONICAL"],
+  ["src/config/missedScheduleAlert.ts", "resolveMissedScheduleGraceMsFrom", "standalone", 1, "CANONICAL"],
   ["src/config/nlqModes.ts", "resolveNlqMode", "standalone", 1, "CANONICAL"],
   ["src/config/orderCapabilities.ts", "resolveOrderType", "standalone", 1, "CANONICAL"],
   ["src/config/orderCapabilities.ts", "resolveTimeInForce", "standalone", 1, "CANONICAL"],
@@ -346,6 +389,7 @@ const BASELINE: Array<[string, string, Kind, number, Disposition]> = [
   ["src/config/quoteModes.ts", "resolveQuoteYahooOpenMode", "standalone", 1, "CANONICAL"],
   ["src/config/quoteModes.ts", "resolveSwitch", "standalone", 1, "DUPLICATE-NAME"],
   ["src/config/researchJobConfig.ts", "resolveResearchJobConfig", "standalone", 1, "CANONICAL"],
+  ["src/config/researchJobConfig.ts", "resolveResearchScheduleUtcHour", "standalone", 1, "CANONICAL"],
   ["src/config/researchJobConfig.ts", "resolveResearchSettlementWaitMs", "standalone", 1, "CANONICAL"],
   ["src/config/researchJobConfig.ts", "resolveResearchStageModes", "standalone", 1, "CANONICAL"],
   ["src/config/researchJobConfig.ts", "resolveResearchStageRetryBuckets", "standalone", 1, "CANONICAL"],
@@ -356,7 +400,11 @@ const BASELINE: Array<[string, string, Kind, number, Disposition]> = [
   ["src/config/restTwinsModes.ts", "resolveSnapIdentity", "standalone", 1, "CANONICAL"],
   ["src/config/runLedgerModes.ts", "resolveRunLedgerDefaultFilter", "standalone", 1, "CANONICAL"],
   ["src/config/runLedgerModes.ts", "resolveRunLedgerFilters", "standalone", 1, "CANONICAL"],
+  ["src/config/scheduleDueGuard.ts", "resolveScheduleDueGuardMs", "standalone", 1, "CANONICAL"],
+  ["src/config/scheduleDueGuard.ts", "resolveScheduleDueGuardMsFromEnv", "standalone", 1, "CANONICAL"],
   ["src/config/scheduleFiringKillSwitch.ts", "resolveScheduleFiringEnabled", "standalone", 1, "CANONICAL"],
+  ["src/config/scheduleFiringRateAlert.ts", "resolveEffectiveScheduleFiringRateAlertThreshold", "standalone", 1, "CANONICAL"],
+  ["src/config/scheduleFiringRateAlert.ts", "resolveEffectiveScheduleFiringRateAlertWindowMinutes", "standalone", 1, "CANONICAL"],
   ["src/config/scheduleFiringRateAlert.ts", "resolveScheduleFiringRateAlertThreshold", "standalone", 1, "CANONICAL"],
   ["src/config/scheduleFiringRateAlert.ts", "resolveScheduleFiringRateAlertWindowMinutes", "standalone", 1, "CANONICAL"],
   ["src/config/scheduleFrequencyFloor.ts", "resolveScheduleMinIntervalSeconds", "standalone", 1, "CANONICAL"],
@@ -371,6 +419,7 @@ const BASELINE: Array<[string, string, Kind, number, Disposition]> = [
   ["src/config/scheduleSections.ts", "resolveSectionDefault", "standalone", 1, "CANONICAL"],
   ["src/config/scheduleSections.ts", "resolveSections", "standalone", 1, "CANONICAL"],
   ["src/config/scheduleSourceModes.ts", "resolveScheduleSourceFilters", "standalone", 1, "CANONICAL"],
+  ["src/config/scheduleStartPaused.ts", "resolveScheduleStartPaused", "standalone", 1, "CANONICAL"],
   ["src/config/scheduledJobAlert.ts", "resolveScheduledJobAlertThreshold", "standalone", 1, "CANONICAL"],
   ["src/config/schemaMigrationModes.ts", "resolveSchemaMigrationMode", "standalone", 1, "CANONICAL"],
   ["src/config/schemaMigrationModes.ts", "resolveSchemaMigrationModeFromEnv", "standalone", 1, "CANONICAL"],
@@ -384,6 +433,9 @@ const BASELINE: Array<[string, string, Kind, number, Disposition]> = [
   ["src/config/sessionStoreConfig.ts", "resolveSessionStoreConfig", "standalone", 1, "CANONICAL"],
   ["src/config/shardPacing.ts", "resolveShardPacing", "standalone", 1, "CANONICAL"],
   ["src/config/sloThresholds.ts", "resolveSloThresholds", "standalone", 1, "CANONICAL"],
+  ["src/config/staleAsyncJobReap.ts", "resolveStaleAsyncJobReapPolicy", "standalone", 1, "CANONICAL"],
+  ["src/config/staleAsyncJobReap.ts", "resolveStaleRunningReapMs", "standalone", 1, "CANONICAL"],
+  ["src/config/staleAsyncJobReap.ts", "resolveStaleSweepBatchLimit", "standalone", 1, "CANONICAL"],
   ["src/config/stuckRunAlert.ts", "resolveStuckRunAlertThresholdMs", "standalone", 1, "CANONICAL"],
   ["src/config/turnStepTimeout.ts", "resolveTurnStepTimeoutMs", "standalone", 1, "CANONICAL"],
   ["src/config/vocabulary.ts", "resolveJobSubset", "standalone", 1, "CANONICAL"],
@@ -631,8 +683,17 @@ const BASELINE: Array<[string, string, Kind, number, Disposition]> = [
   ["src/services/researchVenue.ts", "resolveResearchVenue", "standalone", 1, "CANONICAL"],
   ["src/services/runBrokerContext.ts", "resolveRunBrokerContext", "standalone", 1, "CANONICAL"],
   ["src/services/runDetails.ts", "resolveRunDetailMessage", "standalone", 1, "DUPLICATE-NAME"],
+  ["src/services/scheduleControls.ts", "resolveEffectiveGoalRunRetention", "standalone", 1, "CANONICAL"],
+  ["src/services/scheduleControls.ts", "resolveEffectiveHeartbeatInterval", "standalone", 1, "CANONICAL"],
+  ["src/services/scheduleControls.ts", "resolveEffectiveHeartbeatWatchdogStaleAfter", "standalone", 1, "CANONICAL"],
+  ["src/services/scheduleControls.ts", "resolveEffectiveMissedScheduleGrace", "standalone", 1, "CANONICAL"],
+  ["src/services/scheduleControls.ts", "resolveEffectiveResearchScheduleUtcHour", "standalone", 1, "CANONICAL"],
+  ["src/services/scheduleControls.ts", "resolveEffectiveScheduleDueGuard", "standalone", 1, "CANONICAL"],
   ["src/services/scheduleControls.ts", "resolveEffectiveScheduleFiringEnabled", "standalone", 1, "CANONICAL"],
+  ["src/services/scheduleControls.ts", "resolveEffectiveScheduleFiringRateAlert", "standalone", 1, "CANONICAL"],
   ["src/services/scheduleControls.ts", "resolveEffectiveScheduleFloor", "standalone", 1, "CANONICAL"],
+  ["src/services/scheduleControls.ts", "resolveEffectiveScheduleStartPaused", "standalone", 1, "CANONICAL"],
+  ["src/services/scheduleControls.ts", "resolveEffectiveStaleAsyncJobReap", "standalone", 1, "CANONICAL"],
   ["src/services/scheduleControls.ts", "resolveScheduleControlsView", "standalone", 1, "CANONICAL"],
   ["src/services/scheduleManagement.deprecated.ts", "resolveScheduleUpdate", "standalone", 1, "DUPLICATE-NAME"],
   ["src/services/scheduledEffectiveMode.ts", "resolveScheduledEffectiveMode", "standalone", 1, "CANONICAL"],
@@ -1176,10 +1237,10 @@ describe("universal resolver census (#6528 Phase 1)", () => {
   it("the distinct-question count is a range, never an exact number", () => {
     expect(QUESTION_RANGE_LOW).toBeLessThan(QUESTION_CENTRAL_ESTIMATE);
     expect(QUESTION_CENTRAL_ESTIMATE).toBeLessThan(QUESTION_RANGE_HIGH);
-    // Implied copies at the seeded total: 597 − 320 = 277 … 597 − 285 = 312
-    // (the seed moved 596 → 597 with #6547's one CANONICAL row).
-    expect(baselineTotal - QUESTION_RANGE_HIGH).toBe(277);
-    expect(baselineTotal - QUESTION_RANGE_LOW).toBe(312);
+    // Implied copies at the seeded total: 622 − 320 = 302 … 622 − 285 = 337
+    // (the seed moved 597 → 622 with #6503's 29 CANONICAL rows − 4 retired rows).
+    expect(baselineTotal - QUESTION_RANGE_HIGH).toBe(302);
+    expect(baselineTotal - QUESTION_RANGE_LOW).toBe(337);
   });
 
   it("no test-only or scripts-only resolver is counted as production", () => {
@@ -1238,12 +1299,12 @@ describe("universal resolver census (#6528 Phase 1)", () => {
       expect(count, `${kind} count`).toBeGreaterThan(0);
       expect(DISPOSITIONS.has(disposition), `unknown disposition ${disposition}`).toBe(true);
     }
-    expect(baselineTotal).toBe(597);
+    expect(baselineTotal).toBe(622);
     const byKind = new Map<Kind, number>();
     for (const [, , kind, count] of BASELINE) {
       byKind.set(kind, (byKind.get(kind) ?? 0) + count);
     }
-    expect(byKind.get("standalone")).toBe(566);
+    expect(byKind.get("standalone")).toBe(591);
     expect(byKind.get("class-method")).toBe(18);
     expect(byKind.get("resolver-type")).toBe(9);
     expect(byKind.get("interface-method")).toBe(4);
