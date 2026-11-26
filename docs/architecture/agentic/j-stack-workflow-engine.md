@@ -1130,6 +1130,23 @@ never pass a policy — operator control of retry budgets is filed as
 (`src/services/resilience.ts:37`) without an injected RNG, so it uses
 `Math.random` — a determinism gap filed as #5280.
 
+**Poison runs land in the DLQ (#3967).** A unit whose failure is a CODED
+error the retry cannot fix (`job_config_invalid`, `job_shards_not_configured`,
+`stage_port_unavailable` — everything but `job_step_failed`) is not retried:
+the engine marks the unit failed and, when the host supplies
+`JobPipelineDeps.deadLetterRun`, hands it a `JobPoisonLanding` — job, run,
+node path, stage id, unit, code, message. The host maps that onto the
+platform's ONE dead-letter store (`src/services/jobPipelineDeadLetter.ts`,
+source `job-pipeline`, reason `poison_run`), the same store the queue drops
+land in, so an operator lists poison runs and dropped messages on one surface
+(GET `/api/ops/dlq/records`). The record carries **no envelope**: a run is not
+a queue message, so queue replay refuses it (`no_envelope`) rather than
+pretending to re-drive it — a poison run's remedy is the retry route, which
+starts a fresh run on the current definition. The landing is best-effort by
+contract: a failing sink is logged and swallowed, so the run's own coded
+error is never masked by the record's failure, and a host with no sink (or no
+D1 binding) keeps exactly the old behaviour.
+
 **Replay** is `replayJob` (`src/services/jobPipelineEngine.ts:914`):
 it replays a run on the same instance identity, proven via
 `runWorkflowInstanceId` (#4454). Replay is not a re-run from scratch

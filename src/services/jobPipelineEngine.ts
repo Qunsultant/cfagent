@@ -386,6 +386,29 @@ export type JobPipelineTerminateRun = (request: {
 }) => Promise<void>;
 
 /** Issue #6552 — the platform rewind a host exposes for a live run's instance. */
+/**
+ * Issue #3967 — one poison landing: everything an operator needs to find the
+ * run, the stage and the reason, and to choose the remedy. The engine hands
+ * this to the host; mapping it onto the DLQ store's own shape is the host's
+ * job (src/services/jobPipelineDeadLetter.ts), so the engine never learns the
+ * store's schema or its queue vocabulary.
+ */
+export interface JobPoisonLanding {
+  jobId: string;
+  runId: string;
+  /** The node path the failing stage belongs to ("" for the root). */
+  nodePath: string;
+  /** The stage id in the engine's own namespace (`job:<nodePath>`). */
+  stageId: string;
+  unitId: string;
+  /** The coded error — the reason this run is not retried. */
+  code: string;
+  message: string;
+  at: string;
+}
+
+export type JobPoisonLandingSink = (landing: JobPoisonLanding) => Promise<void>;
+
 export type JobPipelineRestartRun = (request: {
   jobId: string;
   runId: string;
@@ -465,6 +488,14 @@ export interface JobPipelineDeps {
    * ⇒ restartFromStage refuses by name; it never falls back to a guess.
    */
   restartRun?: JobPipelineRestartRun;
+  /**
+   * Issue #3967 — where a POISON run lands: a coded error the engine will not
+   * retry because it can never succeed (an unknown step, an unconfigured
+   * shard). Absent ⇒ the run is marked terminal-failed exactly as before; the
+   * record is evidence for an operator, never part of the run's outcome, so a
+   * sink failure is logged and swallowed rather than failing the run twice.
+   */
+  deadLetterRun?: JobPoisonLandingSink;
   now?: () => Date;
   newRunId?: () => string;
   /**
@@ -4426,6 +4457,42 @@ export class JobPipelineControl {
                   eff.items,
                 );
             continue;
+          }
+          // Issue #3967 — a poison unit lands in the DLQ, so the operator
+          // can inspect and re-drive it rather than only learn it failed.
+          // Best-effort by contract: the landing is evidence, not part of
+          // the run's outcome, so a sink failure never masks the run's own
+          // coded error (the same discipline the stage publisher follows).
+          if (!retryable) {
+            const sink = this.deps.deadLetterRun;
+            if (sink) {
+              try {
+                await sink({
+                  jobId: ctx.jobId,
+                  runId: ctx.runId,
+                  nodePath: path,
+                  stageId,
+                  unitId: unit.unitId,
+                  code:
+                    error instanceof JobPipelineError
+                      ? error.code
+                      : "job_step_failed",
+                  message,
+                  at: this.iso(),
+                });
+              } catch (sinkError) {
+                structuredLog.warn("jobPipeline.poison_landing_failed", {
+                  message:
+                    `[job-pipeline] poison landing for job "${ctx.jobId}" run ` +
+                    `"${ctx.runId}" could not be recorded: ` +
+                    `${sinkError instanceof Error ? sinkError.message : String(sinkError)} ` +
+                    "— the run's own failure is unchanged",
+                  jobId: ctx.jobId,
+                  runId: ctx.runId,
+                  stageId,
+                });
+              }
+            }
           }
           const failed = this.entryFor(ctx.ledger, stageId, unit.unitId);
           this.setEntry(ctx, {

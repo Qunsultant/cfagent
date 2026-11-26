@@ -42,6 +42,14 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 
 export type DeadLetterReason =
   | "denied"
+  /**
+   * Issue #3967 — a job run the engine dead-lettered: a coded error that can
+   * never succeed on a retry (an unknown step, an unconfigured shard). The
+   * row lands in the same store the queue drops land in, so the operator
+   * lists and acts on one surface; a run is re-driven through the retry
+   * route, never replayed into a queue.
+   */
+  | "poison_run"
   | "undecodable"
   | "no_handler"
   | "invalid_envelope"
