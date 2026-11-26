@@ -193,13 +193,22 @@ async function forwardToInstance(
   stub: InstanceStub,
   targetPath: string,
   init: RequestInit,
-  targetLogin: string,
   adminLogin: string,
   tenantId: string,
 ): Promise<ForwardResult> {
   const headers = new Headers(init.headers as HeadersInit | undefined);
   headers.set("Content-Type", "application/json");
-  headers.set("x-user-login", targetLogin);
+  // Issue #6503 step 8c — the forwarded identity is the VERIFIED
+  // admin's login, not the target's: the instance routes (cancel-all
+  // via step 8, clear-table via step 8b) authorize through the
+  // step-8 seam, which re-verifies the login's platform-admin
+  // binding against the membership store — a target login would
+  // 403 every non-admin instance. No scoping is lost: the target
+  // IS the instance (per-login DO, chosen by the caller), and the
+  // dump read (GET /schedules) never consults the header — it
+  // returns the instance's own list. x-admin-actor/x-admin-tenant
+  // stay the audit annotation of who delegated, unchanged.
+  headers.set("x-user-login", adminLogin);
   headers.set("x-admin-actor", adminLogin);
   headers.set("x-admin-tenant", tenantId);
   try {
@@ -348,7 +357,6 @@ export async function handleAdminTenantQueueRoutes(
           stub,
           "/schedules",
           { method: "GET" },
-          login,
           caller.login,
           tenantId,
         );
@@ -391,7 +399,6 @@ export async function handleAdminTenantQueueRoutes(
             method: "POST",
             body: JSON.stringify(confirm ? { confirm: true } : {}),
           },
-          login,
           caller.login,
           tenantId,
         );
@@ -449,7 +456,6 @@ export async function handleAdminTenantQueueRoutes(
             confirm ? { table, confirm: true } : { table },
           ),
         },
-        login,
         caller.login,
         tenantId,
       );

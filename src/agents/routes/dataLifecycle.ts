@@ -756,13 +756,22 @@ async function forward(
   stub: InstanceStub,
   targetPath: string,
   init: RequestInit,
-  targetLogin: string,
   adminLogin: string,
   tenantId: string | null,
 ): Promise<{ ok: boolean; status: number; body: Record<string, unknown>; error?: string }> {
   const headers = new Headers(init.headers as HeadersInit | undefined);
   headers.set("Content-Type", "application/json");
-  headers.set("x-user-login", targetLogin);
+  // Issue #6503 step 8b — the forwarded identity is the VERIFIED
+  // admin's login, not the target's: the instance routes (cancel-all
+  // via step 8, clear-table via step 8b) authorize through the
+  // step-8 seam, which re-verifies the login's platform-admin
+  // binding against the membership store — a target login would
+  // 403 every non-admin instance. No scoping is lost: the target
+  // IS the instance (per-login DO, chosen by the caller), and the
+  // session-scoped clear reads the instance's own session, never
+  // the header. x-admin-actor/x-admin-tenant stay the audit
+  // annotation of who delegated, unchanged.
+  headers.set("x-user-login", adminLogin);
   headers.set("x-admin-actor", adminLogin);
   if (tenantId) headers.set("x-admin-tenant", tenantId);
   try {
@@ -812,7 +821,6 @@ async function runInstanceTargets(
       stub,
       "/schedules/cancel-all",
       { method: "POST", body: JSON.stringify(confirm ? { confirm: true } : {}) },
-      login,
       adminLogin,
       tenantId,
     );
@@ -836,7 +844,6 @@ async function runInstanceTargets(
         stub,
         "/maintenance/clear-table",
         { method: "POST", body: JSON.stringify(body) },
-        login,
         adminLogin,
         tenantId,
       );
@@ -2506,7 +2513,6 @@ async function enumerateRecreate(
         method: "POST",
         body: JSON.stringify({ codes: doPlaneCodes, preview: true }),
       },
-      login,
       callerLogin,
       tenantId,
     );
@@ -2710,7 +2716,6 @@ async function handleRecreate(
       stub,
       "/maintenance/recreate-schema",
       { method: "POST", body: JSON.stringify({ codes }) },
-      instancePlan.login,
       operator,
       tenantId,
     );

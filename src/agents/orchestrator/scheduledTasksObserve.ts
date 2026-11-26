@@ -25,10 +25,12 @@
  */
 
 import type { AgentContext } from "agents";
-import type { AgentName } from "../../types";
-import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
-import type { SqlStorage } from "../../orm";
-import { filterUndeclaredTasks } from "../../services/unifiedScheduleManagement";
+import type { AgentName, Env } from "../../types";
+import { createD1UnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
+import {
+  filterUndeclaredTasks,
+  seedDeclaredTaskRecords,
+} from "../../services/unifiedScheduleManagement";
 import type {
   ThinkScheduledTaskContext,
   ThinkScheduledTasks,
@@ -68,6 +70,10 @@ export interface StrategyScanObserveOccurrence {
  */
 export interface ScheduledTasksObserveContext {
   agentCtx: AgentContext;
+  /** Issue #6503 — the Worker env, so the declaration filter reads
+   *  the D1 schedule store (AGENT_DB). Absent on hosts without a
+   *  binding; the filter then declares as before. */
+  env?: Env;
   getScreenerExecutionContext: () => Promise<ScreenerExecutionContext | undefined>;
   audit: (type: string, agent: AgentName | "judge" | "nlq" | "orchestrator", payload: Record<string, unknown>) => void;
 }
@@ -136,10 +142,26 @@ export async function declareStrategyScanObserveTasks(
   };
   // Issue #4351 — a declared task the user paused or deleted is NOT declared:
   // Think cancels the schedule of a task it no longer sees, and never re-arms
-  // it, so the user's decision survives every restart. No store (a host without
-  // DO SQLite) declares as before.
-  const sql = (ctx.agentCtx?.storage as unknown as { sql?: SqlStorage } | undefined)?.sql;
-  if (!sql) return tasks;
-  const { unifiedSchedules } = createUnifiedSchedulePorts({ sql });
+  // it, so the user's decision survives every restart. No store
+  // (AGENT_DB unbound — issue #6503, D1 only) declares as before.
+  // Issue #6503 (step 11) — the declaration seeds exactly one stored
+  // D1 row first (id = task id, active): the stored row, not the
+  // declaration, is the source of truth for firing afterwards. The
+  // seed never overwrites an existing row, so a paused row stays
+  // paused and a deleted tombstone stays deleted across reconciles.
+  const d1 = ctx.env?.AGENT_DB;
+  if (!d1) return tasks;
+  const { unifiedSchedules } = createD1UnifiedSchedulePorts({ d1 });
+  await seedDeclaredTaskRecords(
+    unifiedSchedules,
+    [
+      {
+        taskId: STRATEGY_SCAN_OBSERVE_TASK_ID,
+        schedule: STRATEGY_SCAN_OBSERVE_SCHEDULE,
+        ownerLogin: executionContext.userLogin,
+      },
+    ],
+    new Date().toISOString(),
+  );
   return filterUndeclaredTasks(unifiedSchedules, tasks);
 }

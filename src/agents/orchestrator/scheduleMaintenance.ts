@@ -11,7 +11,8 @@ import type { AgentContext, Schedule, ScheduleOptions } from "agents";
 import type { AgentName, Env } from "../../types";
 import { defaultAccountTypeForCallback } from "../../config/accountBindings";
 import { resolveValidatedExecutionAccountContext } from "../../services/accountBindings";
-import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
+import { createD1UnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
+import type { ScheduleStore } from "../../data/unifiedSchedulePorts";
 import { stampScheduleProvenance, systemProvenance } from "../../services/consolidatedScheduling";
 import {
   STRATEGY_SCAN_BASELINE_ORIGIN,
@@ -154,17 +155,19 @@ export async function removeUnownedBaselineSchedules(ctx: ScheduleMaintenanceCon
 
 /**
  * Issue #3121 #4236 — the unified store behind a baseline
- * arm/adoption, or null when the host has no DO SQLite. A missing
+ * arm/adoption, or null when AGENT_DB is unbound. A missing
  * store never fails the arm: the scan is armed, and the management
  * path adopts the record on first touch. Issue #3121 #4238 reuses
  * it for the IV collection adoption (same store, same rule).
+ * Issue #6503 — the store is D1 now; the null case is an unbound
+ * AGENT_DB, not a host without DO SQLite.
  */
-function unifiedScheduleStore(ctx: ScheduleMaintenanceContext) {
+async function unifiedScheduleStore(
+  ctx: ScheduleMaintenanceContext,
+): Promise<ScheduleStore | null> {
   try {
-    return createUnifiedSchedulePorts({
-      sql: ctx.agentCtx.storage.sql,
-      storage: ctx.agentCtx.storage,
-    }).unifiedSchedulesSync;
+    return createD1UnifiedSchedulePorts({ d1: ctx.env?.AGENT_DB })
+      .unifiedSchedules;
   } catch {
     return null;
   }
@@ -181,13 +184,13 @@ async function adoptStrategyScanBaselineRecord(
   context: ScreenerExecutionContext,
 ): Promise<void> {
   try {
-    const store = unifiedScheduleStore(ctx);
+    const store = await unifiedScheduleStore(ctx);
     if (!store) return;
     const item = alarm as any;
     const alarmId = typeof item.id === "string" && item.id ? item.id : null;
     if (!alarmId) return;
-    if (store.get(alarmId)) return;
-    store.save(
+    if (await store.get(alarmId)) return;
+    await store.save(
       strategyScanBaselineToRecord(
         { id: alarmId, callback: "autonomousOptionsAnalysis", payload: item.payload },
         { userLogin: context.userLogin, cron: ctx.strategyScanCron },
@@ -217,7 +220,7 @@ async function saveStrategyScanBaselineRecord(
   payload: unknown,
 ): Promise<void> {
   try {
-    const store = unifiedScheduleStore(ctx);
+    const store = await unifiedScheduleStore(ctx);
     if (!store) return;
     let alarmId =
       armed && typeof armed === "object" && typeof (armed as { id?: unknown }).id === "string"
@@ -244,8 +247,8 @@ async function saveStrategyScanBaselineRecord(
       });
       return;
     }
-    if (store.get(alarmId)) return;
-    store.save(
+    if (await store.get(alarmId)) return;
+    await store.save(
       strategyScanBaselineToRecord(
         { id: alarmId, callback: "autonomousOptionsAnalysis", payload },
         { userLogin: context.userLogin, cron: ctx.strategyScanCron },
@@ -278,16 +281,16 @@ async function adoptIvHistoryCollectionRecord(
   context: ScreenerExecutionContext,
 ): Promise<void> {
   try {
-    const store = unifiedScheduleStore(ctx);
+    const store = await unifiedScheduleStore(ctx);
     if (!store) return;
     const item = alarm as any;
     const alarmId = typeof item.id === "string" && item.id ? item.id : null;
     if (!alarmId) return;
     const cron = typeof item.cron === "string" && item.cron ? item.cron : null;
     if (!cron) return;
-    if (store.get(alarmId)) return;
-    if (store.list().some((r) => r.alarmId === alarmId)) return;
-    store.save(
+    if (await store.get(alarmId)) return;
+    if ((await store.list()).some((r) => r.alarmId === alarmId)) return;
+    await store.save(
       ivHistoryCollectionToRecord(
         { id: alarmId, callback: "collectIvHistory", payload: item.payload },
         { userLogin: context.userLogin, cron },
@@ -433,8 +436,8 @@ export async function repairBlankBrokerSchedules(
     const alarmId = typeof item.id === "string" && item.id ? item.id : null;
     const cron = typeof item.cron === "string" && item.cron ? item.cron : null;
     if (!alarmId) continue;
-    const store = unifiedScheduleStore(ctx);
-    const recordState = store?.get(alarmId)?.state;
+    const store = await unifiedScheduleStore(ctx);
+    const recordState = (await store?.get(alarmId))?.state;
     if (recordState && recordState !== "active") {
       // Paused/disabled/deleted: never silently re-arm; the guard
       // covers the firing if the schedule ever resumes.
@@ -625,8 +628,8 @@ export async function repairBlankBrokerSchedules(
  * authenticated user — the full strategy catalog (no
  * allowedStrategies restriction) over the NASDAQ100 universe,
  * published through the same audit + Slack path as the equity
- * screens. Follows the ensureStaleSweepSchedule pattern, with one
- * addition: a scan the user paused in the Schedules tab (#273's
+ * screens. Follows the adopt-into-the-unified-store pattern, with
+ * one addition: a scan the user paused in the Schedules tab (#273's
  * unified store, state paused) is never silently re-armed.
  */
 export async function ensureStrategyScanSchedule(ctx: ScheduleMaintenanceContext, context: ScreenerExecutionContext): Promise<void> {
@@ -649,7 +652,7 @@ export async function ensureStrategyScanSchedule(ctx: ScheduleMaintenanceContext
     return;
   }
   try {
-    const paused = createUnifiedSchedulePorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).unifiedSchedulesSync.listByState("paused");
+    const paused = await createD1UnifiedSchedulePorts({ d1: ctx.env?.AGENT_DB }).unifiedSchedules.listByState("paused");
     const pausedForUser = paused.some(
       (r) =>
         r.callback === "autonomousOptionsAnalysis" &&

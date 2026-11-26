@@ -863,7 +863,12 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
   // Issue #2280: maintenance routes run before the schedules routes.
   const maintenanceResponse = await handleMaintenanceRoutes(request, url, path, sessionId, {
     agentCtx: deps.ctx,
+    env: deps.env,
     audit: (type, agent, payload) => deps.audit(type, agent, payload),
+    // Issue #6503 step 8b — the clear-table gate's identity input:
+    // the same accessor the schedules routes resolve the caller
+    // through, so the gate sees the verified session identity.
+    getScreenerExecutionContext: () => deps.getScreenerExecutionContext(),
   });
   if (maintenanceResponse) return maintenanceResponse;
   // Issue #2331 slice 1: service-user provisioning routes run after

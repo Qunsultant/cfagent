@@ -38,7 +38,9 @@ import { recordScreeningActivity } from "../../services/screeningActivity";
 import {
   createAgentScheduleExecutorDepsForDo,
   nlqPortToAgentSdkAdapter,
+  nlqPortToScheduleAlarms,
 } from "../../services/agentScheduleCapability";
+import { resolveEffectiveScheduleFloor, resolveEffectiveScheduleStartPaused } from "../../services/scheduleControls";
 import { buildFeedJobRegistry } from "../../services/feedJobs";
 import { FEED_PIPELINE_CATALOG, resolveFeedJob } from "../../services/feedPipelineJobs";
 import { recordJobOutcome } from "../../services/jobOutcomes";
@@ -77,6 +79,14 @@ import {
 } from "../../config/nlqModes";
 import { getUserDid } from "../did";
 import { resolveStuckRunAlertThresholdMs } from "../../config/stuckRunAlert";
+import {
+  DEFAULT_STALE_RUNNING_REAP_MS,
+  STALE_RUNNING_REAP_ENV_VAR,
+  STALE_RUNNING_REAP_SETTING_KEY,
+  STALE_SWEEP_BATCH_LIMIT_ENV_VAR,
+  STALE_SWEEP_BATCH_LIMIT_SETTING_KEY,
+  resolveStaleAsyncJobReapPolicy,
+} from "../../config/staleAsyncJobReap";
 import { maybeAlertServeFailure } from "../../observability/alertingList";
 import { postSlackText } from "../resourceGoals";
 import { fetchSlackPost, type SlackDeliveryEnv } from "../social/delivery";
@@ -96,7 +106,7 @@ import {
   verifyEmailRecipientAtDelivery,
 } from "../../services/channelRecipientVerification";
 import { createOptionsDiscoveryPorts } from "../../data/createOptionsDiscoveryPorts";
-import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
+import { createD1UnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
 import { createDiscoveryService } from "../../services/discoveryService";
 import { buildDataProviderPorts } from "../../data/buildDataProviderPorts";
 import { createFitDiscoveryRunner } from "../../services/fitDiscoveryRunner";
@@ -1087,7 +1097,10 @@ export async function recoverStaleRunningAsyncJobs(
   ctx: AsyncJobsContext,
 ): Promise<{ examined: number; failed: number; rearmed: number }> {
   ctx.ensureTables();
-  const rows = ports(ctx).read.listRunning(ctx.sessionKey(), STALE_SWEEP_BATCH_LIMIT) as unknown as Array<Record<string, unknown>>;
+  // Issue #6503 step 13 — the batch cap is the managed
+  // `asyncJob.staleSweepBatchLimit` (default 100 rows per tick).
+  const reapPolicy = resolveStaleReapPolicy(ctx);
+  const rows = ports(ctx).read.listRunning(ctx.sessionKey(), reapPolicy.batchLimit) as unknown as Array<Record<string, unknown>>;
   const nowMs = Date.now();
   let failed = 0;
   let rearmed = 0;
@@ -1095,7 +1108,7 @@ export async function recoverStaleRunningAsyncJobs(
     const jobId = String(row.job_id);
     try {
       if (row.status !== "running" || typeof row.started_at !== "string") continue;
-      if (!isHeartbeatStale(row, nowMs)) continue;
+      if (!isHeartbeatStale(row, nowMs, reapPolicy.reapMs)) continue;
       const lastActivityAt =
         typeof row.last_activity_at === "string" && row.last_activity_at
           ? row.last_activity_at
@@ -1375,10 +1388,12 @@ export function getAsyncJob(ctx: AsyncJobsContext, jobId: string): AsyncJobRecor
   // it is still running). Issue #3907: the reap consults the
   // heartbeat — a live, heartbeating job is never reaped, at any
   // age; only a stale heartbeat (or a pre-heartbeat row past the
-  // 2h backstop) is failed.
+  // reap backstop) is failed. Issue #6503 step 13 — the backstop
+  // is the managed `asyncJob.staleRunningReapMs` (default 2h).
+  const reapPolicy = resolveStaleReapPolicy(ctx);
   if (row.status === "running" && typeof row.started_at === "string" &&
-    Date.now() - Date.parse(row.started_at) > STALE_RUNNING_REAP_MS &&
-    isHeartbeatStale(row)) {
+    Date.now() - Date.parse(row.started_at) > reapPolicy.reapMs &&
+    isHeartbeatStale(row, Date.now(), reapPolicy.reapMs)) {
     const completedAt = new Date().toISOString();
     ports(ctx).queue.reapStaleRunning(
       jobId,
@@ -1424,20 +1439,43 @@ export function getAsyncJob(ctx: AsyncJobsContext, jobId: string): AsyncJobRecor
 }
 
 /**
- * Issue #3784: the stale-running reap's backstop (2h) and its fixed
- * unknown-outcome message, shared by the read path (getAsyncJob
- * above) and the scheduled sweep (sweepStaleAsyncJobs below) so both
- * transitions carry the identical verdict. The message is the
- * read path's exact string, unchanged — a reaped row reads the
- * same whether a read or the sweep reaped it.
+ * Issue #3784: the stale-running reap's fixed unknown-outcome
+ * message, shared by the read path (getAsyncJob above) and the
+ * scheduled sweep (sweepStaleAsyncJobs below) so both transitions
+ * carry the identical verdict. The message is the read path's
+ * exact string, unchanged — a reaped row reads the same whether
+ * a read or the sweep reaped it.
+ *
+ * Issue #6503 step 13 — the reap's backstop (2h) and batch cap
+ * (100) are externalized, not literals here: managed settings
+ * `asyncJob.staleRunningReapMs` / `asyncJob.staleSweepBatchLimit`
+ * (see src/config/staleAsyncJobReap.ts; defaults ARE these
+ * literals, unchanged), resolved per call by
+ * resolveStaleReapPolicy below.
  */
-const STALE_RUNNING_REAP_MS = 2 * 60 * 60 * 1000;
 const STALE_RUNNING_REAP_MESSAGE =
   "Execution stopped before a result was recorded; the outcome may be unknown. Verify external side effects before submitting again.";
-/** Issue #3784: the sweep's batch cap — at most this many running
- *  rows per tick; the oldest are swept first (listRunning orders
- *  by created_at ASC), the rest wait for the next tick. */
-const STALE_SWEEP_BATCH_LIMIT = 100;
+
+/**
+ * Issue #6503 step 13 — resolve the live reap policy for this
+ * context: managed setting (via the context's settings reader,
+ * the #3922 seam — the orchestrator builder wires it to the
+ * instance's mas_settings read) > env carrier > default (2h /
+ * 100 rows). A context without the reader (tests, bare contexts)
+ * falls back to env/default, so existing behavior is unchanged.
+ */
+export function resolveStaleReapPolicy(ctx: Pick<AsyncJobsContext, "readSettingRaw" | "env">): {
+  reapMs: number;
+  batchLimit: number;
+} {
+  const envRecord = ctx.env as unknown as Record<string, unknown> | undefined;
+  return resolveStaleAsyncJobReapPolicy({
+    managedReapMs: ctx.readSettingRaw?.(STALE_RUNNING_REAP_SETTING_KEY) ?? undefined,
+    envReapMs: envRecord?.[STALE_RUNNING_REAP_ENV_VAR],
+    managedBatchLimit: ctx.readSettingRaw?.(STALE_SWEEP_BATCH_LIMIT_SETTING_KEY) ?? undefined,
+    envBatchLimit: envRecord?.[STALE_SWEEP_BATCH_LIMIT_ENV_VAR],
+  });
+}
 
 /** Issue #3811: the generic failure code for an execution that
  *  stopped before a result was recorded (reap) or threw without a
@@ -1475,13 +1513,17 @@ export const HEARTBEAT_STALE_MS = 3 * ASYNC_JOB_HEARTBEAT_MS;
 /** Issue #3907: is this running row's executor dead? True when
  *  its last recorded activity is older than HEARTBEAT_STALE_MS.
  *  A row with no last_activity_at (predates #3811 heartbeats)
- *  is stale only past the 2h backstop, measured on started_at —
- *  the #3784 backstop is preserved for legacy rows. Never throws:
- *  an unparseable timestamp reads as stale (fail the row closed,
- *  never leave it running forever on a bad value). */
+ *  is stale only past the reap backstop, measured on started_at —
+ *  the #3784 backstop is preserved for legacy rows. Issue #6503
+ *  step 13 — the backstop is the managed
+ *  `asyncJob.staleRunningReapMs` (default 2h), passed in by the
+ *  caller; absent → the default. Never throws: an unparseable
+ *  timestamp reads as stale (fail the row closed, never leave it
+ *  running forever on a bad value). */
 export function isHeartbeatStale(
   row: Record<string, unknown>,
   nowMs: number = Date.now(),
+  reapMs: number = DEFAULT_STALE_RUNNING_REAP_MS,
 ): boolean {
   const lastActivity =
     typeof row.last_activity_at === "string" && row.last_activity_at
@@ -1490,7 +1532,7 @@ export function isHeartbeatStale(
   if (Number.isFinite(lastActivity)) return nowMs - lastActivity > HEARTBEAT_STALE_MS;
   const startedAt = typeof row.started_at === "string" ? Date.parse(row.started_at) : NaN;
   if (!Number.isFinite(startedAt)) return true;
-  return nowMs - startedAt > STALE_RUNNING_REAP_MS;
+  return nowMs - startedAt > reapMs;
 }
 
 /** Issue #3907: best-effort tool name for an mcp.tool row
@@ -1771,7 +1813,11 @@ export async function sweepStaleAsyncJobs(
   nowMs: number = Date.now(),
 ): Promise<StaleAsyncJobSweepResult> {
   ctx.ensureTables();
-  const rows = ports(ctx).read.listRunning(ctx.sessionKey(), STALE_SWEEP_BATCH_LIMIT) as unknown as Array<Record<string, unknown>>;
+  // Issue #6503 step 13 — the batch cap and the reap backstop are
+  // the managed `asyncJob.staleSweepBatchLimit` /
+  // `asyncJob.staleRunningReapMs` (defaults 100 rows / 2h).
+  const reapPolicy = resolveStaleReapPolicy(ctx);
+  const rows = ports(ctx).read.listRunning(ctx.sessionKey(), reapPolicy.batchLimit) as unknown as Array<Record<string, unknown>>;
   let alerted = 0;
   let reaped = 0;
   for (const row of rows) {
@@ -1779,7 +1825,7 @@ export async function sweepStaleAsyncJobs(
     try {
       if (row.status !== "running" || typeof row.started_at !== "string") continue;
       const ageMs = nowMs - Date.parse(row.started_at);
-      if (ageMs > STALE_RUNNING_REAP_MS && isHeartbeatStale(row, nowMs)) {
+      if (ageMs > reapPolicy.reapMs && isHeartbeatStale(row, nowMs, reapPolicy.reapMs)) {
         // Issue #4002: a stale FEED dispatch is settled by the recovery
         // rule, not the generic unknown-outcome reap — re-armed when its
         // work is resumable and otherwise failed as ORPHANED with the feed
@@ -3163,7 +3209,16 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
             ctx.env,
             jobUserLoginForNlq,
             getUserDid(ctx.sessionKey()),
-            { scanRunStore: createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, profileStore: createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).strategyProfiles, schedulingPort: ctx.nlqSchedulingPort(), agentScheduleCapability: createAgentScheduleExecutorDepsForDo(ctx.env, ctx.agentCtx.storage.sql, (type, payload) => ctx.audit(type, "orchestrator", payload), { sdk: nlqPortToAgentSdkAdapter(ctx.nlqSchedulingPort(), createUnifiedSchedulePorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).unifiedSchedules) }), stockScreenPort: ctx.nlqStockScreenPort(), discoveryRunner: createDiscoveryService({ env: ctx.env, userLogin: jobUserLoginForNlq, orm: ctx.getOrm(), sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage, platform: TradingPlatformRegistry.getPlatform(await resolveTenantBroker(ctx.env), ctx.env, ctx.getOrm(), jobUserLoginForNlq), ...(nlqDpPorts?.config ? { configPort: nlqDpPorts.config } : {}), ...(nlqDpPorts?.captures ? { capturePort: nlqDpPorts.captures } : {}) }), fitDiscoveryRunner: createFitDiscoveryRunner({ env: ctx.env, userLogin: jobUserLoginForNlq, sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }) },
+            { scanRunStore: createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, profileStore: createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).strategyProfiles, schedulingPort: ctx.nlqSchedulingPort(), agentScheduleCapability: createAgentScheduleExecutorDepsForDo(ctx.env, ctx.agentCtx.storage.sql, (type, payload) => ctx.audit(type, "orchestrator", payload), { sdk: nlqPortToAgentSdkAdapter(ctx.nlqSchedulingPort(), createD1UnifiedSchedulePorts({ d1: ctx.env.AGENT_DB }).unifiedSchedules, {
+                // Issue #6503 — the start-paused control, resolved here so
+                // a schedule created through chat/NLQ starts active when
+                // the control is off (resume arms it through the NLQ
+                // port's alarms).
+                startPaused: resolveEffectiveScheduleStartPaused(ctx.agentCtx.storage.sql, ctx.env).paused,
+                alarms: nlqPortToScheduleAlarms(ctx.nlqSchedulingPort(), () =>
+                  resolveEffectiveScheduleFloor(ctx.agentCtx.storage.sql, ctx.env).seconds,
+                ),
+              }) }), stockScreenPort: ctx.nlqStockScreenPort(), discoveryRunner: createDiscoveryService({ env: ctx.env, userLogin: jobUserLoginForNlq, orm: ctx.getOrm(), sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage, platform: TradingPlatformRegistry.getPlatform(await resolveTenantBroker(ctx.env), ctx.env, ctx.getOrm(), jobUserLoginForNlq), ...(nlqDpPorts?.config ? { configPort: nlqDpPorts.config } : {}), ...(nlqDpPorts?.captures ? { capturePort: nlqDpPorts.captures } : {}) }), fitDiscoveryRunner: createFitDiscoveryRunner({ env: ctx.env, userLogin: jobUserLoginForNlq, sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }) },
         ),
         executionDeadline.promise,
       ]);

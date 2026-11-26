@@ -76,6 +76,11 @@ import {
   type CopilotNonDeclarationCause,
 } from "../../services/scheduleWatchdog";
 import { nameLedgerWriteFailure, recordScheduleCallbackRun } from "./scheduleCallbackRunRecords";
+import { createD1UnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
+import {
+  filterUndeclaredTasks,
+  seedDeclaredTaskRecords,
+} from "../../services/unifiedScheduleManagement";
 import { TradingPlatformRegistry } from "../../trading";
 
 /** The one code-declared task this slice arms. */
@@ -485,7 +490,7 @@ export async function declareStockCopilotTasks(
     env: ctx.env,
     readSettingRaw: ctx.readSettingRaw,
   });
-  return {
+  const tasks: ThinkScheduledTasks = {
     [STOCK_COPILOT_TASK_ID]: {
       schedule: cadence.effective as any,
       handler: async (taskCtx: ThinkScheduledTaskContext): Promise<void> => {
@@ -521,4 +526,28 @@ export async function declareStockCopilotTasks(
       },
     },
   };
+  // Issue #6503 (step 11) — the declaration seeds exactly one stored
+  // D1 row first (id = task id, active), then goes through the one
+  // declaration filter (#4351) this declarer previously skipped: a
+  // paused or deleted copilot row is NOT declared, so the operator's
+  // decision survives every restart and a deleted task never
+  // resurrects. The seed never overwrites an existing row. No store
+  // (AGENT_DB unbound) declares as before. Flag-off instances never
+  // reach here, so no row is seeded while the flag is off; the row
+  // seeds on the first reconcile after the flag flips on.
+  const d1 = ctx.env?.AGENT_DB;
+  if (!d1) return tasks;
+  const { unifiedSchedules } = createD1UnifiedSchedulePorts({ d1 });
+  await seedDeclaredTaskRecords(
+    unifiedSchedules,
+    [
+      {
+        taskId: STOCK_COPILOT_TASK_ID,
+        schedule: cadence.effective,
+        ownerLogin: executionContext.userLogin,
+      },
+    ],
+    new Date().toISOString(),
+  );
+  return filterUndeclaredTasks(unifiedSchedules, tasks);
 }
