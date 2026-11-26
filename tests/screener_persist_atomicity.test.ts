@@ -10,9 +10,6 @@
  * (Reports tab vs Slack divergence). The atomicity was fake.
  *
  * Pins:
- *  - Behavioral (precondition): the helper returns null — never throws —
- *    when the store write fails, and an id when it succeeds. This is the
- *    contract the caller must defend against.
  *  - Structural (the fix): `persistRun` in src/agents/screener-agent.ts
  *    captures the helper's return value and throws when it is null, inside
  *    the #832 try whose catch rethrows "Failed to persist report metadata".
@@ -31,54 +28,22 @@
  * #308 seam. #783 removes the screener-side write entirely, so the
  * structural pins below now pin the removal: the divergence #832/#835
  * chased (Reports tab vs delivered report) cannot recur from a write
- * that does not exist. The behavioral pins above are UNCHANGED — the
- * helper keeps its never-throws contract (and its #876 error logging)
- * for any raw-SQL call site. The single-home behaviour is pinned in
+ * that does not exist. The single-home behaviour is pinned in
  * tests/screener_reports_single_home.test.ts.
+ *
+ * Issue #6101 (step 8): the never-throws canonical store is
+ * storeReportAtGeneration (async, null on failure) writing D1
+ * agent_reports; persistScheduledReportSql is DELETED, so the two
+ * behavioral pins that characterized it were deleted with it — the
+ * contract itself is pinned in tests/scheduled-reports.test.ts
+ * ("never throws on a broken store") and tests/reports_d1_6101.test.ts.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { persistScheduledReportSql } from "../src/services/scheduledReports";
-import type { SqlStorage } from "../src/services/scheduledReports";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-
-function report() {
-  return {
-    runId: "NASDAQ100:2026-10-20T13:55:00.000Z",
-    title: "Market Screen — NASDAQ100 · Scheduled",
-    source: "screener",
-    summary: "Scanned 100, 12 matched.",
-    body: "{}",
-    userLogin: "default_trader",
-  };
-}
-
-describe("persistScheduledReportSql contract (the precondition for #835)", () => {
-  it("returns null — never throws — when the store write fails", () => {
-    const broken: SqlStorage = {
-      exec: () => {
-        throw new Error("boom");
-      },
-    } as unknown as SqlStorage;
-    expect(persistScheduledReportSql(broken, report())).toBeNull();
-  });
-
-  it("returns the record id when the write succeeds", () => {
-    const rows: unknown[][] = [];
-    const working: SqlStorage = {
-      exec: (query: string, ...params: unknown[]) => {
-        rows.push([query, ...params]);
-        return { toArray: () => [] } as unknown as ReturnType<SqlStorage["exec"]>;
-      },
-    } as unknown as SqlStorage;
-    const id = persistScheduledReportSql(working, report());
-    expect(id).toBeTruthy();
-    expect(rows.some((r) => String(r[0]).includes("INSERT INTO"))).toBe(true);
-  });
-});
 
 describe("ScreenerAgent.persistRun no longer writes mas_reports (#783 removal)", () => {
   const src = readFileSync(path.join(repoRoot, "src/agents/screener-agent.ts"), "utf-8");

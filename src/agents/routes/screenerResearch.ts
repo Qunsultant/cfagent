@@ -53,8 +53,11 @@ import type {
   ResearchStageTimeouts,
 } from "../../config/researchJobConfig";
 import { isResearchVenueRefusal, resolveResearchVenue } from "../../services/researchVenue";
-import { recordLedgerRun } from "../../services/unifiedLedger";
-import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
+import {
+  recordLedgerRunD1,
+  type D1JobRunRecordStore,
+  type LedgerAttribution,
+} from "../../data/createJobRunRecordPorts";
 import { resolveScheduledJobAlertThreshold } from "../../config/scheduledJobAlert";
 import {
   recordScheduledJobOutcome,
@@ -249,28 +252,35 @@ async function recordTickJobOutcome(
  * is the single entry the one ledger carries for the run; the
  * #2037 tick-outcome sink still records the run's mas_events outcome
  * (ran / skipped / failed). Best-effort and total: a missing store
- * (a mock ctx without getStorage, or a storage without .sql) is a
- * no-op, and a failed write never throws — recording never fails
- * the tick. Only successful firings are recorded here; a failed run
- * is observable via the tick-outcome sink.
+ * (a null D1 store) is a no-op, and a failed write never throws —
+ * recording never fails the tick. Only successful firings are
+ * recorded here; a failed run is observable via the tick-outcome sink.
+ *
+ * Issue #6101 — the row lands in D1 (the store resolves from the
+ * caller's env); the DO writer is gone.
  */
-export function recordNightlyResearchLedgerRun(
-  sql: ConstructorParameters<typeof SqlJobRunRecordStore>[0] | undefined | null,
+export async function recordNightlyResearchLedgerRun(
+  store: D1JobRunRecordStore | null | undefined,
   started: string,
   finished: string,
-): void {
-  if (!sql) return;
+  attribution?: Partial<LedgerAttribution>,
+): Promise<void> {
+  if (!store) return;
   try {
-    recordLedgerRun(new SqlJobRunRecordStore(sql), {
-      system: "orchestrator-schedule",
-      jobId: NIGHTLY_RESEARCH_RECORD_ID,
-      operation: "nightly-research",
-      started,
-      finished,
-      outcome: "success",
-      triggeredBy: "scheduled",
-      scheduleId: NIGHTLY_RESEARCH_RECORD_ID,
-    });
+    await recordLedgerRunD1(
+      store,
+      {
+        system: "orchestrator-schedule",
+        jobId: NIGHTLY_RESEARCH_RECORD_ID,
+        operation: "nightly-research",
+        started,
+        finished,
+        outcome: "success",
+        triggeredBy: "scheduled",
+        scheduleId: NIGHTLY_RESEARCH_RECORD_ID,
+      },
+      attribution,
+    );
   } catch {
     // Recording never fails the tick.
   }

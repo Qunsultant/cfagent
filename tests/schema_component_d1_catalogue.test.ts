@@ -185,6 +185,9 @@ const D1_MIGRATION_SQL_SHA256: Record<number, string> = {
   // system-schedule seeds are Recreate steps, not migration-applied
   // (#6503 step 7: a fresh store starts empty).
   92: "c79093d94c6ee5eec808cb3f449619ba1de498d2ebf77d53a00c98a84a60a421",
+  // #6101 adds migration 0093 (run-record identity columns +
+  // carrier-table drop): 6 statements.
+  93: "883dd6c711bbb3dd9bd5cad36cb5d0a900a9308d88f1198c8df7a3400f2a7621",
 };
 
 /** Per-version statement counts, measured from the base runner. */
@@ -299,6 +302,9 @@ const D1_MIGRATION_STATEMENT_COUNTS: Record<number, number> = {
   // system-schedule seeds are Recreate steps, not migration-applied
   // (#6503 step 7: a fresh store starts empty).
   92: 5,
+  // #6101 adds migration 0093 (run-record identity columns +
+  // carrier-table drop): 6 statements.
+  93: 6,
 };
 
 /** The 19 seed-DML statements, exact text, measured from the base runner. */
@@ -350,7 +356,7 @@ function expectedD1Model(): SchemaModel {
 }
 
 describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
-  it("catalogues all 305 runner statements: 286 schema + 19 seed", () => {
+  it("catalogues all 311 runner statements: 292 schema + 19 seed", () => {
     const catalogue = buildD1Catalogue();
     // #5086 adds migration 0070 (otel_config_overrides table): 224 → 225.
     // #4767 adds migrations 0071/0072 (4 D1 ALTERs): 225 → 229.
@@ -373,10 +379,11 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
     // #6557 adds migrations 0090/0091 (instance provenance carrier + four
     // record provenance columns): 290 → 295.
     // #6503 adds migration 0092 (D1 unified_schedules table + 3 indexes + 6 seeds): 295 → 305.
-    // Union: 305 (schema 286, seeds 19).
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(305);
-    expect(catalogue.size()).toBe(305);
-    expect(catalogue.byKind("schema").length).toBe(286);    expect(catalogue.byKind("seed").length).toBe(19);
+    // #6101 adds migration 0093 (run-record identity columns + carrier-table drop): 305 → 311.
+    // Union: 311 (schema 292, seeds 19).
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(311);
+    expect(catalogue.size()).toBe(311);
+    expect(catalogue.byKind("schema").length).toBe(292);    expect(catalogue.byKind("seed").length).toBe(19);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
       const upper = statement.trim().toUpperCase();
@@ -403,7 +410,9 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
     expect(verbs.get("CREATE TABLE")).toBe(116);
     expect(verbs.get("CREATE INDEX")).toBe(69);
     expect(verbs.get("CREATE UNIQUE INDEX")).toBe(11);
-    expect(verbs.get("ALTER TABLE")).toBe(88);    expect(verbs.get("DROP TABLE")).toBe(2);
+    // #6101 adds migration 0093 (run-record identity columns: 5
+    // ALTERs + the carrier-table drop): ALTER 88 → 93, DROP 2 → 3.
+    expect(verbs.get("ALTER TABLE")).toBe(93);    expect(verbs.get("DROP TABLE")).toBe(3);
     expect(verbs.get("INSERT OR IGNORE")).toBe(14);
     expect(verbs.get("INSERT INTO")).toBe(2);
     expect(verbs.get("UPDATE")).toBe(3);
@@ -426,7 +435,7 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
     // #6503 adds migration 0092 (unified_schedules D1 table + goals
     // seed; renumbered 0089 -> 0092 on rebase: main took 0089-0091).
     expect(versions).toEqual(
-      Array.from({ length: 92 }, (_, i) => i + 1),
+      Array.from({ length: 93 }, (_, i) => i + 1),
     );    const allCodes = new Set<string>();
     for (const version of versions) {
       const codes = D1_MIGRATION_CODES[version];

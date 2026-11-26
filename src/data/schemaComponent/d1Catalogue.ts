@@ -8,13 +8,14 @@
  * bookkeeping table is runner infrastructure (created by
  * `applyMigrations`) and is NOT catalogued.
  *
- * Contents: 305 statements. The
+ * Contents: 311 statements. The
  * pin tests (`tests/schema_component_*`) are the live source of truth
  * for exact entry membership as migrations land. (Historical baseline at
  * 534e8903 + 0053 was 221 statements; 0066 added 10 more, and subsequent
  * migrations updated the live catalogue to 283 entries; main added #6102
  * (0089, 7 entries) + #6557 (0090 + 0091, 5 entries), 283 → 295; #6503
- * adds migration 0092's 4 schema entries + 6 seed entries, 295 → 305.)
+ * adds migration 0092's 4 schema entries + 6 seed entries, 295 → 305;
+ * #6101 adds migration 0093's 6 schema entries, 305 → 311.)
  *
  * Code naming (`<kind>.d1.<table>.<action>`):
  *  - CREATE TABLE: `create_table`. The one re-create of an
@@ -3934,6 +3935,61 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     kind: "seed",
     form: "literal",
   },
+  {
+    // Issue #6101 — the run-record identity columns (Q7/Q8): the
+    // platform, user and session ids plus correlation/trace as plain
+    // columns. Nullable additive, NULL for pre-cutover rows, never
+    // backfilled (the #5102 precedent). HAND-ADDED like the 0092
+    // entries; the sha256 pin is updated deliberately.
+    code: "schema.d1.job_run_records.alter_table_add_column_platform_id",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN platform_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.job_run_records.alter_table_add_column_user_id",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN user_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.job_run_records.alter_table_add_column_session_id",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN session_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.job_run_records.alter_table_add_column_correlation_id",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN correlation_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.job_run_records.alter_table_add_column_trace_id",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN trace_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // Issue #6101 — the carrier table dies with the projector: no
+    // carrier is ever configured again, and no code reads it.
+    code: "schema.d1.agent_tenant_projection_carriers.drop_table",
+    plane: "d1",
+    table: "agent_tenant_projection_carriers",
+    statement: `DROP TABLE IF EXISTS agent_tenant_projection_carriers`,
+    kind: "schema",
+    form: "literal",
+  },
 ];
 
 /** Per-migration-version code lists, in statement order. */
@@ -4382,6 +4438,16 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
     "schema.d1.unified_schedules.create_index_unified_schedules_state_idx",
     "schema.d1.unified_schedules.create_index_unified_schedules_created_idx",
     "seed.d1.unified_schedules.insert_builtin_goals",
+  ],
+  // Issue #6101 — the run-record identity columns (Q7/Q8) + the
+  // carrier-table drop (the table dies with the projector).
+  93: [
+    "schema.d1.job_run_records.alter_table_add_column_platform_id",
+    "schema.d1.job_run_records.alter_table_add_column_user_id",
+    "schema.d1.job_run_records.alter_table_add_column_session_id",
+    "schema.d1.job_run_records.alter_table_add_column_correlation_id",
+    "schema.d1.job_run_records.alter_table_add_column_trace_id",
+    "schema.d1.agent_tenant_projection_carriers.drop_table",
   ],
   82: [
     "schema.d1.agent_referral_rules.alter_table_add_column_extension_days",

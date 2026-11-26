@@ -32,7 +32,10 @@ import {
   type ScheduledTasksPipelineContext,
 } from "../src/agents/scheduledTasksPipeline";
 import { createJobPipelineStoresFromSql } from "../src/data/createJobPipelinePorts";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
 import { createInMemoryJobPipelineStores } from "../src/data/inMemoryJobPipelineAdapter";
 import { InMemoryJobRunRecordStore } from "../src/data/inMemoryJobRunRecordAdapter";
 import type { SqlStorage } from "../src/orm";
@@ -73,8 +76,53 @@ class SqliteTestStorage {
   }
 }
 
+/** Minimal D1Database stand-in over node:sqlite (the #6101 suite's double). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: { changes: info.changes, last_row_id: info.lastInsertRowid },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+  async batch(stmts: { run: () => Promise<unknown> }[]) {
+    return Promise.all(stmts.map((stmt) => stmt.run()));
+  }
+}
+
+/** A fresh D1 ledger store over an in-memory mock binding (#6101). */
+function ledgerD1() {
+  const d1 = new MockD1Database();
+  const store = new D1JobRunRecordStore(createD1JobRunRecordDb(d1 as unknown as D1Database));
+  return { d1, store };
+}
+
 function makeHostContext(env: Partial<Env> = {}) {
   const sql = new SqliteTestStorage();
+  const { d1, store } = ledgerD1();
   const kv = new Map<string, unknown>();
   const agentCtx = {
     storage: {
@@ -86,10 +134,11 @@ function makeHostContext(env: Partial<Env> = {}) {
     },
   };
   const ctx = {
-    env: env as Env,
+    // Issue #6101 — the host's run recorder is the D1 recorder.
+    env: { AGENT_DB: d1, ...env } as Env,
     agentCtx: agentCtx as unknown as ScheduledTasksPipelineContext["agentCtx"],
   } satisfies ScheduledTasksPipelineContext;
-  return { ctx, sql: sql as unknown as SqlStorage, kv };
+  return { ctx, sql: sql as unknown as SqlStorage, kv, d1, store };
 }
 
 /** A recording queue binding: the SCREENER_EVENTS send seam. */
@@ -273,7 +322,7 @@ describe("options steps in the ScheduledAgent host registry (#4452)", () => {
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: makeChain("AAPL") });
     try {
       const { sent, queue } = recordingQueue();
-      const { ctx, sql } = makeHostContext({ SCREENER_EVENTS: queue } as unknown as Partial<Env>);
+      const { ctx, sql, store } = makeHostContext({ SCREENER_EVENTS: queue } as unknown as Partial<Env>);
       const control = createScheduledAgentPipelineControl(ctx, "tester");
       const runId = "host-4452:scan:1";
       const jobId = strategyScreenJobId(runId);
@@ -296,7 +345,7 @@ describe("options steps in the ScheduledAgent host registry (#4452)", () => {
         expect(message.artifactKeys.length).toBeGreaterThan(0);
         expect(message.idempotencyKey).toBe(`${runId}::options::${message.stageId}`);
       }
-      const record = new SqlJobRunRecordStore(sql).latestByJob(jobId);
+      const record = await store.latestByJob(jobId);
       expect(record?.outcome).toBe("success");
       const stores = createJobPipelineStoresFromSql(sql);
       const keys = await stores.artifacts.listArtifactKeys(dispatch.runId);
@@ -317,14 +366,14 @@ describe("options steps in the ScheduledAgent host registry (#4452)", () => {
   });
 
   it("a host-dispatched comparison-shape job refuses by name, as in the workflow residency", async () => {
-    const { ctx, sql } = makeHostContext();
+    const { ctx, sql, store } = makeHostContext();
     const control = createScheduledAgentPipelineControl(ctx, "tester");
     const runId = "host-4452:comparison:1";
     const jobId = strategyScreenJobId(runId);
     await control.defineJob(strategyScreenJobDefinition(jobId, COMPARISON_REQUEST, "tester"));
     const dispatch = await control.runJob(jobId, { trigger: "scheduled" });
     expect(dispatch.state).toBe("failed");
-    const record = new SqlJobRunRecordStore(sql).latestByJob(jobId);
+    const record = await store.latestByJob(jobId);
     expect(record?.outcome).toBe("failure");
     // The run record carries the refusal's message; the code
     // (stage_port_unavailable) lives on the thrown error, pinned

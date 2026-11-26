@@ -110,7 +110,7 @@ export async function persistWorkflowGoalScreenReport(
     // stocks only, testing framing for full-dataset.
     (result.yahooDataMode ? ` ${yahooDataModeLabel(result.yahooDataMode)}.` : "");
   const orm = ctx.getOrm();
-  const stored = orm.storeCanonicalReport({
+  const stored = await orm.storeCanonicalReport({
     runId: `goal-screen:${envelope.taskId}`,
     generationId: `goal-screen:${envelope.taskId}`,
     title: `Goal screen — ${result.goalKind} (${result.outlook})`,

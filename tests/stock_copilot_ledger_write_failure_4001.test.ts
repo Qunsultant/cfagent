@@ -112,9 +112,77 @@ import {
   declareStockCopilotTasks,
   STOCK_COPILOT_TASK_ID,
 } from "../src/agents/orchestrator/scheduledTasksCopilot";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
 import { InMemoryCommercialAdapter } from "../src/data/inMemoryCommercialAdapter";
 import { BROKER_ENVIRONMENT_SETTING_KEY } from "../src/agents/routes/brokerEnvironment";
+
+/** Minimal D1Database stand-in over node:sqlite (the #6101 double). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: { changes: info.changes, last_row_id: info.lastInsertRowid },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+}
+
+/**
+ * Issue #6101 — a D1 binding whose ledger-row INSERTs fail, like the
+ * production gap (the DO-sql throw this file used to inject). Schema
+ * work and reads still succeed, so the failure is observable as a
+ * missing row rather than a dead binding.
+ */
+class LedgerThrowingD1Database extends MockD1Database {
+  override prepare(sql: string) {
+    const bound = super.prepare(sql);
+    return {
+      bind(...params: unknown[]) {
+        const stmt = bound.bind(...params);
+        return {
+          ...stmt,
+          async run() {
+            if (/INSERT\s+INTO\s+"?job_run_records"?/i.test(sql)) {
+              throw new Error("D1 unavailable for job_run_records");
+            }
+            return stmt.run();
+          },
+        };
+      },
+    };
+  }
+}
+
+/** The D1 run-ledger store over one mock binding (#6101). */
+function ledgerD1(d1: MockD1Database) {
+  return new D1JobRunRecordStore(createD1JobRunRecordDb(d1 as unknown as D1Database));
+}
 
 class SqliteTestStorage {
   readonly sqlite = new DatabaseSync(":memory:");
@@ -140,22 +208,13 @@ const CYCLE_PAYLOAD = {
 };
 const CYCLE_SCHEDULE = { id: STOCK_COPILOT_TASK_ID };
 
-/** A sql handle whose ledger-table writes fail, like the production gap. */
-function ledgerThrowingSql(base: SqliteTestStorage): unknown {
-  return {
-    exec(query: string, ...params: unknown[]) {
-      if (typeof query === "string" && query.includes("job_run_records")) {
-        throw new Error("DO SQLite unavailable for job_run_records");
-      }
-      return base.exec(query, ...params);
-    },
-  };
-}
-
 /** The declared task's handler, invoked the way the Think SDK invokes it. */
 async function runDeclaredHandler(
   sql: unknown,
   audits: Array<{ type: string; payload: Record<string, unknown> }>,
+  // Issue #6101 — the firing records its ledger row in D1: the
+  // handler resolves the store from env.AGENT_DB.
+  d1: MockD1Database,
 ) {
   const settings = new Map<string, string>([
     ["stock_copilot:sessions", "pre_market,regular,after_hours,exto"],
@@ -166,6 +225,7 @@ async function runDeclaredHandler(
     env: {
       STOCK_COPILOT_PAPER_ENABLED: "1",
       STOCK_COPILOT_AROUND_THE_CLOCK: "true",
+      AGENT_DB: d1,
     } as any,
     agentCtx: { storage: { sql: sql as any } } as any,
     getScreenerExecutionContext: async () => ({
@@ -205,13 +265,18 @@ describe("Issue #4001 — a ledger-write failure is reported, never swallowed", 
       CYCLE_PAYLOAD,
       CYCLE_SCHEDULE,
       async () => ({ outcome: "success", descriptor: "cycle complete" }),
-      { onRecordFailure: hook },
+      // Issue #6101 — the failing store is the D1 binding now.
+      { onRecordFailure: hook, env: { AGENT_DB: new LedgerThrowingD1Database() } },
     );
     expect(hook).toHaveBeenCalledTimes(1);
     expect(hook).toHaveBeenCalledWith(
       expect.objectContaining({
         jobId: STOCK_COPILOT_TASK_ID,
-        error: expect.stringMatching(/DO SQLite unavailable/),
+        // The D1 stack wraps the injected store failure in
+        // drizzle's "Failed query: insert into job_run_records ..."
+        // — the hook carries the failed ledger statement, not the
+        // raw injected message.
+        error: expect.stringMatching(/job_run_records/),
       }),
     );
   });
@@ -226,7 +291,8 @@ describe("Issue #4001 — a ledger-write failure is reported, never swallowed", 
         CYCLE_PAYLOAD,
         CYCLE_SCHEDULE,
         async () => ({ outcome: "success", descriptor: "cycle complete" }),
-        { onRecordFailure: hook },
+        // Issue #6101 — the failing store is the D1 binding now.
+        { onRecordFailure: hook, env: { AGENT_DB: new LedgerThrowingD1Database() } },
       ),
     ).resolves.toBeUndefined();
     expect(hook).toHaveBeenCalledTimes(1);
@@ -237,12 +303,15 @@ describe("Issue #4001 — a ledger-write failure is reported, never swallowed", 
         CYCLE_PAYLOAD,
         CYCLE_SCHEDULE,
         async () => ({ outcome: "success", descriptor: "cycle complete" }),
+        // Issue #6101 — the failing store is the D1 binding now.
+        { env: { AGENT_DB: new LedgerThrowingD1Database() } },
       ),
     ).resolves.toBeUndefined();
   });
 
   it("a successful record never calls onRecordFailure", async () => {
     const sql = new SqliteTestStorage();
+    const d1 = new MockD1Database();
     const hook = vi.fn();
     await recordScheduleCallbackRun(
       sql as any,
@@ -250,11 +319,12 @@ describe("Issue #4001 — a ledger-write failure is reported, never swallowed", 
       CYCLE_PAYLOAD,
       CYCLE_SCHEDULE,
       async () => ({ outcome: "success", descriptor: "cycle complete" }),
-      { onRecordFailure: hook },
+      // Issue #6101 — the ledger is D1: the store resolves from env.
+      { onRecordFailure: hook, env: { AGENT_DB: d1 } },
     );
     expect(hook).not.toHaveBeenCalled();
-    const store = new SqlJobRunRecordStore(sql as any);
-    expect(store.listByJob(STOCK_COPILOT_TASK_ID).length).toBe(1);
+    const store = ledgerD1(d1);
+    expect((await store.listByJob(STOCK_COPILOT_TASK_ID)).length).toBe(1);
   });
 
   it("a throwing callback still rethrows AND reports its failed failure-record", async () => {
@@ -267,23 +337,26 @@ describe("Issue #4001 — a ledger-write failure is reported, never swallowed", 
         CYCLE_PAYLOAD,
         CYCLE_SCHEDULE,
         async () => { throw new Error("platform exploded"); },
-        { onRecordFailure: hook },
+        // Issue #6101 — the failing store is the D1 binding now.
+        { onRecordFailure: hook, env: { AGENT_DB: new LedgerThrowingD1Database() } },
       ),
     ).rejects.toThrow("platform exploded");
     expect(hook).toHaveBeenCalledTimes(1);
     expect(hook).toHaveBeenCalledWith(
       expect.objectContaining({
         jobId: STOCK_COPILOT_TASK_ID,
-        error: expect.stringMatching(/DO SQLite unavailable/),
+        // See the first test: drizzle wraps the injected failure
+        // in "Failed query: insert into job_run_records ...".
+        error: expect.stringMatching(/job_run_records/),
       }),
     );
   });
 
   it("a clean firing whose ledger store throws audits ledger_write_failed with the job id", async () => {
-    const base = new SqliteTestStorage();
-    const sql = ledgerThrowingSql(base);
+    const sql = new SqliteTestStorage();
+    const d1 = new LedgerThrowingD1Database();
     const audits: Array<{ type: string; payload: Record<string, unknown> }> = [];
-    await runDeclaredHandler(sql, audits);
+    await runDeclaredHandler(sql, audits, d1);
     // The cycle itself completed (the callback ran to its audit).
     expect(audits.find((a) => a.type === "stock_copilot.cycle")).toBeDefined();
     // The failed ledger write is named, not swallowed.
@@ -291,9 +364,10 @@ describe("Issue #4001 — a ledger-write failure is reported, never swallowed", 
     expect(failure).toBeDefined();
     expect(failure?.payload.jobId).toBe(STOCK_COPILOT_TASK_ID);
     expect(String(failure?.payload.error ?? "")).toMatch(/job_run_records/);
-    // And no ledger row exists — the write really did fail (read the
-    // underlying store, not the throwing proxy).
-    const store = new SqlJobRunRecordStore(base as any);
-    expect(store.listByJob(STOCK_COPILOT_TASK_ID).length).toBe(0);
+    // And no ledger row exists — the write really did fail (the
+    // failing D1 binding still answers reads, so read it back
+    // through the D1 store).
+    const store = ledgerD1(d1);
+    expect((await store.listByJob(STOCK_COPILOT_TASK_ID)).length).toBe(0);
   });
 });

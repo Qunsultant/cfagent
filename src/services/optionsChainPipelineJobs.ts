@@ -318,7 +318,7 @@ export function optionsChainStepDepsForScheduledAgent(
   const env = ctx.env;
   return {
     env,
-    engineStores: optionsEngineStoresFromSql(pipelineSql(ctx)),
+    engineStores: optionsEngineStoresFromSql(pipelineSql(ctx), env),
     queue: stageQueueSendFromEnv(env),
     chainSourceFor: (args) => resolveChainSourceForRequest(env, args),
     blobPut: defaultBlobPut(env),

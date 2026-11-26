@@ -38,11 +38,14 @@
  * Part B (seam equivalence) — green before AND after S2;
  * these pin the #2347 observable contract the migration
  * must not move:
- *  - fresh WithR2 store: fanout_outcome byte-identical
- *    (stored_r2 / r2 / STORED), row carries the pointer and
- *    an empty inline body, exactly one put with identical
- *    key/bytes/contentType, and the put still PRECEDES the
- *    insert (a row never claims a body it does not have);
+ *  - fresh WithR2 store: the store-result fanout byte-identical
+ *    (stored_r2 / r2 / STORED) — the ROW carries no fan-out
+ *    outcome anymore (D1 carries no fan-out column, #6101
+ *    named loss: read-back fanoutOutcome is null); the row
+ *    carries the pointer and an empty inline body, exactly
+ *    one put with identical key/bytes/contentType, and the
+ *    put still PRECEDES the insert (a row never claims a body
+ *    it does not have);
  *  - put failure: stored_inline_fallback / inline_fallback /
  *    DEGRADED, the seam's exact fallback log line, the row
  *    complete inline;
@@ -55,12 +58,11 @@
  *    object and returns null (today's behaviour — pinned,
  *    not "fixed").
  *
- * DOUBLES: node:sqlite-backed SqlStorage (real semantics),
+ * DOUBLES: MockD1Database (node:sqlite-backed D1, #6101 step 8),
  * recording fake R2 buckets.
  *
  * #CDO-mha7
  */
-import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/actors/thinkAdapter", () => ({
@@ -81,16 +83,16 @@ import {
   type PublishDocumentInput,
   type PublishTargetOutcome,
 } from "../src/services/documentPublish";
+import { MockD1Database } from "./mock-d1";
 import {
   getCanonicalReport,
-  getCanonicalReportFanoutOutcome,
+  listScheduledReports,
   reportBodyR2Key as seamReportBodyR2Key,
   storeReportAtGeneration,
   storeReportAtGenerationWithR2,
   type ScheduledReportInput,
 } from "../src/services/scheduledReports";
 import { DataFoundationCode } from "../src/aspects/errorCodes";
-import type { SqlStorage } from "../src/orm";
 
 const DOC: PublishDocumentInput = {
   kind: "report",
@@ -350,20 +352,42 @@ describe("3527 S2 stage: r2-body target", () => {
 /* Part B — seam equivalence (green before and after the migration).  */
 /* ------------------------------------------------------------------ */
 
-class SqliteTestStorage {
-  readonly sqlite = new DatabaseSync(":memory:");
-  failInserts = false;
-  exec(query: string, ...params: unknown[]): unknown[] {
-    if (this.failInserts && /^\s*INSERT\s+INTO\s+mas_reports/i.test(query)) {
-      throw new Error("simulated insert failure");
-    }
-    const stmt = this.sqlite.prepare(query);
-    if (/^\s*(SELECT|PRAGMA)/i.test(query)) {
-      return stmt.all(...(params as never[])) as unknown[];
-    }
-    stmt.run(...(params as never[]));
-    return [];
-  }
+type D1Database = any;
+
+/** Fresh D1 env per test (#6101 step 8: the seam reads/writes D1). */
+function d1Env(extra: Record<string, unknown> = {}) {
+  const mock = new MockD1Database();
+  const env = {
+    AGENT_DB: mock as unknown as D1Database,
+    IAAA_TENANT_ID: "tenant-3527-s2",
+    ...extra,
+  };
+  return { mock, env };
+}
+
+/**
+ * A D1 stand-in whose agent_reports INSERT throws — the #6101
+ * replacement for the old fake-sql failInserts flag (put succeeds,
+ * INSERT fails: null result, no row, the object strands).
+ */
+function failingInsertD1Env(extra: Record<string, unknown> = {}) {
+  const mock = new MockD1Database();
+  const broken = {
+    sqlite: mock.sqlite,
+    prepare(sql: string) {
+      if (/^\s*INSERT\s+INTO\s+["`]?agent_reports/i.test(sql)) {
+        throw new Error("simulated insert failure");
+      }
+      return mock.prepare(sql);
+    },
+    batch: (stmts: any[]) => mock.batch(stmts),
+  };
+  const env = {
+    AGENT_DB: broken as unknown as D1Database,
+    IAAA_TENANT_ID: "tenant-3527-s2",
+    ...extra,
+  };
+  return { mock, env };
 }
 
 const flush = async () => {
@@ -386,23 +410,19 @@ function input(over: Partial<ScheduledReportInput> = {}): ScheduledReportInput {
   };
 }
 
-function rowCount(sql: SqliteTestStorage): number {
-  return (sql.exec(`SELECT id FROM mas_reports`) as unknown[]).length;
+async function rowCount(env: Record<string, unknown>): Promise<number> {
+  return (await listScheduledReports(env as never)).length;
 }
 
 describe("3527 S2 seam equivalence: the WithR2 body leg", () => {
   it("fresh store: identical put + byte-identical fanout + pointer row", async () => {
-    const sql = new SqliteTestStorage();
     const { calls, objects, bucket } = makeRecordingBucket();
-    const stored = await storeReportAtGenerationWithR2(
-      sql as unknown as SqlStorage,
-      // Phase 3 (#6550): AI_SEARCH_REPORT_INDEXING_ENABLED lives in
-      // environment.config.json (ON in production), so a bare env no
-      // longer means the report leg is off — it would attempt (and
-      // record) an index instead of "not_attempted"/"disabled".
-      { REPORTS_BUCKET: bucket, AI_SEARCH_REPORT_INDEXING_ENABLED: "0" } as never,
-      input(),
-    );
+    // Phase 3 (#6550): AI_SEARCH_REPORT_INDEXING_ENABLED lives in
+    // environment.config.json (ON in production), so a bare env no
+    // longer means the report leg is off — it would attempt (and
+    // record) an index instead of "not_attempted"/"disabled".
+    const { env } = d1Env({ REPORTS_BUCKET: bucket, AI_SEARCH_REPORT_INDEXING_ENABLED: "0" });
+    const stored = await storeReportAtGenerationWithR2(env as never, input());
     expect(stored?.created).toBe(true);
     expect(stored?.fanout).toEqual({
       outcome: "stored_r2",
@@ -420,30 +440,22 @@ describe("3527 S2 seam equivalence: the WithR2 body leg", () => {
       },
     ]);
     expect(objects.get(key)).toBe(JSON.stringify(input().body));
-    const hit = getCanonicalReport(sql as unknown as SqlStorage, stored!.reportId);
+    const hit = await getCanonicalReport(env as never, stored!.reportId);
     expect(hit?.bodyR2Key).toBe(key);
     await flush();
-    const recorded = getCanonicalReportFanoutOutcome(
-      sql as unknown as SqlStorage,
-      stored!.reportId,
-    );
-    expect(recorded).toEqual({
-      outcome: "stored_r2",
-      code: DataFoundationCode.REPORT_FANOUT_STORED,
-      body: "r2",
-      vectorize: "not_attempted",
-      aiSearch: "not_attempted",
-      aiSearchCode: "disabled",
-    });
+    // #6101 step 8 (named loss): D1 agent_reports carries no fan-out
+    // column, so the read-back outcome is ALWAYS null — the store
+    // result above still carries the outcome as known at return time.
+    expect(hit?.fanoutOutcome).toBeNull();
   });
 
   it("ordering: the put still precedes the row insert", async () => {
-    const sql = new SqliteTestStorage();
+    const { env } = d1Env();
     const objects = new Map<string, string>();
     let rowsAtPutTime = -1;
     const bucket = {
       put: async (key: string, value: unknown) => {
-        rowsAtPutTime = rowCount(sql);
+        rowsAtPutTime = await rowCount(env);
         objects.set(key, String(value));
       },
       get: async (key: string) => {
@@ -455,18 +467,17 @@ describe("3527 S2 seam equivalence: the WithR2 body leg", () => {
       },
     };
     const stored = await storeReportAtGenerationWithR2(
-      sql as unknown as SqlStorage,
-      { REPORTS_BUCKET: bucket } as never,
+      { ...env, REPORTS_BUCKET: bucket } as never,
       input(),
     );
     expect(stored?.created).toBe(true);
     expect(rowsAtPutTime).toBe(0);
-    expect(rowCount(sql)).toBe(1);
+    expect(await rowCount(env)).toBe(1);
   });
 
   it("put failure: recorded inline fallback + the seam's exact log line + the row complete inline", async () => {
-    const sql = new SqliteTestStorage();
     const { objects, bucket } = makeRecordingBucket({ failPut: true });
+    const { env } = d1Env({ REPORTS_BUCKET: bucket });
     // #3515 S3: the seam's log line now travels as a structured
     // storeReportAtGenerationWithR2.r2_body_put_failed event (level error)
     // on the console-info JSON fallback, not a console.error line. The pin
@@ -474,11 +485,7 @@ describe("3527 S2 seam equivalence: the WithR2 body leg", () => {
     // exact same line, verbatim.
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
-      const stored = await storeReportAtGenerationWithR2(
-        sql as unknown as SqlStorage,
-        { REPORTS_BUCKET: bucket } as never,
-        input(),
-      );
+      const stored = await storeReportAtGenerationWithR2(env as never, input());
       expect(stored?.created).toBe(true);
       expect(stored?.fanout).toEqual({
         outcome: "stored_inline_fallback",
@@ -520,17 +527,10 @@ describe("3527 S2 seam equivalence: the WithR2 body leg", () => {
       expect(putFailed?.fields.reportId).toBe(stored!.reportId);
       expect(putFailed?.fields.error).toBe("r2 put boom");
       await flush();
-      const recorded = getCanonicalReportFanoutOutcome(
-        sql as unknown as SqlStorage,
-        stored!.reportId,
-      );
-      expect(recorded?.outcome).toBe("stored_inline_fallback");
-      expect(recorded?.body).toBe("inline_fallback");
-      expect(recorded?.code).toBe(DataFoundationCode.REPORT_FANOUT_DEGRADED);
-      const hit = getCanonicalReport(
-        sql as unknown as SqlStorage,
-        stored!.reportId,
-      );
+      // #6101 step 8 (named loss): the fallback outcome lives on the
+      // store result above, not on the row — the D1 read is null.
+      const hit = await getCanonicalReport(env as never, stored!.reportId);
+      expect(hit?.fanoutOutcome).toBeNull();
       expect(hit?.bodyR2Key).toBeNull();
       expect(hit?.body).toContain("NVDA");
       expect(objects.size).toBe(0);
@@ -540,12 +540,8 @@ describe("3527 S2 seam equivalence: the WithR2 body leg", () => {
   });
 
   it("bucket unbound: plain inline store — not the fallback, not degraded", async () => {
-    const sql = new SqliteTestStorage();
-    const stored = await storeReportAtGenerationWithR2(
-      sql as unknown as SqlStorage,
-      {} as never,
-      input(),
-    );
+    const { env } = d1Env();
+    const stored = await storeReportAtGenerationWithR2(env as never, input());
     expect(stored?.fanout).toEqual({
       outcome: "stored_inline",
       code: DataFoundationCode.REPORT_FANOUT_STORED,
@@ -553,19 +549,15 @@ describe("3527 S2 seam equivalence: the WithR2 body leg", () => {
       vectorize: "not_attempted",
       aiSearch: "pending",
     });
-    const hit = getCanonicalReport(sql as unknown as SqlStorage, stored!.reportId);
+    const hit = await getCanonicalReport(env as never, stored!.reportId);
     expect(hit?.bodyR2Key).toBeNull();
     expect(hit?.body).toContain("NVDA");
   });
 
   it("the non-R2 seam never puts, even with a bucket in its env (it did not request the body leg)", async () => {
-    const sql = new SqliteTestStorage();
     const { calls, bucket } = makeRecordingBucket();
-    const stored = storeReportAtGeneration(
-      sql as unknown as SqlStorage,
-      input(),
-      { REPORTS_BUCKET: bucket } as never,
-    );
+    const { env } = d1Env({ REPORTS_BUCKET: bucket });
+    const stored = await storeReportAtGeneration(input(), env as never);
     expect(stored?.fanout.outcome).toBe("stored_inline");
     expect(stored?.fanout.body).toBe("inline");
     await flush();
@@ -573,44 +565,30 @@ describe("3527 S2 seam equivalence: the WithR2 body leg", () => {
   });
 
   it("dedupe never rewrites the R2 object; the deduped outcome still names body r2", async () => {
-    const sql = new SqliteTestStorage();
     const { calls, bucket } = makeRecordingBucket();
-    const env = { REPORTS_BUCKET: bucket } as never;
-    const first = await storeReportAtGenerationWithR2(
-      sql as unknown as SqlStorage,
-      env,
-      input(),
-    );
-    const second = await storeReportAtGenerationWithR2(
-      sql as unknown as SqlStorage,
-      env,
-      input(),
-    );
+    const { env } = d1Env({ REPORTS_BUCKET: bucket });
+    const first = await storeReportAtGenerationWithR2(env as never, input());
+    const second = await storeReportAtGenerationWithR2(env as never, input());
     expect(first?.created).toBe(true);
     expect(second?.created).toBe(false);
     expect(second?.fanout.outcome).toBe("deduped");
     expect(second?.fanout.body).toBe("r2");
     await flush();
     expect(calls).toHaveLength(1);
-    expect(rowCount(sql)).toBe(1);
+    expect(await rowCount(env)).toBe(1);
   });
 
   it("put succeeds, INSERT fails: null result, no row, the object strands (today's behaviour, pinned)", async () => {
-    const sql = new SqliteTestStorage();
-    sql.failInserts = true;
     const { objects, bucket } = makeRecordingBucket();
+    const { env } = failingInsertD1Env({ REPORTS_BUCKET: bucket });
     // #3515 S3: the failure now travels as a structured
     // storeReportAtGenerationWithR2.failed event (level error) on the
     // console-info JSON fallback, not a console.error line.
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
-      const stored = await storeReportAtGenerationWithR2(
-        sql as unknown as SqlStorage,
-        { REPORTS_BUCKET: bucket } as never,
-        input(),
-      );
+      const stored = await storeReportAtGenerationWithR2(env as never, input());
       expect(stored).toBeNull();
-      expect(rowCount(sql)).toBe(0);
+      expect(await rowCount(env)).toBe(0);
       expect(objects.size).toBe(1);
       const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
       for (const call of infoSpy.mock.calls) {
@@ -645,10 +623,9 @@ describe("3527 S2 seam equivalence: the WithR2 body leg", () => {
   });
 
   it("index legs are untouched by the migration: vectorize indexes the R2-bodied row after settle", async () => {
-    const sql = new SqliteTestStorage();
     const { bucket } = makeRecordingBucket();
     const upserts: Array<{ id: string }> = [];
-    const env = {
+    const { env } = d1Env({
       REPORTS_BUCKET: bucket,
       AI: { run: async () => ({ data: [[0.1, 0.2, 0.3]] }) },
       // Phase 3 (#6550): AI_SEARCH_REPORT_INDEXING_ENABLED lives in
@@ -662,20 +639,15 @@ describe("3527 S2 seam equivalence: the WithR2 body leg", () => {
           upserts.push(...vectors);
         },
       },
-    } as never;
-    const stored = await storeReportAtGenerationWithR2(
-      sql as unknown as SqlStorage,
-      env,
-      input(),
-    );
+    });
+    const stored = await storeReportAtGenerationWithR2(env as never, input());
     await flush();
     expect(upserts).toHaveLength(1);
-    const recorded = getCanonicalReportFanoutOutcome(
-      sql as unknown as SqlStorage,
-      stored!.reportId,
-    );
-    expect(recorded?.body).toBe("r2");
-    expect(recorded?.vectorize).toBe("indexed");
-    expect(recorded?.code).toBe(DataFoundationCode.REPORT_FANOUT_STORED);
+    // #6101 step 8 (named loss): the settled vectorize outcome is no
+    // longer recorded on the row — the D1 read is null; the row still
+    // carries the R2 pointer and the leg still ran (upsert above).
+    const hit = await getCanonicalReport(env as never, stored!.reportId);
+    expect(hit?.bodyR2Key).toBe(`reports/${stored!.reportId}.json`);
+    expect(hit?.fanoutOutcome).toBeNull();
   });
 });

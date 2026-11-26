@@ -418,6 +418,15 @@ const ORCH = "agents/orchestrator.ts";
  *  src/services/runLedgerProjectionHooks.ts) — measured 4,064
  *  lines / 186,709 B on the rebased tree, so budget lines rise to
  *  4070 and bytes rise to 187_300 (~590 B headroom).
+ *  #6101 (D1-first run ledger) DELETES projectQueuedRunLedger and
+ *  reconcileRunLedgerProjection, with runLedgerProjectionHooks.ts,
+ *  runLedgerProjectionPosting.ts, runLedgerProjection.ts and the
+ *  runLedgerQueueTransport — the D1 writer
+ *  (D1JobRunRecordStore.foldJobOutcome via recordLedgerRunD1) is
+ *  the only ledger write left, and recordFeedJobOutcome folds
+ *  through it. The deletion pin below asserts the RPCs stay
+ *  deleted; they are never re-added to the expectations. The
+ *  #6006 budget entry above is history, not a live expectation.
  *  #5160 (IDP profile) adds the two thin get/setIdpProfileConfig
  *  delegating wrappers + their imports (execution in
  *  orchestrator/idpProfileConfig.ts; the class gains no logic) —
@@ -449,7 +458,12 @@ const ORCH = "agents/orchestrator.ts";
  *  #3122 (agentic loop safeguards, landed on main after the #6503
  *  rebase) adds the loop state + turn queue + run-ID mint to the
  *  class — measured 4,160 lines / 192,343 B on the rebased tree, so
- *  budget lines rise to 4170 and bytes rise to 192_900. */
+ *  budget lines rise to 4170 and bytes rise to 192_900.
+ *  #6101 (run-ledger D1 consolidation) shrinks the class across its
+ *  steps — projector hooks, outcome folds, and (step 8) the
+ *  seedCanonicalReports delegating wrapper + its import, the seed
+ *  retired — measured 4,001 lines / 185,092 B; budget keeps 4170
+ *  and 192_900 (a shrink needs no budget change). */
 const BUDGET_LINES = 4170;
 const BUDGET_BYTES = 192_900;
 
@@ -547,6 +561,30 @@ describe("orchestrator class inventory (#992 standing gate)", () => {
     }
     // Deliberate retention: autonomousOptionsAnalysis only (see header).
     expect(count(text, "new ScheduledTasksService(")).toBe(1);
+  });
+
+  it("keeps the deleted #6101 run-ledger projection RPCs deleted", () => {
+    // Issue #6101 — projectQueuedRunLedger and
+    // reconcileRunLedgerProjection are deleted by design (with
+    // runLedgerProjectionHooks.ts, runLedgerProjectionPosting.ts,
+    // runLedgerProjection.ts and the runLedgerQueueTransport):
+    // the D1 writer is the only ledger write left. They must not
+    // be re-added to the class or to this inventory's expectations.
+    const text = src(ORCH);
+    for (const marker of [
+      "projectQueuedRunLedger",
+      "reconcileRunLedgerProjection",
+      "runLedgerProjectionHooks",
+      "runLedgerProjectionPosting",
+      "runLedgerProjection",
+      "runLedgerQueueTransport",
+      "runLedgerReconcile",
+    ]) {
+      expect(count(text, marker), marker).toBe(0);
+    }
+    // The fold itself survives, now D1-direct: recordFeedJobOutcome
+    // still folds outcomes, without any projection RPC.
+    expect(text).toContain("recordFeedJobOutcome");
   });
 
   it("caps inline schedule registrations at the post-refactor counts", () => {

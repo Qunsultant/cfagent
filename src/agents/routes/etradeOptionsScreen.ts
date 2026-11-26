@@ -264,7 +264,7 @@ async function executeOptionsScreenViaSync(args: ExecuteOptionsScreenArgs, gener
       // Issue #4068: the engine run record is durable in this DO's
       // SQLite (the same handle the stage claims + delivery
       // suppressor already use).
-      engineStores: optionsEngineStoresFromSql(ctx.agentCtx.storage.sql),
+      engineStores: optionsEngineStoresFromSql(ctx.agentCtx.storage.sql, ctx.env),
       // Issue #6179: the OTel observers for this dispatch — the
       // manual run emits job.run.settled like the scheduled runs.
       otel: getOtelJobPipelineObservers(ctx.env),
@@ -523,7 +523,7 @@ async function runUnifiedOpportunitiesViaPipeline(args: {
       // takes the SQL path, so production behavior is unchanged.
       engineStores:
         typeof ctx.agentCtx.storage.sql?.exec === "function"
-          ? optionsEngineStoresFromSql(ctx.agentCtx.storage.sql)
+          ? optionsEngineStoresFromSql(ctx.agentCtx.storage.sql, ctx.env)
           : optionsEngineStoresInMemory(),
       // Issue #6179: the OTel observers for this dispatch — the
       // unified scan emits job.run.settled like the scheduled runs.
@@ -788,7 +788,7 @@ export async function executeUnifiedOptions(args: {
     const runId = newRunId();
     const rowGenerationId = generationId(runId);
     const orm = ctx.getOrm();
-    storeOptionsCanonicalReport(orm, {
+    await storeOptionsCanonicalReport(orm, {
       runId,
       generationId: rowGenerationId,
       title: `Options scanner — ${reqData.thesis || "mixed"} (${generatedAt.slice(0, 10)})`,
@@ -869,7 +869,7 @@ export async function executeUnifiedOptions(args: {
     scannerCsvKey = artifactLinks.csvKey;
     scannerCsvUrl = artifactLinks.csvUrl;
     const orm = ctx.getOrm();
-    storeOptionsCanonicalReport(orm, {
+    await storeOptionsCanonicalReport(orm, {
       runId: strategyRunId,
       generationId: strategyGenerationId,
       title: `Options strategy ${action === "llm_ideas" || action === "llm_evaluate" ? "AI" : "screener"} — ${symbol} (${action})`,
