@@ -396,7 +396,11 @@ describe("3527 S2 seam equivalence: the WithR2 body leg", () => {
     const { calls, objects, bucket } = makeRecordingBucket();
     const stored = await storeReportAtGenerationWithR2(
       sql as unknown as SqlStorage,
-      { REPORTS_BUCKET: bucket } as never,
+      // Phase 3 (#6550): AI_SEARCH_REPORT_INDEXING_ENABLED lives in
+      // environment.config.json (ON in production), so a bare env no
+      // longer means the report leg is off — it would attempt (and
+      // record) an index instead of "not_attempted"/"disabled".
+      { REPORTS_BUCKET: bucket, AI_SEARCH_REPORT_INDEXING_ENABLED: "0" } as never,
       input(),
     );
     expect(stored?.created).toBe(true);
@@ -647,6 +651,12 @@ describe("3527 S2 seam equivalence: the WithR2 body leg", () => {
     const env = {
       REPORTS_BUCKET: bucket,
       AI: { run: async () => ({ data: [[0.1, 0.2, 0.3]] }) },
+      // Phase 3 (#6550): AI_SEARCH_REPORT_INDEXING_ENABLED lives in
+      // environment.config.json (ON in production); with the leg
+      // attempting (and failing, no AI_SEARCH binding here) the
+      // fanout code degrades instead of staying STORED. This test
+      // pins the vectorize leg, so the report leg stays off.
+      AI_SEARCH_REPORT_INDEXING_ENABLED: "0",
       VECTOR_MEMORY: {
         upsert: async (vectors: Array<{ id: string }>) => {
           upserts.push(...vectors);

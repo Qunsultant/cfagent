@@ -225,6 +225,9 @@ describe("Issue #1499 — service hook resolves presetId at run time", () => {
       expectedCount: 10,
     });
     env = {
+      // Phase 3 (#6550): monetization is ON via environment.config.json;
+      // these tests pin preset resolution, not the paid gate, so it stays off.
+      MONETIZATION_ENABLED: "0",
       APP_ENV: "TEST",
       APP_BASE_URL: "https://agent.openaimp.com",
       ETRADE_ENVIRONMENT: "sandbox",

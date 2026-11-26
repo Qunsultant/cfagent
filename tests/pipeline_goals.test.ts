@@ -31,7 +31,15 @@ import { OPERATION_CATALOG } from "../src/orchestrate";
 
 // Monday 2026-10-26 09:00 EDT = 13:00Z.
 const MON_0900 = Date.parse("2026-10-26T13:00:00Z");
-const ENABLED = { SOCIAL_POSTING_ENABLED: "1" };
+const ENABLED = {
+  SOCIAL_POSTING_ENABLED: "1",
+  // Phase 3 (#6550): SOCIAL_AUTONOMOUS_CHANNELS lives in
+  // environment.config.json ("threads" in production), so a bare env
+  // no longer resolves the code default ["threads", "x"]. This
+  // pipeline pins the two-autonomous-channel shape (x + threads),
+  // so the list is set explicitly here.
+  SOCIAL_AUTONOMOUS_CHANNELS: "threads,x",
+};
 
 function memoryBriefStore(initial: Record<string, string> = {}): SocialBriefStore & {
   calls: string[];

@@ -121,6 +121,10 @@ interface FetchCall {
 
 function makeEnv(fetchCalls: FetchCall[], fetchImpl?: (req: Request) => Promise<unknown>) {
   return {
+    // Phase 3 (#6550): SERVICE_USER_LOGIN now resolves
+    // "svc-background" from environment.config.json, so the
+    // no-identity case needs the malformed login.
+    SERVICE_USER_LOGIN: "not a login!",
     SCREENER_EVENTS: { send: async () => {} },
     ORCHESTRATOR_AGENT: {
       idFromName: (_name: string) => "stub-id",

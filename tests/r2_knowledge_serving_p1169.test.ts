@@ -184,17 +184,21 @@ describe("#3322 broker-neutral service name (alias retired by #3342)", () => {
 });
 
 describe("#1169 S2 serving flag", () => {
-  it("is on for 1/true/on (case-insensitive, trimmed) and off otherwise", () => {
+  // Phase 3 (#6550): the flag moved to environment.config.json
+  // (defaults.aiSearch.knowledgeServingEnabled, "1"), so an absent
+  // or blank env now resolves to the FILE value (ON). Only an
+  // explicit off value turns it off.
+  it("is on for 1/true/on (case-insensitive, trimmed); absent/blank resolve to the file value (ON)", () => {
     expect(isKnowledgeServingEnabled({ KNOWLEDGE_SERVING_ENABLED: "1" })).toBe(true);
     expect(isKnowledgeServingEnabled({ KNOWLEDGE_SERVING_ENABLED: "true" })).toBe(true);
     expect(isKnowledgeServingEnabled({ KNOWLEDGE_SERVING_ENABLED: "on" })).toBe(true);
     expect(isKnowledgeServingEnabled({ KNOWLEDGE_SERVING_ENABLED: "  TRUE  " })).toBe(true);
-    expect(isKnowledgeServingEnabled({})).toBe(false);
-    expect(isKnowledgeServingEnabled(undefined)).toBe(false);
-    expect(isKnowledgeServingEnabled(null)).toBe(false);
+    expect(isKnowledgeServingEnabled({})).toBe(true);
+    expect(isKnowledgeServingEnabled(undefined)).toBe(true);
+    expect(isKnowledgeServingEnabled(null)).toBe(true);
+    expect(isKnowledgeServingEnabled({ KNOWLEDGE_SERVING_ENABLED: "" })).toBe(true);
     expect(isKnowledgeServingEnabled({ KNOWLEDGE_SERVING_ENABLED: "0" })).toBe(false);
     expect(isKnowledgeServingEnabled({ KNOWLEDGE_SERVING_ENABLED: "false" })).toBe(false);
-    expect(isKnowledgeServingEnabled({ KNOWLEDGE_SERVING_ENABLED: "" })).toBe(false);
   });
 
   it("parses knowledge/ bucket keys and rejects everything else", () => {
@@ -375,7 +379,7 @@ describe("#1169 S2 serving route GET /knowledge/file", () => {
   };
 
   it("flag-OFF falls through (null) — today's behavior, no such route", async () => {
-    const res = await getFile(`knowledge/broker_rules/${hash}`, { login: LOGIN });
+    const res = await getFile(`knowledge/broker_rules/${hash}`, { login: LOGIN, flag: "0" });
     expect(res).toBeNull();
   });
 
@@ -470,7 +474,7 @@ describe("#1169 S2 MAS provenance (flag-gated)", () => {
   });
 
   it("flag-OFF passes upstream chunks through verbatim (today's shape)", async () => {
-    const mas: any = createMAS(masOpts(masEnv(undefined, { chunks: [SCORED_CAT] }), "sess-off-1"));
+    const mas: any = createMAS(masOpts(masEnv("0", { chunks: [SCORED_CAT] }), "sess-off-1"));
     const res = await mas.searchKnowledge.execute({ query: "broker rules" });
     expect(res.chunks).toHaveLength(1);
     expect(res.chunks[0]).toEqual(SCORED_CAT);

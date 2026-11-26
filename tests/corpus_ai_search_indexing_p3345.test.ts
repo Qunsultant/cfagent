@@ -129,14 +129,21 @@ async function finraMeta(bytes: Uint8Array = HTML_BYTES): Promise<KnowledgeDocMe
 }
 
 describe("A. flag reader (#3345)", () => {
-  it("absent / empty / off values are OFF", () => {
-    expect(isAiSearchCorpusIndexingEnabled({})).toBe(false);
-    expect(isAiSearchCorpusIndexingEnabled({ [FLAG]: "" })).toBe(false);
+  // Phase 3 (#6550): the flag moved to environment.config.json
+  // (defaults.aiSearch.corpusIndexingEnabled, "1" in production), so
+  // an absent or blank env now resolves to the FILE value (ON), not
+  // to OFF. Only an explicit off value turns it off.
+  it("absent / empty values resolve to the file value (ON)", () => {
+    expect(isAiSearchCorpusIndexingEnabled({})).toBe(true);
+    expect(isAiSearchCorpusIndexingEnabled({ [FLAG]: "" })).toBe(true);
+    expect(isAiSearchCorpusIndexingEnabled(null)).toBe(true);
+    expect(isAiSearchCorpusIndexingEnabled(undefined)).toBe(true);
+  });
+
+  it("explicit off values are OFF", () => {
     expect(isAiSearchCorpusIndexingEnabled({ [FLAG]: "0" })).toBe(false);
     expect(isAiSearchCorpusIndexingEnabled({ [FLAG]: "false" })).toBe(false);
     expect(isAiSearchCorpusIndexingEnabled({ [FLAG]: "off" })).toBe(false);
-    expect(isAiSearchCorpusIndexingEnabled(null)).toBe(false);
-    expect(isAiSearchCorpusIndexingEnabled(undefined)).toBe(false);
   });
 
   it('"1" / "true" / "on" (case-insensitive, trimmed) are ON', () => {
@@ -177,7 +184,7 @@ describe("C. corpus indexing hook (#3345)", () => {
     const { uploads, binding } = fakeNamespace();
     const meta = await finraMeta();
     const outcome = await indexCorpusDocInAiSearch(
-      { AI_SEARCH: binding as any, AI_SEARCH_INSTANCE: INSTANCE },
+      { AI_SEARCH: binding as any, AI_SEARCH_INSTANCE: INSTANCE, [FLAG]: "0" },
       { meta, bytes: HTML_BYTES }
     );
     expect(outcome.ok).toBe(false);
@@ -431,7 +438,7 @@ describe("D. sync backfill leg (#3345)", () => {
     const { metaA, metaC, manifest, records, bucket } = await fixture();
     const { uploads, binding } = fakeNamespace();
     const out = await runCorpusAiSearchIndexBackfill(
-      { AI_SEARCH: binding as any, AI_SEARCH_INSTANCE: INSTANCE },
+      { AI_SEARCH: binding as any, AI_SEARCH_INSTANCE: INSTANCE, [FLAG]: "0" },
       { manifest, recordStore: stubRecordStore(records), bucket: bucket as any }
     );
     const byKey = new Map(out.items.map((i) => [i.bucketKey, i]));
@@ -603,6 +610,7 @@ describe("F. routes (#3345)", () => {
       REPORTS_BUCKET: bucket,
       AI_SEARCH: binding,
       AI_SEARCH_INSTANCE: INSTANCE,
+      [FLAG]: "0",
     });
     expect(res!.status).toBe(201);
     const body = (await res!.json()) as Record<string, any>;

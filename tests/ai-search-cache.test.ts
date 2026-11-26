@@ -16,10 +16,15 @@ import {
 } from "../src/services/aiSearchCache";
 
 describe("resolveAiSearchCacheConfig", () => {
-  it("returns sane defaults when env is absent", () => {
+  // Phase 3 (#6550): the cache TTL/entries vars moved to
+  // environment.config.json (defaults.aiSearch). An absent or invalid
+  // env now resolves to the FILE values (7200000/1000), not the
+  // code defaults (300000/200) — the code defaults survive only as
+  // the guard fallback for a value that is invalid after resolution.
+  it("returns the file values when env is absent", () => {
     const cfg = resolveAiSearchCacheConfig(undefined);
-    expect(cfg.ttlMs).toBe(AI_SEARCH_CACHE_DEFAULT_TTL_MS);
-    expect(cfg.maxEntries).toBe(AI_SEARCH_CACHE_DEFAULT_MAX_ENTRIES);
+    expect(cfg.ttlMs).toBe(7200000);
+    expect(cfg.maxEntries).toBe(1000);
   });
 
   it("parses env vars", () => {
@@ -31,13 +36,18 @@ describe("resolveAiSearchCacheConfig", () => {
     expect(cfg.maxEntries).toBe(42);
   });
 
-  it("falls back to defaults on invalid values", () => {
+  it("falls back to the file values on invalid values", () => {
     const cfg = resolveAiSearchCacheConfig({
       AI_SEARCH_CACHE_TTL_MS: "nope",
       AI_SEARCH_CACHE_MAX_ENTRIES: "-5",
     });
-    expect(cfg.ttlMs).toBe(AI_SEARCH_CACHE_DEFAULT_TTL_MS);
-    expect(cfg.maxEntries).toBe(AI_SEARCH_CACHE_DEFAULT_MAX_ENTRIES);
+    expect(cfg.ttlMs).toBe(7200000);
+    expect(cfg.maxEntries).toBe(1000);
+  });
+
+  it("keeps the code defaults as the guard fallback constants", () => {
+    expect(AI_SEARCH_CACHE_DEFAULT_TTL_MS).toBe(300000);
+    expect(AI_SEARCH_CACHE_DEFAULT_MAX_ENTRIES).toBe(200);
   });
 });
 

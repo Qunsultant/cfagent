@@ -94,6 +94,7 @@ import {
   type AISearchResultItem,
 } from "../services/aiSearch";
 import { isKnowledgeServingEnabled } from "../services/knowledgeCorpus";
+import { resolveEnvironmentConfig } from "../config/environment";
 import { RemoteMcpClient } from "../mcps/client/mcpClient";
 import { AGENT_ERROR_CATALOG, AgentErrorCode } from "../aspects/errorCodes";
 import type { Env } from "../types";
@@ -444,7 +445,11 @@ export async function runAiSearchPaths(
   const attempts: PathAttempt[] = [];
 
   // 1. namespace (PRIMARY): binding + instance name.
-  const instanceName = nonEmptyString(env.AI_SEARCH_INSTANCE);
+  // Phase 3 (#6550): the instance name now resolves from
+  // environment.config.json (defaults.aiSearch.instance), not env.
+  const instanceName = nonEmptyString(
+    resolveEnvironmentConfig(env).workerSettings.aiSearch.instance,
+  );
   if (env.AI_SEARCH && instanceName) {
     const binding = env.AI_SEARCH;
     const namespaceSearch = deps.namespaceSearch ?? defaultNamespaceSearch;
@@ -571,7 +576,9 @@ export async function searchAiSearchNamespaceChunks(
   query: string,
   opts: AiSearchAgentSearchOptions = {},
 ): Promise<AiSearchNamespaceChunksOutcome> {
-  const instanceName = nonEmptyString(env?.AI_SEARCH_INSTANCE);
+  const instanceName = nonEmptyString(
+    resolveEnvironmentConfig(env).workerSettings.aiSearch.instance,
+  );
   if (!env?.AI_SEARCH || !instanceName) {
     return {
       ok: false,
@@ -680,44 +687,40 @@ export function aiSearchAgentResultToQueryResponse(
 
 /**
  * Issue #2246: is report indexing into the AI Search instance
- * enabled? Follows the S2 precedent (isKnowledgeServingEnabled):
- * the env var is a plain string, "1"/"true"/"on" (case-insensitive,
- * trimmed) means ON, and ABSENCE means OFF. The var is deliberately
- * NOT in wrangler.jsonc — the capability ships default-off, and
- * enablement is a config change after the #1169 probe, never a
- * code change. When OFF, the pipeline hook in
- * src/services/reportAiSearchIndex.ts is a silent no-op and report
- * storage behaves exactly as before #2246 (Vectorize leg only).
+ * enabled? Phase 3 (#6550): the setting lives in
+ * environment.config.json (defaults.aiSearch.reportIndexingEnabled,
+ * ON in production); a still-set env var wins. When OFF, the
+ * pipeline hook in src/services/reportAiSearchIndex.ts is a silent
+ * no-op and report storage behaves exactly as before #2246
+ * (Vectorize leg only).
  */
 export function isAiSearchReportIndexingEnabled(
   env?: { AI_SEARCH_REPORT_INDEXING_ENABLED?: string } | null,
 ): boolean {
-  const v = env?.AI_SEARCH_REPORT_INDEXING_ENABLED;
-  if (typeof v !== "string") return false;
-  const norm = v.trim().toLowerCase();
-  return norm === "1" || norm === "true" || norm === "on";
+  // Phase 3 (#6550): resolves from environment.config.json
+  // (defaults.aiSearch.reportIndexingEnabled); a still-set env var
+  // wins, exactly as before the move.
+  return resolveEnvironmentConfig(env as Partial<Env> | undefined).workerSettings.aiSearch
+    .reportIndexingEnabled;
 }
 
 /**
  * Issue #3345: is corpus indexing into the AI Search instance
- * enabled? The corpus bridge's flag, read with the exact idiom of
- * isAiSearchReportIndexingEnabled above (and S2's
- * isKnowledgeServingEnabled): "1"/"true"/"on" (case-insensitive,
- * trimmed) means ON, ABSENCE means OFF. The var is deliberately
- * NOT in wrangler.jsonc — the bridge ships default-off, and
- * enablement is a config change after the #1169 probe, never a
- * code change. When OFF, the hooks in
- * src/services/corpusAiSearchIndex.ts record the honest
+ * enabled? Phase 3 (#6550): the setting lives in
+ * environment.config.json (defaults.aiSearch.corpusIndexingEnabled,
+ * ON in production); a still-set env var wins. When OFF, the hooks
+ * in src/services/corpusAiSearchIndex.ts record the honest
  * not-configured state and corpus writes/syncs behave exactly as
  * before #3345.
  */
 export function isAiSearchCorpusIndexingEnabled(
   env?: { AI_SEARCH_CORPUS_INDEXING_ENABLED?: string } | null,
 ): boolean {
-  const v = env?.AI_SEARCH_CORPUS_INDEXING_ENABLED;
-  if (typeof v !== "string") return false;
-  const norm = v.trim().toLowerCase();
-  return norm === "1" || norm === "true" || norm === "on";
+  // Phase 3 (#6550): resolves from environment.config.json
+  // (defaults.aiSearch.corpusIndexingEnabled); a still-set env var
+  // wins, exactly as before the move.
+  return resolveEnvironmentConfig(env as Partial<Env> | undefined).workerSettings.aiSearch
+    .corpusIndexingEnabled;
 }
 
 /** A document to index into the instance: id, text content, metadata. */
@@ -823,7 +826,9 @@ export async function runAiSearchIndexUpload(
       error: "AiSearch index upload requires a non-empty document id and content.",
     };
   }
-  const instanceName = nonEmptyString(env?.AI_SEARCH_INSTANCE);
+  const instanceName = nonEmptyString(
+    resolveEnvironmentConfig(env).workerSettings.aiSearch.instance,
+  );
   if (!env?.AI_SEARCH || !instanceName) {
     const error =
       "AI Search indexing is not configured: the namespace path needs the ai_search_namespaces binding (env.AI_SEARCH) plus AI_SEARCH_INSTANCE.";

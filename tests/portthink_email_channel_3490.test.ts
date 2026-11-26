@@ -778,6 +778,10 @@ describe("worker email export: agent channel vs NLQ fallthrough (#3490)", () => 
     const agent = new WorkerRoutedAgent(CTX, ENV_WITH_BINDING);
     const env = {
       ...ENV_WITH_BINDING,
+      // Phase 3 (#6550): SERVICE_USER_LOGIN now resolves
+      // "svc-background" from environment.config.json, so the
+      // no-identity case needs the malformed login.
+      SERVICE_USER_LOGIN: "not a login!",
       ORCHESTRATOR_AGENT: fakeNamespace(agent),
     } as unknown as Record<string, unknown>;
     // No SERVICE_USER_LOGIN: the NLQ handler fails loud on the
@@ -803,6 +807,10 @@ describe("worker email export: agent channel vs NLQ fallthrough (#3490)", () => 
     const agent = new WorkerRoutedAgent(CTX, ENV_WITH_BINDING);
     const env = {
       ...ENV_WITH_BINDING,
+      // Phase 3 (#6550): SERVICE_USER_LOGIN now resolves
+      // "svc-background" from environment.config.json, so the
+      // no-identity case needs the malformed login.
+      SERVICE_USER_LOGIN: "not a login!",
       ORCHESTRATOR_AGENT: fakeNamespace(agent),
     } as unknown as Record<string, unknown>;
     const message = workerMessage(

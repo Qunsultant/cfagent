@@ -235,7 +235,10 @@ describe("3c characterization: sync seam (storeReportAtGeneration)", () => {
 
   it("AI Search leg: flag OFF makes zero instance uploads; flag ON uploads once", async () => {
     const sqlOff = new SqliteTestStorage();
-    const off = makeAiSearchEnv();
+    // Phase 3 (#6550): AI_SEARCH_REPORT_INDEXING_ENABLED lives in
+    // environment.config.json (ON in production), so a bare env no
+    // longer means the flag is off.
+    const off = makeAiSearchEnv({ flag: "0" });
     storeReportAtGeneration(sqlOff as unknown as SqlStorage, input(), off.env as never);
     await flush();
     expect(off.uploads).toHaveLength(0);

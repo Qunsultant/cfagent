@@ -116,7 +116,9 @@ describe("#3741 one resolver — registry and identity", () => {
     expect(screener.value).toBe("on");
     expect(screener.source).toBe("stored");
     expect(orchestrator.value).toBe("off");
-    expect(orchestrator.source).toBe("default");
+    // Phase 3 (#6550): the file value arrives through the env level
+    // of the chain now, so a bare env reports "env", not "default".
+    expect(orchestrator.source).toBe("env");
   });
 
   it("(a) two registrations resolve the same channel differently from env alone", () => {
@@ -192,12 +194,14 @@ describe("#3741 production preservation — the defaults register holds (c)", ()
     expect(turn.mode).toBe("off");
     expect(turn.level).toBe("env");
     expect(turn.invalid).toBe(false);
-    // Nothing configured at all: the built-in default (off) holds.
+    // Phase 3 (#6550): nothing in the env, but the file carries
+    // CHAT_NLQ_MODE "off" — the bare env now reports the file value
+    // at the env level, not the built-in default.
     const bare = resolveAgentConfig("chatNlqMode", ORCHESTRATOR, { env: {} });
     expect(bare.value).toBe("off");
-    expect(bare.source).toBe("default");
+    expect(bare.source).toBe("env");
     expect(resolveChatNlqMode({}).mode).toBe("off");
-    expect(resolveChatNlqMode({}).level).toBe("builtin");
+    expect(resolveChatNlqMode({}).level).toBe("env");
   });
 
   it("screener ND resolves on from the production env; the gate resolver agrees", () => {
@@ -207,9 +211,11 @@ describe("#3741 production preservation — the defaults register holds (c)", ()
     const gate = resolveScreenerNdGateFromEnv(PRODUCTION_ENV);
     expect(gate.enabled).toBe(true);
     expect(gate.invalid).toBe(false);
-    // Nothing configured: the built-in default (off) holds.
-    expect(resolveScreenerNdGate(undefined)).toEqual({ enabled: false, invalid: false, raw: undefined });
-    expect(resolveAgentConfig("screenerNdMode", SCREENER, { env: {} }).value).toBe("off");
+    // Phase 3 (#6550): nothing in the env, but the file carries
+    // SCREENER_ND_MODE "on" — the bare env now resolves ON from the
+    // file, not the built-in default (off).
+    expect(resolveScreenerNdGate(undefined)).toEqual({ enabled: true, invalid: false, raw: "on" });
+    expect(resolveAgentConfig("screenerNdMode", SCREENER, { env: {} }).value).toBe("on");
   });
 
   it("capabilities are config-enabled for every class under the production env", () => {

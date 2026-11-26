@@ -190,7 +190,14 @@ describe("mesh screen door ND gate with a settings reader (#3922)", () => {
   });
 
   it("stored on admits an ND request while the env flag is unset", async () => {
-    const h = makeDoorHarness({}, readerFrom({ screener_nd_mode: "on" }));
+    const h = makeDoorHarness(
+      // Phase 3 (#6550): monetization is ON via
+      // environment.config.json; the paid gate fails the admitted ND
+      // request with the price-catalogue error before the workflow
+      // starts. This test pins ND admission, not payment, so it stays off.
+      { MONETIZATION_ENABLED: "false" },
+      readerFrom({ screener_nd_mode: "on" }),
+    );
     await runStockScreenViaDoor(h.ctx, "alice", {
       screenMode: "non-deterministic",
       screenIntent: ND_INTENT,
@@ -200,14 +207,24 @@ describe("mesh screen door ND gate with a settings reader (#3922)", () => {
   });
 
   it("a reader that finds nothing leaves the env resolution exactly as today", async () => {
-    const on = makeDoorHarness({ SCREENER_ND_MODE: "on" }, () => null);
+    // Phase 3 (#6550): monetization is ON via
+    // environment.config.json; the paid gate fails the admitted ND
+    // request with the price-catalogue error before the workflow
+    // starts. This test pins ND resolution, not payment, so it stays off.
+    const on = makeDoorHarness({ SCREENER_ND_MODE: "on", MONETIZATION_ENABLED: "false" }, () => null);
     await runStockScreenViaDoor(on.ctx, "alice", {
       screenMode: "non-deterministic",
       screenIntent: ND_INTENT,
     });
     expect(on.started).toHaveLength(1);
 
-    const off = makeDoorHarness({}, () => null);
+    // Phase 3 (#6550): SCREENER_ND_MODE now resolves "on" from
+    // environment.config.json (defaults.agent.screenerNdMode) when
+    // the env is unset and the reader finds nothing, so a bare env
+    // no longer means the gate is closed — the request is admitted
+    // and fails at the paid gate instead. The closed-gate rejection
+    // is pinned with an explicit off.
+    const off = makeDoorHarness({ SCREENER_ND_MODE: "off" }, () => null);
     await expect(
       runStockScreenViaDoor(off.ctx, "alice", {
         screenMode: "non-deterministic",
@@ -319,7 +336,11 @@ describe("tryStartScreenerWorkflow backstop with a settings reader (#3922)", () 
   });
 
   it("no reader → the env-only backstop, exactly as #2530 pins it", async () => {
-    await expect(tryStartScreenerWorkflow({} as never, ndCommand())).rejects.toThrow(/SCREENER_ND_MODE/);
+    // Phase 3 (#6550): SCREENER_ND_MODE now resolves "on" from
+    // environment.config.json (defaults.agent.screenerNdMode) when
+    // the env is unset, so a bare env no longer means the gate is
+    // closed. The closed-gate throw is pinned with an explicit off.
+    await expect(tryStartScreenerWorkflow({ SCREENER_ND_MODE: "off" } as never, ndCommand())).rejects.toThrow(/SCREENER_ND_MODE/);
     await expect(
       tryStartScreenerWorkflow({ SCREENER_ND_MODE: "on" } as never, ndCommand()),
     ).resolves.toBeNull();

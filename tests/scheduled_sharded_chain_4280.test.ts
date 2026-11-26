@@ -761,6 +761,10 @@ describe("market sharded submit through the seam (#4280)", () => {
   function shardedService() {
     const mockSql = { exec: vi.fn(() => []) };
     const mockEnv = {
+      // Phase 3 (#6550): monetization is ON via environment.config.json;
+      // these tests pin the seam/lock behaviour, not the paid gate, so it
+      // stays off.
+      MONETIZATION_ENABLED: "0",
       ETRADE_ENVIRONMENT: "sandbox",
       ETRADE_SANDBOX_BASE_URL: "https://apisb.etrade.com",
       ETRADE_SANDBOX_CONSUMER_KEY: "mock_consumer_key",

@@ -37,7 +37,6 @@ import { MockD1Database } from "./mock-d1";
 import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import {
   TickerAgent,
-  TICKER_PUSH_INTERVAL_SECONDS,
   resolveTickerPushStaleAfterIntervals,
 } from "../src/agents/ticker-agent";
 import { handleSchedulesRoutes } from "../src/agents/routes/schedules";
@@ -247,7 +246,11 @@ describe("4237 TickerAgent records its own feed (best-effort, never breaks the f
     expect(stored?.state).toBe("active");
     expect((stored?.definition as any).armed).toBe(true);
     expect(stored?.alarmId).toBe("sched-1");
-    expect((stored?.definition as any).intervalSeconds).toBe(TICKER_PUSH_INTERVAL_SECONDS);
+    // Phase 3 (#6550): TICKER_PUSH_INTERVAL_S moved to
+    // environment.config.json (defaults.polling.tickerPushIntervalS,
+    // 3000), so the bare agent's empty env now resolves to the FILE
+    // interval, not the code constant (5).
+    expect((stored?.definition as any).intervalSeconds).toBe(3000);
   });
 
   it("pushTicks stamps lastPushAt on the record", async () => {

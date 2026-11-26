@@ -6,7 +6,12 @@ import { createMemoryDryRunSink } from "../src/agents/social/publisher";
 
 // 2026-10-26 is a Monday; 13:00Z = 09:00 EDT.
 const MON_0900 = Date.parse("2026-10-26T13:00:00Z");
-const ENABLED = { SOCIAL_POSTING_ENABLED: "1" };
+// Phase 3 (#6550): SOCIAL_AUTONOMOUS_CHANNELS lives in
+// environment.config.json ("threads" in production), so a bare env
+// no longer resolves the code default ["threads", "x"]. These
+// tests pin the two-autonomous-channel shape (x + threads), so
+// the list is set explicitly here.
+const ENABLED = { SOCIAL_POSTING_ENABLED: "1", SOCIAL_AUTONOMOUS_CHANNELS: "threads,x" };
 
 function deps(overrides: Record<string, unknown> = {}) {
   const store = new MemorySocialLedger();

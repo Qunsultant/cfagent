@@ -230,7 +230,16 @@ describe("OrchestratorAgent.getScheduledTasks (#2693 wiring)", () => {
       },
       id: { toString: () => "think-scheduled-tasks-observe-test" },
     };
-    agent.env = {};
+    agent.env = {
+      // Phase 3 (#6550): STOCK_COPILOT_PAPER_ENABLED lives in
+      // environment.config.json (ON in production), so a bare env no
+      // longer means the copilot flag is off. With it on, the copilot
+      // task is declared alongside the observe task (two tasks, and
+      // no flag_off audit). These tests pin the flag-off shape — one
+      // observe task, plus the copilot non-declaration signal — so
+      // the flag is off explicitly here.
+      STOCK_COPILOT_PAPER_ENABLED: "0",
+    };
     agent.listSchedules = async () => [];
     agent.schedule = vi.fn(async () => ({ id: "mock-schedule" }));
     agent.scheduleEvery = vi.fn(async () => ({ id: "mock-schedule" }));

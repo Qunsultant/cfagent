@@ -116,7 +116,10 @@ describe("POST /screening/goal-screen async flag (#1996)", () => {
       // Issue #1997: the #1996 opt-in path is flag-gated, so
       // these tests run with the flag ON (the flag-OFF direct
       // behavior is pinned in goal_workflow_flag_1997.test.ts).
-      env: { FEATURE_FLAGS: JSON.stringify({ goal_workflow: true }), AGENT_DB: d1Mock },
+      // Phase 3 (#6550): monetization is ON via
+      // environment.config.json; these route tests pin the 202
+      // submission, not the paid gate, so it stays off.
+      env: { FEATURE_FLAGS: JSON.stringify({ goal_workflow: true }), MONETIZATION_ENABLED: "false", AGENT_DB: d1Mock },
     } as unknown as ScreenerResearchRouteContext;
     return { ctx, orm, d1Store };
   }
@@ -274,6 +277,10 @@ describe("autonomousGoalScreen workflow submission (#1996)", () => {
     // goal_workflow_flag_1997.test.ts).
     const mockEnv = {
       ETRADE_ENVIRONMENT: "sandbox",
+      // Phase 3 (#6550): monetization is ON via
+      // environment.config.json; these scheduled tests pin the
+      // workflow submission, not the paid gate, so it stays off.
+      MONETIZATION_ENABLED: "false",
       FEATURE_FLAGS: JSON.stringify({ goal_workflow: true }),
     } as unknown as Env;
     const mockOrm = new DatabaseORM(new MockSqlStorage() as any);

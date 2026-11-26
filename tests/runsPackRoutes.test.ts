@@ -140,7 +140,10 @@ async function setup(opts: { monetization?: boolean; stripe?: boolean; x402?: bo
     PAYMENT_WORKFLOW: binding,
     SCREENER_WORKFLOW: screenerBinding,
   };
-  if (opts.monetization) env.MONETIZATION_ENABLED = "true";
+  // Phase 3 (#6550): monetization is ON via
+  // environment.config.json; the flag-OFF cases must pin the flag
+  // explicitly, or mint/confirm proceed instead of refusing 403.
+  env.MONETIZATION_ENABLED = opts.monetization ? "true" : "false";
   if (opts.stripe) env.STRIPE_SECRET_KEY = "sk_test_stub";
   if (opts.x402) {
     env.X402_RECIPIENT_ADDRESS = "0x1111111111111111111111111111111111111111";

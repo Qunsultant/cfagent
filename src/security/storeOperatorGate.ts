@@ -35,6 +35,8 @@ import { createKvBindingStore, isBootstrapListed } from "./iaaaLogin";
 import { lookupInternalUserIdByLogin, lookupLoginByUserId } from "./iaaaMigration";
 import { listMembershipsFromEntries } from "./iaaaMembershipStore";
 import { listEffectiveOperatorLogins } from "../data/createStoreOperatorsPorts";
+import { resolveEnvironmentConfig } from "../config/environment";
+import type { Env } from "../types";
 import type { Membership, MembershipStore } from "./authorization";
 import type { StoreOperators } from "../data/storeOperatorsPorts";
 import type { KvLike } from "./kvResilience";
@@ -132,7 +134,7 @@ export async function resolveStoreOperatorAccess(
   // 2. Founding bypass — bootstrap handlers only.
   if (deps.allowBootstrapFounding && deps.kv && deps.env && internalUserId !== null) {
     const bindingStore = createKvBindingStore(deps.kv);
-    const bootstrapRaw = deps.env.IAAA_BOOTSTRAP_ADMINS as string | undefined;
+    const bootstrapRaw = resolveEnvironmentConfig(deps.env as Partial<Env>).workerSettings.iaaa.bootstrapAdmins;
     if (await isBootstrapListed(bindingStore, bootstrapRaw, internalUserId)) {
       return { allowed: true, via: "bootstrap-founding", login, internalUserId, storeDegraded };
     }

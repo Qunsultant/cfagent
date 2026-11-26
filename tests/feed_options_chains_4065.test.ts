@@ -1059,7 +1059,12 @@ describe("the chains job across residencies (#4065)", () => {
   it("E*TRADE/Public chains in workflow residency need the configured service login", async () => {
     const mock = new MockD1Database();
     const bucket = makeFakeBucket();
-    const plain = { AGENT_DB: mock, REPORTS_BUCKET: bucket } as unknown as Env;
+    // Phase 3 (#6550): SERVICE_USER_LOGIN moved to
+    // environment.config.json (defaults.service.userLogin,
+    // "svc-background"), so a bare env now resolves the file
+    // identity. A MALFORMED env value still yields null (fail
+    // closed) — the remaining way to reach the no-identity case.
+    const plain = { AGENT_DB: mock, REPORTS_BUCKET: bucket, SERVICE_USER_LOGIN: "not a login!" } as unknown as Env;
     const plainDeps = feedStepDepsForWorkflow(
       plain,
       createJobPipelineStoresFromD1(mock as never),

@@ -1,6 +1,7 @@
 import { createWorkersAI } from "workers-ai-provider";
 import { getGatewayOptions } from "../gateway/gatewayConfig";
 import type { Env } from "../types";
+import { resolveEnvironmentConfig } from "../config/environment";
 import { getAiConfig, getAvailableAiModels, type AiModelDefinition, type AiConfig } from "../config/etapiConfig";
 
 export { getAiConfig, getAvailableAiModels, type AiModelDefinition, type AiConfig };
@@ -29,9 +30,21 @@ export function resolveAiModelName(env?: Partial<Env>, taskOrCustomModel?: strin
       }
       return taskOrCustomModel;
     }
-    return env?.AI_MODEL || aiConfig.defaultModel || DEFAULT_AI_MODEL;
+    // Phase 3 (#6550): AI_MODEL now resolves from
+    // environment.config.json (defaults.ai.model); a still-set env var
+    // wins. The etapi defaultModel below is the same value today (the
+    // pre-existing duplication, not resolved here).
+    return (
+      resolveEnvironmentConfig(env).workerSettings.ai.model ||
+      aiConfig.defaultModel ||
+      DEFAULT_AI_MODEL
+    );
   } catch {
-    return taskOrCustomModel || env?.AI_MODEL || DEFAULT_AI_MODEL;
+    return (
+      taskOrCustomModel ||
+      resolveEnvironmentConfig(env).workerSettings.ai.model ||
+      DEFAULT_AI_MODEL
+    );
   }
 }
 

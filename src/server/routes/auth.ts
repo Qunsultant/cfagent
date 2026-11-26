@@ -926,7 +926,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
               tenantId,
               roleBindings: [{ role: existing.requestedRole, scope: "tenant", grantedBy: session.internalUserId }],
               nowMs,
-              defaultExpiryDays: resolveGrantDefaultExpiryDays(env.IAAA_GRANT_DEFAULT_EXPIRY_DAYS),
+              defaultExpiryDays: resolveGrantDefaultExpiryDays(resolveEnvironmentConfig(env).workerSettings.iaaa.grantDefaultExpiryDays),
             });
             if (!granted.ok) {
               return Response.json({ error: "Forbidden: grant denied." }, { status: 403 });
@@ -1733,7 +1733,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
               },
             ],
             nowMs,
-            defaultExpiryDays: resolveGrantDefaultExpiryDays(env.IAAA_GRANT_DEFAULT_EXPIRY_DAYS),
+            defaultExpiryDays: resolveGrantDefaultExpiryDays(resolveEnvironmentConfig(env).workerSettings.iaaa.grantDefaultExpiryDays),
             ...(granteeEmail !== undefined ? { email: granteeEmail } : {}),
           });
           if (!granted.ok) {
@@ -3002,7 +3002,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
             unresolvedEntries: string[];
             forwardResolved: Array<{ from: string; to: string }>;
           }> => {
-            const entries = currentBootstrapEntries(env.IAAA_BOOTSTRAP_ADMINS);
+            const entries = currentBootstrapEntries(resolveEnvironmentConfig(env).workerSettings.iaaa.bootstrapAdmins);
             const parsed = entries.map((entry) => {
               const one = parseBootstrapListWithGenesis(entry);
               return {
@@ -3250,7 +3250,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
             }
             const mode =
               request.method === "POST"
-                ? resolveMembershipIndexRepairMode(env.IAAA_MEMBERSHIP_INDEX_REPAIR_MODE)
+                ? resolveMembershipIndexRepairMode(resolveEnvironmentConfig(env).workerSettings.iaaa.membershipIndexRepairMode)
                 : "dry-run";
             const report = await repairMembershipIndexes(kv, memberEntries, {
               mode,
@@ -3292,7 +3292,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           // The run itself is audited best-effort: a failed run
           // audit is named in the response, never a failed cleanup.
           if (path === "/api/iaaa/stale-identities/cleanup" && request.method === "POST") {
-            const mode = resolveStaleCleanupMode(env.IAAA_STALE_CLEANUP_MODE);
+            const mode = resolveStaleCleanupMode(resolveEnvironmentConfig(env).workerSettings.iaaa.staleCleanupMode);
             const result = await runStaleIdentityCleanupForRequest(mode);
             if (result === null) {
               return Response.json(
@@ -3653,7 +3653,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
               };
             }),
             nowMs,
-            defaultExpiryDays: resolveGrantDefaultExpiryDays(env.IAAA_GRANT_DEFAULT_EXPIRY_DAYS),
+            defaultExpiryDays: resolveGrantDefaultExpiryDays(resolveEnvironmentConfig(env).workerSettings.iaaa.grantDefaultExpiryDays),
             ...(granteeEmail !== undefined ? { email: granteeEmail } : {}),
           });
           if (!granted.ok) {
@@ -3903,7 +3903,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
               };
             }),
             nowMs,
-            defaultExpiryDays: resolveGrantDefaultExpiryDays(env.IAAA_GRANT_DEFAULT_EXPIRY_DAYS),
+            defaultExpiryDays: resolveGrantDefaultExpiryDays(resolveEnvironmentConfig(env).workerSettings.iaaa.grantDefaultExpiryDays),
           });
           if (!granted.ok) {
             return Response.json(

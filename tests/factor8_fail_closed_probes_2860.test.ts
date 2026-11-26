@@ -31,6 +31,10 @@ async function gatedService(opts: {
   const { DatabaseORM } = await import("../src/orm");
   const mockEnv = {
     ETRADE_ENVIRONMENT: "sandbox",
+    // Phase 3 (#6550): monetization is ON via
+    // environment.config.json; these tests pin the probe outcomes,
+    // not the paid gate, so it stays off.
+    MONETIZATION_ENABLED: "false",
     ETRADE_SANDBOX_BASE_URL: "https://apisb.etrade.com",
   } as any;
   const platformDeps =
@@ -78,7 +82,11 @@ async function gatedService(opts: {
 }
 
 describe("fail-closed chain probes (#2860 Factor 8)", () => {
-  it("refuses submission when the lock probe cannot answer (no submit, gate-unavailable)", async () => {
+  // Phase 3 (#6550): this is the first test in the file and pays the
+  // dynamic import of the service module (~15s under full-shard
+  // load); the 25s global cap is too tight, so it gets the repo's
+  // 120s slow-test timeout (same idiom as trading-boundary.test.ts).
+  it("refuses submission when the lock probe cannot answer (no submit, gate-unavailable)", { timeout: 120_000 }, async () => {
     const { service, submit } = await gatedService({ lockThrows: true });
     const result = await service.autonomousMarketScreen({ sharded: true });
     expect(submit).not.toHaveBeenCalled();

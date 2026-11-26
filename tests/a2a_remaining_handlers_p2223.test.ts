@@ -94,7 +94,12 @@ import { handleA2A } from "../src/a2a/index";
 import { AGENT_ERROR_CATALOG } from "../src/aspects/errorCodes";
 
 const ENV_SVC = { SERVICE_USER_LOGIN: "svc-user" } as any;
-const ENV_NONE = {} as any;
+// Phase 3 (#6550): SERVICE_USER_LOGIN moved to
+// environment.config.json (defaults.service.userLogin,
+// "svc-background"), so a bare env now resolves the file
+// identity. A MALFORMED env value still yields null (fail
+// closed) — the remaining way to reach the no-identity case.
+const ENV_NONE = { SERVICE_USER_LOGIN: "not a login!" } as any;
 
 const envelope = (data: Record<string, unknown>) => ({
   jsonrpc: "2.0",
@@ -972,7 +977,10 @@ describe("entrypoint: six names reach their stubs (#2223 final slice)", () => {
   });
 
   it("screener and research fail honestly (500, not-configured) with no service identity — no virgin instance is started", async () => {
-    const { env, idFromNameCalls } = makeEntrypointEnv();
+    // Phase 3 (#6550): bare env now resolves "svc-background" from
+    // environment.config.json, so the no-identity case needs the
+    // malformed login (see ENV_NONE above).
+    const { env, idFromNameCalls } = makeEntrypointEnv({ SERVICE_USER_LOGIN: "not a login!" });
     for (const path of ["/a2a/screener", "/a2a/research"]) {
       const res = await postEntrypoint(path, env);
       expect(res.status, path).toBe(500);

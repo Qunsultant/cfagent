@@ -513,7 +513,13 @@ function doCtx(overrides: Partial<SchedulesRouteContext> = {}): {
   const submitted: Array<Record<string, unknown>> = [];
   const { namespace } = makeFakeSessionStore();
   const ctx = {
-    env: { SESSION_STORE: namespace },
+    // Phase 3 (#6550): IAAA_PDP_ENABLED lives in
+    // environment.config.json (ON in production), so a bare env now
+    // enforces the agent-schedule PDP and these webhook tests
+    // would 403 with no grant. They pin minting/idempotency, not
+    // PDP (the PDP-denial test below sets the flag on explicitly),
+    // so PDP stays off here.
+    env: { SESSION_STORE: namespace, IAAA_PDP_ENABLED: "0" },
     agentCtx: { storage: { sql } },
     audit: (type: string, agent: string, payload: Record<string, unknown>) => {
       audits.push({ type, agent, payload });

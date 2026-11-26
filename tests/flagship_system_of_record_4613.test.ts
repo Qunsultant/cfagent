@@ -41,13 +41,21 @@ describe("Flagship is the flag system of record (#4613)", () => {
   });
 
   it("shares one single monetization default across CfFlagshipAdapter and local/test EnvFeatureFlagAdapter", async () => {
+    // Phase 3 (#6550): FEATURE_MONETIZATION moved to
+    // environment.config.json (defaults.features.monetization, "1"),
+    // so a bare env now resolves to the FILE value (ON) — the env
+    // adapter no longer exercises the shared default in a bare env.
+    // The single default (false) still governs Flagship and the env
+    // adapter's explicit-OFF path.
     const envPort = new EnvFeatureFlagAdapter({ ENVIRONMENT: "local" });
     const flagshipPort = new CfFlagshipAdapter({
       getBooleanValue: vi.fn().mockImplementation(async (_flag: string, defaultValue: boolean) => defaultValue),
     });
 
     expect(DEFAULT_MONETIZATION_FLAG_VALUE).toBe(false);
-    expect(await envPort.isEnabled("monetization")).toBe(DEFAULT_MONETIZATION_FLAG_VALUE);
+    expect(await envPort.isEnabled("monetization")).toBe(true);
+    const envOff = new EnvFeatureFlagAdapter({ FEATURE_MONETIZATION: "0" });
+    expect(await envOff.isEnabled("monetization")).toBe(DEFAULT_MONETIZATION_FLAG_VALUE);
     expect(await flagshipPort.isEnabled("monetization")).toBe(DEFAULT_MONETIZATION_FLAG_VALUE);
   });
 });

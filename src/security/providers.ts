@@ -50,6 +50,7 @@
  * for the worked Apple example (the generic onboarding shape).
  */
 import type { Env } from "../types";
+import { resolveEnvironmentConfig } from "../config/environment";
 import type { AuditStore } from "./iaaaAudit";
 import { mintAppleClientSecret } from "./appleClientSecret";
 import { authOutcomeLoginUrl } from "./authOutcome";
@@ -273,12 +274,9 @@ export function listProviders(): string[] {
   return defaultRegistry.listProviders();
 }
 
-/** True only when IAAA_WIRING_ENABLED is "1" or "true" (case-insensitive, trimmed). */
+/** True only when IAAA_WIRING_ENABLED is "1" or "true" (case-insensitive, trimmed). Phase 3 (#6550): resolves from environment.config.json (defaults.iaaa.wiringEnabled); a still-set env var wins. */
 export function isWiringEnabled(env: Partial<Env> | null | undefined): boolean {
-  const raw = env?.IAAA_WIRING_ENABLED;
-  if (typeof raw !== "string") return false;
-  const value = raw.trim().toLowerCase();
-  return value === "1" || value === "true";
+  return resolveEnvironmentConfig(env ?? undefined).workerSettings.iaaa.wiringEnabled;
 }
 
 /**
@@ -288,7 +286,9 @@ export function isWiringEnabled(env: Partial<Env> | null | undefined): boolean {
  */
 export function enabledProviders(env: Partial<Env> | null | undefined): string[] {
   if (!isWiringEnabled(env)) return [];
-  const raw = env?.IAAA_ENABLED_PROVIDERS;
+  // Phase 3 (#6550): the provider list lives in environment.config.json
+  // (defaults.iaaa.enabledProviders); a still-set env var wins.
+  const raw = resolveEnvironmentConfig(env ?? undefined).workerSettings.iaaa.enabledProviders;
   if (typeof raw !== "string" || raw.trim() === "") return ["github"];
   const seen = new Set<string>();
   const out: string[] = [];

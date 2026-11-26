@@ -84,8 +84,13 @@ describe("SCREENER_ND_MODE gate (#2530)", () => {
     expect(SCREENER_ND_MODE_SWITCH).toBe("SCREENER_ND_MODE");
   });
 
-  it("defaults OFF when unset or blank", () => {
-    expect(resolveScreenerNdGate(undefined)).toEqual({ enabled: false, invalid: false });
+  it("unset resolves the file value; null or blank stays OFF", () => {
+    // Phase 3 (#6550): SCREENER_ND_MODE lives in
+    // environment.config.json (defaults.screenerNdMode, "on" in
+    // production), so an UNSET value resolves the file and the gate
+    // is ON; null/blank are direct values that yield the code
+    // default OFF, exactly as before the move.
+    expect(resolveScreenerNdGate(undefined)).toEqual({ enabled: true, invalid: false, raw: "on" });
     expect(resolveScreenerNdGate(null)).toEqual({ enabled: false, invalid: false });
     expect(resolveScreenerNdGate("")).toEqual({ enabled: false, invalid: false });
     expect(resolveScreenerNdGate("   ")).toEqual({ enabled: false, invalid: false });
@@ -566,7 +571,9 @@ function makeDoorHarness(env: Record<string, unknown>): DoorHarness {
 
 describe("mesh screen door mode selection (#2530)", () => {
   it("refuses an ND request while the flag is off — before any workflow start, never a silent downgrade", async () => {
-    const h = makeDoorHarness({});
+    // Phase 3 (#6550): the flag lives in environment.config.json
+    // ("on" in production), so a bare env no longer means off.
+    const h = makeDoorHarness({ SCREENER_ND_MODE: "off" });
     await expect(
       runStockScreenViaDoor(h.ctx, "alice", {
         screenMode: "non-deterministic",
@@ -604,7 +611,10 @@ describe("mesh screen door mode selection (#2530)", () => {
   });
 
   it("starts an ND run with the mode + intent on the command when the flag is on", async () => {
-    const h = makeDoorHarness({ SCREENER_ND_MODE: "on" });
+    // Phase 3 (#6550): monetization is ON via
+    // environment.config.json, so the door would fail closed on the
+    // paid gate; this test pins ND mode selection, not payment.
+    const h = makeDoorHarness({ SCREENER_ND_MODE: "on", MONETIZATION_ENABLED: "false" });
     await runStockScreenViaDoor(h.ctx, "alice", {
       screenMode: "non-deterministic",
       screenIntent: ND_INTENT,
@@ -616,7 +626,10 @@ describe("mesh screen door mode selection (#2530)", () => {
   });
 
   it("deterministic requests are unaffected by the flag (off) and carry no mode", async () => {
-    const h = makeDoorHarness({});
+    // Phase 3 (#6550): explicit flag-off (a bare env now resolves
+    // the file's "on") and monetization off (the paid gate is
+    // orthogonal to mode selection).
+    const h = makeDoorHarness({ SCREENER_ND_MODE: "off", MONETIZATION_ENABLED: "false" });
     await runStockScreenViaDoor(h.ctx, "alice", {});
     expect(h.started).toHaveLength(1);
     expect(h.started[0].screenMode).toBeUndefined();
@@ -658,8 +671,10 @@ describe("screenModeSelectionFromFields (#2530)", () => {
   });
 
   it("ND while the flag is off → a refusal naming the switch", () => {
+    // Phase 3 (#6550): explicit flag-off; a bare env now resolves
+    // the file's "on".
     const sel = screenModeSelectionFromFields(
-      {},
+      { SCREENER_ND_MODE: "off" },
       { screenMode: "non-deterministic", screenIntent: "momentum names" },
     );
     expect(sel.ok).toBe(false);
@@ -680,7 +695,9 @@ describe("tryStartScreenerWorkflow ND backstop (#2530)", () => {
       screenMode: "non-deterministic",
       screenIntent: ND_INTENT,
     });
-    await expect(tryStartScreenerWorkflow({} as never, command)).rejects.toThrow(/SCREENER_ND_MODE/);
+    // Phase 3 (#6550): explicit flag-off; a bare env now resolves
+    // the file's "on".
+    await expect(tryStartScreenerWorkflow({ SCREENER_ND_MODE: "off" } as never, command)).rejects.toThrow(/SCREENER_ND_MODE/);
   });
 
   it("does not throw for an ND command when the flag is on (port availability decides, as today)", async () => {
@@ -822,7 +839,12 @@ function makeGoldenHarness(ndGateOn: boolean): GoldenHarness {
     status: (workflowId) => adapter.status(workflowId),
   };
   harness.ctx = {
-    env: (ndGateOn ? { SCREENER_ND_MODE: "on" } : {}) as MeshScreenDoorContext["env"],
+    // Phase 3 (#6550): monetization is ON via
+    // environment.config.json; the golden pair pins mode selection,
+    // not payment, so the paid gate stays off in both branches.
+    env: (ndGateOn
+      ? { SCREENER_ND_MODE: "on", MONETIZATION_ENABLED: "false" }
+      : { MONETIZATION_ENABLED: "false" }) as MeshScreenDoorContext["env"],
     ensureTables: () => sql as never,
     workflowPort: recordingPort,
     readWorkflowJobHistory: (tenantId, chainId) => shardStore.listJobsForChain(tenantId, chainId),

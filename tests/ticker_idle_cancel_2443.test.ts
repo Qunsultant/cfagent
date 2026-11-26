@@ -29,7 +29,12 @@ class FakeConnection {
  */
 function bareAgent(): any {
   const agent = Object.create(TickerAgent.prototype);
-  agent.env = {};
+  // Phase 3 (#6550): TICKER_PUSH_INTERVAL_S lives in
+  // environment.config.json (3000 in production — the moved
+  // wrangler value, verbatim), so a bare env no longer resolves
+  // the 5s code default. These tests pin the arming behaviour,
+  // not the interval value, so the 5s interval is set explicitly.
+  agent.env = { TICKER_PUSH_INTERVAL_S: "5" };
   return agent;
 }
 
@@ -242,13 +247,18 @@ describe("TickerAgent idle-cancel (Issue #2443)", () => {
     expect(scheduled).toEqual([]);
   });
 
-  it("resolves the interval from TICKER_PUSH_INTERVAL_S, defaulting to 5s", () => {
-    expect(resolveTickerPushIntervalSeconds({})).toBe(5);
-    expect(resolveTickerPushIntervalSeconds(undefined)).toBe(5);
+  it("resolves the interval from TICKER_PUSH_INTERVAL_S, defaulting to the file value", () => {
+    // Phase 3 (#6550): TICKER_PUSH_INTERVAL_S lives in
+    // environment.config.json (3000 in production — the moved
+    // wrangler value, verbatim), so an absent or unparseable value
+    // now resolves the file value, not the 5s code default. An
+    // explicit valid env var still wins.
+    expect(resolveTickerPushIntervalSeconds({})).toBe(3000);
+    expect(resolveTickerPushIntervalSeconds(undefined)).toBe(3000);
     expect(resolveTickerPushIntervalSeconds({ TICKER_PUSH_INTERVAL_S: "12" })).toBe(12);
-    expect(resolveTickerPushIntervalSeconds({ TICKER_PUSH_INTERVAL_S: "abc" })).toBe(5);
-    expect(resolveTickerPushIntervalSeconds({ TICKER_PUSH_INTERVAL_S: "0" })).toBe(5);
-    expect(resolveTickerPushIntervalSeconds({ TICKER_PUSH_INTERVAL_S: "-3" })).toBe(5);
+    expect(resolveTickerPushIntervalSeconds({ TICKER_PUSH_INTERVAL_S: "abc" })).toBe(3000);
+    expect(resolveTickerPushIntervalSeconds({ TICKER_PUSH_INTERVAL_S: "0" })).toBe(3000);
+    expect(resolveTickerPushIntervalSeconds({ TICKER_PUSH_INTERVAL_S: "-3" })).toBe(3000);
   });
 
   it("onConnect arms with the externalized interval", async () => {

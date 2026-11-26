@@ -28,6 +28,9 @@
  * This module performs no network calls and holds no secrets.
  */
 
+import { resolveEnvironmentConfig } from "../../config/environment";
+import type { Env } from "../../types";
+
 export const KNOWN_SOCIAL_CHANNELS = [
   "threads",
   "x",
@@ -71,11 +74,44 @@ function parseChannelList(raw: string | undefined, fallback: string[]): string[]
 }
 
 export function parseSocialConfig(env: SocialEnv | null | undefined): SocialConfig {
-  const enabledRaw = env?.SOCIAL_POSTING_ENABLED;
+  // Phase 3 (#6550): SOCIAL_POSTING_ENABLED and
+  // SOCIAL_AUTONOMOUS_CHANNELS live in environment.config.json
+  // (defaults.social); a still-set env var wins. The unset-vs-blank
+  // distinction for the channel list is preserved: an explicitly
+  // blank env value still yields an empty list.
+  const resolved = resolveEnvironmentConfig(
+    env as Partial<Env> | undefined,
+  ).workerSettings.social;
   return {
-    postingEnabled: enabledRaw === "1" || enabledRaw === "true",
-    autonomousChannels: parseChannelList(env?.SOCIAL_AUTONOMOUS_CHANNELS, DEFAULT_AUTONOMOUS),
+    postingEnabled: resolved.postingEnabled,
+    autonomousChannels: parseChannelList(
+      env?.SOCIAL_AUTONOMOUS_CHANNELS ?? resolved.autonomousChannels,
+      DEFAULT_AUTONOMOUS,
+    ),
     approvalChannels: parseChannelList(env?.SOCIAL_APPROVAL_CHANNELS, DEFAULT_APPROVAL),
+  };
+}
+
+/**
+ * Phase 3 (#6550): the SocialEnv object the scheduled pipeline and
+ * the messaging routes forward, rendered from the resolved context
+ * so a downstream reader never sees a blank moved var. The two moved
+ * flags render as "1"/"0"; the autonomous list renders from the file
+ * (env wins when set); SOCIAL_APPROVAL_CHANNELS stays an env-only
+ * read. Named `build*`, not `resolve*`, so it does not count toward
+ * the resolver census (Phase 2 pin).
+ */
+export function buildSocialEnv(
+  env: (SocialEnv & { SOCIAL_LIVE_PUBLISHING?: string }) | null | undefined,
+): SocialEnv & { SOCIAL_LIVE_PUBLISHING?: string } {
+  const resolved = resolveEnvironmentConfig(
+    env as Partial<Env> | undefined,
+  ).workerSettings.social;
+  return {
+    SOCIAL_POSTING_ENABLED: resolved.postingEnabled ? "1" : "0",
+    SOCIAL_AUTONOMOUS_CHANNELS: env?.SOCIAL_AUTONOMOUS_CHANNELS ?? resolved.autonomousChannels,
+    SOCIAL_APPROVAL_CHANNELS: env?.SOCIAL_APPROVAL_CHANNELS,
+    SOCIAL_LIVE_PUBLISHING: resolved.livePublishing ? "1" : "0",
   };
 }
 

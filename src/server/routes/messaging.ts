@@ -28,7 +28,7 @@ import type { DoNamespaceLike } from "../../data/durableKv";
 import { zonedDateParts } from "../../schedule";
 import { SOCIAL_BRIEF_MAX_CHARS, createSocialBriefStoreFromNamespace, isBriefDate } from "../../agents/social/briefStore";
 import { createSocialStoresFromNamespace } from "../../agents/social/durableStores";
-import { KNOWN_SOCIAL_CHANNELS, parseSocialConfig } from "../../agents/social/config";
+import { buildSocialEnv, KNOWN_SOCIAL_CHANNELS, parseSocialConfig } from "../../agents/social/config";
 import { createMemoryDryRunSink, resolvePostUrl, resolveSubmissionEndpoint } from "../../agents/social/publisher";
 import { createFetchSocialTransport } from "../../agents/social/liveTransport";
 import { approveAndPublish, rejectSocialDraft } from "../../agents/social/approvalActions";
@@ -615,12 +615,9 @@ export async function handleMessagingSocialRoutes(request: Request, env: Env, ur
         );
       }
       const rawEnv = env as unknown as Record<string, string | undefined>;
-      const socialEnv = {
-        SOCIAL_POSTING_ENABLED: rawEnv.SOCIAL_POSTING_ENABLED,
-        SOCIAL_AUTONOMOUS_CHANNELS: rawEnv.SOCIAL_AUTONOMOUS_CHANNELS,
-        SOCIAL_APPROVAL_CHANNELS: rawEnv.SOCIAL_APPROVAL_CHANNELS,
-        SOCIAL_LIVE_PUBLISHING: rawEnv.SOCIAL_LIVE_PUBLISHING,
-      };
+      // Phase 3 (#6550): rendered from environment.config.json
+      // via buildSocialEnv; a still-set env var wins.
+      const socialEnv = buildSocialEnv(rawEnv);
       if (action === "reject") {
         const rejected = await rejectSocialDraft({
           store: stores.ledger,
@@ -851,12 +848,9 @@ export async function handleMessagingSlackRoutes(request: Request, env: Env, url
         const outcome = await handleSocialSlackInteraction({
           payload,
           principal: clickerPrincipal,
-          env: {
-            SOCIAL_POSTING_ENABLED: rawEnv.SOCIAL_POSTING_ENABLED,
-            SOCIAL_AUTONOMOUS_CHANNELS: rawEnv.SOCIAL_AUTONOMOUS_CHANNELS,
-            SOCIAL_APPROVAL_CHANNELS: rawEnv.SOCIAL_APPROVAL_CHANNELS,
-            SOCIAL_LIVE_PUBLISHING: rawEnv.SOCIAL_LIVE_PUBLISHING,
-          },
+          // Phase 3 (#6550): rendered from environment.config.json
+          // via buildSocialEnv; a still-set env var wins.
+          env: buildSocialEnv(rawEnv),
           tokens: {
             X_ACCESS_TOKEN: rawEnv.X_ACCESS_TOKEN,
             THREADS_ACCESS_TOKEN: rawEnv.THREADS_ACCESS_TOKEN,

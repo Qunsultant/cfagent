@@ -271,7 +271,13 @@ describe("monthly Autopilot evaluation schedule (#4411)", () => {
     const mockD1 = new MockD1Database();
     await plantGoals(mockD1, [monthlyGoal()]);
     const ctx = makeCtx();
-    const env = makeEnv({ AGENT_DB: mockD1 });
+    // Phase 3 (#6550): SERVICE_USER_LOGIN moved to
+    // environment.config.json (defaults.service.userLogin), so a bare
+    // env now resolves the file identity and the "no identity" path
+    // is unreachable that way. A MALFORMED env value still yields
+    // null (fail closed) — that is the remaining way to reach the
+    // no-identity skip, and it exercises the same path.
+    const env = makeEnv({ SERVICE_USER_LOGIN: "not a login!", AGENT_DB: mockD1 });
     const agent = new ScheduledAgent(ctx as never, env as never);
     const tick = await agent.onCron(env as never, { halted: false } as never);
     expect(tick.errors.join(" ")).toMatch(/SERVICE_USER_LOGIN/);

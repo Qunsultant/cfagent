@@ -71,7 +71,10 @@ const wiredPastTtl = {
 } as never;
 
 const PDP_ON = { IAAA_PDP_ENABLED: "1" };
-const PDP_OFF = {};
+// Phase 3 (#6550): IAAA_PDP_ENABLED lives in
+// environment.config.json (ON in production), so a bare env no
+// longer means the PDP flag is off.
+const PDP_OFF = { IAAA_PDP_ENABLED: "0" };
 
 describe("isLegacyPdpGraceExpired (#1749)", () => {
   it("is false when the PDP flag is off, even for an ancient legacy session", () => {

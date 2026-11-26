@@ -111,7 +111,10 @@ async function setup(opts: { monetization?: boolean; stripe?: boolean } = {}) {
     PAYMENT_WORKFLOW: binding,
     SCREENER_WORKFLOW: screenerBinding,
   };
-  if (opts.monetization) env.MONETIZATION_ENABLED = "true";
+  // Phase 3 (#6550): monetization is ON via
+  // environment.config.json; the free-path tests must pin the flag
+  // explicitly, or the no-account submit fails closed with 403.
+  env.MONETIZATION_ENABLED = opts.monetization ? "true" : "false";
   if (opts.stripe) env.STRIPE_SECRET_KEY = "sk_test_stub";
   const ctx = {
     env,

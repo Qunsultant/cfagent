@@ -139,6 +139,12 @@ function makeEnv(sessionStore?: unknown, extra: Record<string, unknown> = {}) {
     PAYMENTS_AGENT: { idFromName: () => "payments-default", get: () => makePayments() },
     SESSION_STORE: sessionStore,
     SOCIAL_POSTING_ENABLED: "1",
+    // Phase 3 (#6550): SOCIAL_AUTONOMOUS_CHANNELS lives in
+    // environment.config.json ("threads" in production), so a bare env
+    // no longer resolves the code default ["threads", "x"]. These
+    // tests pin the two-autonomous-channel shape (x + threads), so
+    // the list is set explicitly here.
+    SOCIAL_AUTONOMOUS_CHANNELS: "threads,x",
     ...extra,
   } as any;
 }

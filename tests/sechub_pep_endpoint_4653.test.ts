@@ -147,7 +147,10 @@ describe("GET /api/security/pep (#4653)", () => {
   });
 
   it("returns the full gate inventory and enforcement-off state for a platform admin with the flag off", async () => {
-    const { env } = await makeEnv();
+    // Phase 3 (#6550): IAAA_PDP_ENABLED lives in
+    // environment.config.json (ON in production), so a bare env no
+    // longer means the PDP flag is off.
+    const { env } = await makeEnv({ IAAA_PDP_ENABLED: "0" });
     const res = await worker.fetch(
       req("GET", "/api/security/pep", PLATFORM_SESSION),
       env,

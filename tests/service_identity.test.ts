@@ -110,9 +110,15 @@ describe("getServiceUserLogin (#1185)", () => {
     expect(getServiceUserLogin({ SERVICE_USER_LOGIN: "  svc-background  " } as Env)).toBe(SERVICE_LOGIN);
   });
 
-  it("returns null when unset, blank, or not login-shaped (fail closed)", () => {
-    expect(getServiceUserLogin({} as Env)).toBeNull();
-    expect(getServiceUserLogin({ SERVICE_USER_LOGIN: "   " } as Env)).toBeNull();
+  // Phase 3 (#6550): SERVICE_USER_LOGIN moved to
+  // environment.config.json (defaults.service.userLogin,
+  // "svc-background"). An unset or blank env now falls back to the
+  // FILE identity; a MALFORMED env value still yields null (fail
+  // closed), exactly as before — the env value wins when set, and
+  // only a login-shaped resolved value is an identity.
+  it("falls back to the file identity when unset or blank, null when malformed", () => {
+    expect(getServiceUserLogin({} as Env)).toBe(SERVICE_LOGIN);
+    expect(getServiceUserLogin({ SERVICE_USER_LOGIN: "   " } as Env)).toBe(SERVICE_LOGIN);
     expect(getServiceUserLogin({ SERVICE_USER_LOGIN: "not a login!" } as Env)).toBeNull();
   });
 });
@@ -276,15 +282,20 @@ describe("worker queue() (#1185)", () => {
     }
   });
 
-  it("retries without dispatching when neither owner nor service identity exists", async () => {
+  // Phase 3 (#6550): with no env identity, the FILE identity
+  // ("svc-background") applies — "no service identity exists" is no
+  // longer reachable via env. The unprovisioned file identity is
+  // DENIED (not retried): the message is dropped (acked), never
+  // dispatched, and never re-queued.
+  it("drops (acks, never dispatches, never retries) when the file identity is unprovisioned", async () => {
     const { env, search } = fakeEnv(undefined);
     const { batch, state } = batchWith({ symbol: "AAPL" });
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       await (worker as any).queue(batch, env, undefined);
       expect(search.requests).toHaveLength(0);
-      expect(state.acked).toBe(0);
-      expect(state.retried).toBe(1);
+      expect(state.acked).toBe(1);
+      expect(state.retried).toBe(0);
     } finally {
       warnSpy.mockRestore();
     }

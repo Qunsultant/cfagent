@@ -275,6 +275,10 @@ describe("A1. upload route characterization (#3527 S3)", () => {
       REPORTS_BUCKET: bucket,
       AI_SEARCH: binding,
       AI_SEARCH_INSTANCE: INSTANCE,
+      // Phase 3 (#6550): AI_SEARCH_CORPUS_INDEXING_ENABLED lives in
+      // environment.config.json (ON in production), so a bare env no
+      // longer means the corpus leg is off.
+      [FLAG]: "0",
     });
     expect(res!.status).toBe(201);
     const body = (await res!.json()) as Record<string, any>;
@@ -426,7 +430,10 @@ describe("A2. sync backfill leg characterization (#3527 S3)", () => {
     const { metaA, metaB, metaC, metaD, manifest, records, bucket } = await fixture();
     const { uploads, binding } = fakeNamespace();
     const out = await runCorpusAiSearchIndexBackfill(
-      { AI_SEARCH: binding as any, AI_SEARCH_INSTANCE: INSTANCE },
+      // Phase 3 (#6550): AI_SEARCH_CORPUS_INDEXING_ENABLED lives in
+      // environment.config.json (ON in production), so a bare env no
+      // longer means the backfill leg is off.
+      { AI_SEARCH: binding as any, AI_SEARCH_INSTANCE: INSTANCE, [FLAG]: "0" },
       { manifest, recordStore: stubRecordStore(records), bucket: bucket as any }
     );
     const byKey = new Map(out.items.map((i) => [i.bucketKey, i]));

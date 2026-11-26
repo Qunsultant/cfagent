@@ -877,11 +877,13 @@ describe("refund routes (#2204)", () => {
       decision: "approve",
     });
     const flagOffCtx = {
-      env: { ...env, MONETIZATION_ENABLED: undefined },
+      // Phase 3 (#6550): deleting the flag no longer means OFF —
+      // an absent flag resolves monetization ON from
+      // environment.config.json. Pin it OFF explicitly.
+      env: { ...env, MONETIZATION_ENABLED: "false" },
       getOrm: () => ({}) as DatabaseORM,
       audit: vi.fn(),
     } as unknown as AgenticPaymentsRouteContext;
-    delete (flagOffCtx.env as Record<string, unknown>).MONETIZATION_ENABLED;
     expect(
       (await call(flagOffCtx, "POST", "/payments/agentic/commercial/refunds/execute", "op1", {
         refundId: refund.id,

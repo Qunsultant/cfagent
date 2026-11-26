@@ -388,7 +388,12 @@ async function executeCapturedJob(
     traceparent?: string;
   };
   const context = {
-    env: {} as Env,
+    // Phase 3 (#6550): monetization is ON via
+    // environment.config.json, so the door would fail closed on the
+    // paid gate's missing stored price. This acceptance test pins
+    // the FREE discovered-path screen, not payment, so the paid
+    // gate stays off in the executor context.
+    env: { MONETIZATION_ENABLED: "false" } as Env,
     orm: {} as never,
     sessionId: "session-2496",
     audit: () => {},

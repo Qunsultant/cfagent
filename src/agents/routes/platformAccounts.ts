@@ -83,7 +83,7 @@ import { createOnboardingAdapter } from "../../data/createOnboardingPorts";
 import { createPriceCatalogueAdapter } from "../../data/createPriceCataloguePorts";
 import { createProfileAdapter } from "../../data/createProfilePorts";
 import { createReferralCodeAdapters } from "../../data/createReferralCodePorts";
-import { createStoreOperatorsAdapter } from "../../data/createStoreOperatorsPorts";
+import { createStoreOperatorsAdapter, parseEnvOperators } from "../../data/createStoreOperatorsPorts";
 import { createSubscriptionAdapter } from "../../data/createSubscriptionPorts";
 import { PLATFORM_ROUTE_SUFFIXES } from "../../data/platformUrlCatalog";
 import type { CommercialStore } from "../../data/commercialPorts";
@@ -265,15 +265,11 @@ function resolvePorts(ctx: PlatformAccountRouteContext): PlatformAccountPorts {
   };
 }
 
+// Phase 3 (#6550): the operator list now resolves from
+// environment.config.json via parseEnvOperators; a still-set env
+// var wins. (Blank file/env value -> empty set, as before.)
 function envOperatorLogins(ctx: PlatformAccountRouteContext): Set<string> {
-  const raw = (ctx.env as unknown as Record<string, unknown>)["COMMERCIAL_STORE_OPERATORS"];
-  if (typeof raw !== "string" || !raw.trim()) return new Set();
-  return new Set(
-    raw
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0),
-  );
+  return parseEnvOperators(ctx.env);
 }
 
 async function isOperator(ctx: PlatformAccountRouteContext, ports: PlatformAccountPorts, login: string): Promise<boolean> {

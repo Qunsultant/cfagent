@@ -74,7 +74,18 @@ async function makeEnv() {
   seedSession(PLAT_A_SESSION, "plat-a", PLAT_A_ID, "https://github.com");
   seedSession(PLAT_B_SESSION, "plat-b", PLAT_B_ID, "https://github.com");
   seedSession(MEMBER_SESSION, "member-user", MEMBER_ID, "https://github.com");
-  const env = { SESSION_STORE: namespace } as unknown as Env;
+  // Phase 3 (#6550): IAAA_WIRING_ENABLED / IAAA_PDP_ENABLED moved to
+  // environment.config.json (defaults.iaaa, both "1" in production),
+  // so a bare env now takes the wired + PDP path and these seeded
+  // legacy sessions 401. These tests pin the grant mechanics, not
+  // the wiring gate — the gate is pinned in iaaa_providers.test.ts
+  // and iaaa_github_end_to_end.test.ts — so the fixture opts out
+  // of wiring explicitly, as the old bare env did implicitly.
+  const env = {
+    SESSION_STORE: namespace,
+    IAAA_WIRING_ENABLED: "0",
+    IAAA_PDP_ENABLED: "0",
+  } as unknown as Env;
   const membershipStore = createKvMembershipStore(sessionStore(env));
   const seedMembership = (internalUserId: string, role: string, scope: string, tenantId = "primary") =>
     createMembership(membershipStore, {

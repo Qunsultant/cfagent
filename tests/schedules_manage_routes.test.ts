@@ -117,7 +117,11 @@ beforeEach(async () => {
   const mockD1 = new MockD1Database();
   await seedD1(mockD1);
   ctx = {
-    env: { AGENT_DB: mockD1 },
+    // Phase 3 (#6550): a bare env now resolves pdpEnabled:true from
+    // environment.config.json (defaults.iaaa.pdpEnabled), so PDP is
+    // on unless pinned off. These tests were written with PDP off in
+    // a bare env — pin it off to restore that.
+    env: { IAAA_PDP_ENABLED: "0", AGENT_DB: mockD1 },
     agentCtx: { storage: { sql } },
     audit: vi.fn(),
     // Issue #6503 step 9 (G2) — audit-before-write blocks every
