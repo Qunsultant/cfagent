@@ -1,9 +1,4 @@
-import {
-  registerAgentConfigEntry,
-  resolveAgentConfig,
-  type AgentConfigIdentity,
-} from "./agentConfigResolver";
-import type { Env } from "../types";
+import { registerAgentConfigEntry } from "./agentConfigResolver";
 
 export const AGENT_SCHEDULE_LOOP_SETTINGS_ENTRY = "agentScheduleLoopSettings";
 export const AGENT_SCHEDULE_LOOP_SETTINGS_KEY = "agent_schedule_loop_settings";
@@ -87,19 +82,3 @@ registerAgentConfigEntry<AgentScheduleLoopSettings | null>({
       ? AGENT_SCHEDULE_LOOP_SETTINGS_KEY
       : null,
 });
-
-export function resolveAgentScheduleLoopSettings(
-  readSettingRaw: (key: string) => string | null,
-  env?: Env,
-): AgentScheduleLoopSettingsResolution {
-  const identity: AgentConfigIdentity = { className: "ScheduledAgent" };
-  const resolution = resolveAgentConfig(
-    AGENT_SCHEDULE_LOOP_SETTINGS_ENTRY,
-    identity,
-    { readSettingRaw, env },
-  );
-  return {
-    settings: resolution.value as AgentScheduleLoopSettings | null,
-    issues: resolution.issues,
-  };
-}

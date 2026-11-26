@@ -40,7 +40,7 @@ function makeAgent() {
       env?: unknown,
       actor?: string | null,
     ) => Promise<unknown>;
-    resolveAgentScheduleLoopSettingsForLogin: (
+    getAgentScheduleLoopSettingsForLogin: (
       login: string,
     ) => Promise<{ settings: typeof enabledSettings | null; issues: string[] }>;
     runBoundedAgenticLoop: (goal: Record<string, unknown>) => Promise<{
@@ -78,7 +78,7 @@ describe("agentic-loop execution guards", () => {
   it("creates an approval request when measured model usage reaches the configured cap", async () => {
     const { agent, store } = makeAgent();
     vi.spyOn(agent.lifecycle, "start").mockResolvedValue(undefined);
-    vi.spyOn(agent, "resolveAgentScheduleLoopSettingsForLogin")
+    vi.spyOn(agent, "getAgentScheduleLoopSettingsForLogin")
       .mockResolvedValue({ settings: enabledSettings, issues: [] });
     vi.spyOn(agent, "runTurn").mockImplementation(async (options) => {
       await agent.beforeTurn({
@@ -131,7 +131,7 @@ describe("agentic-loop execution guards", () => {
       },
     ]);
     vi.spyOn(agent, "getGoals").mockResolvedValue([loopGoal]);
-    vi.spyOn(agent, "resolveAgentScheduleLoopSettingsForLogin")
+    vi.spyOn(agent, "getAgentScheduleLoopSettingsForLogin")
       .mockResolvedValue({ settings: enabledSettings, issues: [] });
     const trigger = vi.spyOn(agent, "triggerGoal").mockResolvedValue({
       timestamp: "2026-01-01T00:00:00.000Z",
@@ -158,7 +158,7 @@ describe("agentic-loop execution guards", () => {
   it("stops at the configured step limit without treating it as a cost-cap approval", async () => {
     const { agent, store } = makeAgent();
     vi.spyOn(agent.lifecycle, "start").mockResolvedValue(undefined);
-    vi.spyOn(agent, "resolveAgentScheduleLoopSettingsForLogin")
+    vi.spyOn(agent, "getAgentScheduleLoopSettingsForLogin")
       .mockResolvedValue({
         settings: { ...enabledSettings, maxTurns: 1 },
         issues: [],
@@ -201,7 +201,7 @@ describe("agentic-loop execution guards", () => {
         requestId: "loop-turn",
       },
     });
-    vi.spyOn(agent, "resolveAgentScheduleLoopSettingsForLogin")
+    vi.spyOn(agent, "getAgentScheduleLoopSettingsForLogin")
       .mockResolvedValue({
         settings: { ...enabledSettings, maxDurationMs: 1 },
         issues: [],
@@ -216,7 +216,7 @@ describe("agentic-loop execution guards", () => {
   it("aborts at a live kill-switch change and does not request continuation approval", async () => {
     const { agent, store } = makeAgent();
     vi.spyOn(agent.lifecycle, "start").mockResolvedValue(undefined);
-    vi.spyOn(agent, "resolveAgentScheduleLoopSettingsForLogin")
+    vi.spyOn(agent, "getAgentScheduleLoopSettingsForLogin")
       .mockResolvedValueOnce({ settings: enabledSettings, issues: [] })
       .mockResolvedValueOnce({
         settings: { ...enabledSettings, enabled: false },
@@ -243,7 +243,7 @@ describe("agentic-loop execution guards", () => {
   it("fails closed when the provider does not report usage", async () => {
     const { agent, store } = makeAgent();
     vi.spyOn(agent.lifecycle, "start").mockResolvedValue(undefined);
-    vi.spyOn(agent, "resolveAgentScheduleLoopSettingsForLogin")
+    vi.spyOn(agent, "getAgentScheduleLoopSettingsForLogin")
       .mockResolvedValue({ settings: enabledSettings, issues: [] });
     vi.spyOn(agent, "runTurn").mockImplementation(async (options) => {
       await agent.beforeTurn({

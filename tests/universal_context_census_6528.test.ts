@@ -6,7 +6,7 @@
  * result SHRINK-ONLY against the baseline recorded below, seeded from
  * main at `e5541ff` (2026-11-25, Phase 1):
  *  - a `*Context` definition that is NOT in the baseline fails;
- *  - the app-created context total above its baselined 210 fails;
+ *  - the app-created context total above its baselined 211 fails;
  *  - decreases and vanished rows pass — that is the shrink the programme
  *    wants, and retiring a definition means lowering or removing its
  *    baseline entry in the same PR.
@@ -32,7 +32,7 @@
  * NOT copied from the `3e516f1c` survey — the recount is
  * `~/workspace/6528-recount.md`; the seed reconciliation is
  * `docs/architecture/survey/6528-census-seed.md`):
- * - app-created: 210 = 130 itemized `*Context` rows (this baseline) − 1
+ * - app-created: 211 = 131 itemized `*Context` rows (this baseline) − 1
  *   alias row (`BrokerOrderRouteContext`, a type alias, not a shape) − 2
  *   config-named rows (counted inside the 77 instead) + 1
  *   `PlatformIdentity` (a counted non-`*Context*` name) + 77 config
@@ -48,24 +48,32 @@
  * `UniversalSettingSources`) and its input (`ResolveUniversalInput`)
  * deliberately carry no `Context` name, so they are not separate
  * contexts (survey §1.1: nested sections are not contexts) and add
- * no further rows. The `OfferContext` judgment call below still
- * holds: counting the excluded server `OfferContext` would make the
- * total 211.
+ * no further rows. At that phase, counting the excluded server
+ * `OfferContext` would have made 211; the current #3122 pin baseline
+ * adds `AgentScheduleToolContext`, so counting the excluded row would
+ * now make 212.
+ *
+ * Issue #3122 raises the baseline 210 → 211 with one canonical
+ * `AgentScheduleToolContext` row in `src/agents/mcpAdapter.ts`. This narrow
+ * schedule-tool adapter port carries only the environment, owner-login
+ * accessor, action executor, loop-origin accessor, and goals-only flag;
+ * reusing the broad `McpToolContext` would inject unrelated command,
+ * database, session, and permission dependencies into this capability.
  * - platform-provided: 3 types (Workers `ExecutionContext` at
  *   `scheduled`/`queue`/`email`, `DurableObjectState` at 3 constructors,
  *   Agents-SDK `AgentContext`) — 5 rows in the survey's §1.6 table, 7
  *   check sites in this pin.
  * - test-only: 0.
  *
- * JUDGMENT CALL — server `OfferContext` (DECISION: EXCLUDED, total stays 210):
+ * JUDGMENT CALL — server `OfferContext` (DECISION: EXCLUDED, total stays 211):
  * a second, distinct `OfferContext` definition exists at
  * `src/services/upgradeOffers.ts:758` (`{ trigger, shownAtMs? }`, the
  * audit-only payload the client passes to the mint routes; the counted
  * client one is `src/client/commercialApi.ts:572`). It predates the
  * baseline — the survey missed it, it is not new. Under §0 as written it
  * is an *input* not listed in the services/security rows, so the survey's
- * applied practice excludes it and the total stays 210. If it were
- * counted, the total would be 211. The row is in EXCLUDED below with this
+ * applied practice excludes it and the total stays 211. If it were
+ * counted, the total would be 212. The row is in EXCLUDED below with this
  * reason, so the decision is visible in the pin, not hidden. (Recount
  * §1.3; census seed §2.)
  *
@@ -91,11 +99,11 @@
  * be satisfied from the survey as written. Itemizing the 2 companions is
  * follow-up census work, not a silent "unknown" row.
  *
- * Why a pure regex cannot reproduce 210: the anchored regex finds 175
+ * Why a pure regex cannot reproduce 211: the anchored regex finds 176
  * `*Context` definitions in `src/`; 45 of those are EXCLUDED boundary
  * rows (inputs/results, deny-codes, domain-internal parameter objects,
- * shapes of counted items, UI prop types), leaving 130 counted rows;
- * the remaining 80 of the 210 are non-`*Context*` entries (77 config +
+ * shapes of counted items, UI prop types), leaving 131 counted rows;
+ * the remaining 80 of the 211 are non-`*Context*` entries (77 config +
  * `PlatformIdentity` + 3 React consts, which are `const` declarations,
  * not types) plus the 2 unitemized Tier A shapes, minus the alias and
  * the 2 config-named rows (see the formula above). The pin's authority
@@ -141,12 +149,13 @@ const DISPOSITIONS: ReadonlySet<string> = new Set([
 /** Recorded census data (see the header — 77 and 2 are recorded, not recomputed). */
 const RECORDED_CONFIG_TOTAL = 77;
 const RECORDED_UNITEMIZED_TIER_A = 2;
-const RECORDED_APP_CREATED_TOTAL = 210;
+const RECORDED_APP_CREATED_TOTAL = 211;
 
 /** [file, name, kind, disposition] — shrink-only baseline (130 rows). */
 const BASELINE: Array<[string, string, Kind, Disposition]> = [
   ["src/agentic/chainExecutor.ts", "ChainExecutionContext", "execution-identity", "CANONICAL"],
   ["src/agents/chatErrorFallback.ts", "ChatErrorFallbackContext", "di-ports", "CANONICAL"],
+  ["src/agents/mcpAdapter.ts", "AgentScheduleToolContext", "mcp", "CANONICAL"],
   ["src/agents/orchestrator.ts", "ScreenerExecutionContext", "execution-identity", "MIRROR"],
   ["src/agents/orchestrator/asyncJobs.ts", "AsyncJobsContext", "di-ports", "CANONICAL"],
   ["src/agents/orchestrator/autopilot.ts", "AutopilotContext", "di-ports", "CANONICAL"],
@@ -727,7 +736,7 @@ describe("universal context census (#6528 Phase 1)", () => {
     for (const [, , , reason] of EXCLUDED) {
       expect(reason.length).toBeGreaterThan(0);
     }
-    expect(BASELINE.length).toBe(130);
+    expect(BASELINE.length).toBe(131);
     expect(EXCLUDED.length).toBe(45);
   });
 });

@@ -58,6 +58,7 @@ import {
   SCHEDULED_AGENT_JOB_RUN_CAP,
   type JobRunRecord,
 } from "../services/jobRunRecords";
+import { newRunId } from "../services/executionTreeIds";
 import { resolveMissedScheduleGraceMs } from "../config/missedScheduleAlert";
 import { HEARTBEAT_ALARM_CALLBACK } from "../config/heartbeatWatchdog";
 import {
@@ -1314,7 +1315,7 @@ export class ScheduledAgent extends PortThink {
     }
     active.usedModelTokens += reportedTokens;
 
-    const resolution = await this.resolveAgentScheduleLoopSettingsForLogin(
+    const resolution = await this.getAgentScheduleLoopSettingsForLogin(
       active.login,
     );
     if (!resolution.settings) {
@@ -3521,7 +3522,7 @@ export class ScheduledAgent extends PortThink {
         throw new Error("Agentic-loop schedules require a recorded owner login.");
       }
       const resolution =
-        await this.resolveAgentScheduleLoopSettingsForLogin(ownerLogin);
+        await this.getAgentScheduleLoopSettingsForLogin(ownerLogin);
       if (!resolution.settings?.enabled) {
         throw new Error(
           resolution.settings
@@ -4230,7 +4231,7 @@ export class ScheduledAgent extends PortThink {
    * alias-resolved principal (the session precondition of
    * evaluateRoutePep cannot be met inside the DO).
    */
-  private async resolveAgentScheduleLoopSettingsForLogin(
+  private async getAgentScheduleLoopSettingsForLogin(
     login: string,
   ): Promise<AgentScheduleLoopSettingsResolution> {
     try {
@@ -4340,7 +4341,7 @@ export class ScheduledAgent extends PortThink {
 
     return this.withAgenticLoopTurn(async () => {
       const resolution =
-        await this.resolveAgentScheduleLoopSettingsForLogin(login);
+        await this.getAgentScheduleLoopSettingsForLogin(login);
       if (!resolution.settings) {
         return {
           status: "failed",
@@ -4369,7 +4370,7 @@ export class ScheduledAgent extends PortThink {
       const active: ActiveAgenticLoop = {
         login,
         scheduleId: goal.id,
-        runId: crypto.randomUUID(),
+        runId: newRunId(),
         prompt,
         settings: resolution.settings,
         controller: new AbortController(),
@@ -4499,7 +4500,7 @@ export class ScheduledAgent extends PortThink {
       pdp: (input) => evaluateAgentSchedulePdp(createAgentSchedulePdpDeps(this.env), input),
       config: resolveEnvironmentConfig(this.env).agentSchedule,
       resolveAgentScheduleLoopSettings: async (login) =>
-        (await this.resolveAgentScheduleLoopSettingsForLogin(login)).settings,
+        (await this.getAgentScheduleLoopSettingsForLogin(login)).settings,
       nowMs: () => Date.now(),
       nowIso: () => new Date().toISOString(),
       recordLedger: (record) => {
@@ -4578,7 +4579,7 @@ export class ScheduledAgent extends PortThink {
         );
       }
       const settings =
-        await this.resolveAgentScheduleLoopSettingsForLogin(entry.requestedBy);
+        await this.getAgentScheduleLoopSettingsForLogin(entry.requestedBy);
       if (!settings.settings?.enabled) {
         throw new Error(
           settings.settings
