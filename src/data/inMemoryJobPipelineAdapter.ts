@@ -23,6 +23,8 @@ import {
   JOB_PIPELINE_DEFINITIONS_TABLE,
   JOB_PIPELINE_INSTANCES_TABLE,
   jobPipelineArtifactId,
+  jobPipelineRunInstanceId,
+  parseJobPipelineInstanceId,
   type JobDefinition,
   type JobInstanceRecord,
   type JobPipelineStores,
@@ -62,7 +64,13 @@ class JobArtifactMemoryRepository extends InMemoryRepository<JobArtifactRow> {
 
 function instanceToRow(record: JobInstanceRecord): JobInstanceRow {
   return {
-    jobId: record.jobId,
+    // Issue #6555 — a run-scoped row is stored under its
+    // composite key (job + run marker + run key); a management
+    // row keeps the plain job id.
+    jobId:
+      record.instanceScope === "run" && record.runKey
+        ? jobPipelineRunInstanceId(record.jobId, record.runKey)
+        : record.jobId,
     state: record.state,
     desiredState: record.desiredState,
     currentRunId: record.currentRunId,
@@ -83,8 +91,17 @@ function instanceToRow(record: JobInstanceRecord): JobInstanceRow {
 }
 
 function rowToInstance(row: JobInstanceRow): JobInstanceRecord {
+  // Issue #6555 — parse the stored key back: a composite key
+  // restores the job id, the run scope, and the run key. A plain
+  // key is a management row, whose scope fields stay absent
+  // (absent means "job") so the historical record shape is
+  // unchanged for existing rows.
+  const parsed = parseJobPipelineInstanceId(row.jobId);
   return {
-    jobId: row.jobId,
+    jobId: parsed.jobId,
+    ...(parsed.instanceScope === "run"
+      ? { instanceScope: parsed.instanceScope, runKey: parsed.runKey }
+      : {}),
     state: row.state as JobInstanceRecord["state"],
     desiredState: row.desiredState as JobInstanceRecord["desiredState"],
     currentRunId: row.currentRunId,
@@ -148,8 +165,14 @@ export class InMemoryJobPipelineStores implements JobPipelineStores {
   };
 
   readonly instances = {
-    getInstance: async (jobId: string): Promise<JobInstanceRecord | null> => {
-      const row = this.instancesRepo.findById(jobId);
+    getInstance: async (
+      jobId: string,
+      runKey?: string | null,
+    ): Promise<JobInstanceRecord | null> => {
+      // Issue #6555 — a run key selects one run's own row;
+      // without it, the job's management row.
+      const key = runKey ? jobPipelineRunInstanceId(jobId, runKey) : jobId;
+      const row = this.instancesRepo.findById(key);
       return row ? rowToInstance(row) : null;
     },
     saveInstance: async (record: JobInstanceRecord): Promise<void> => {

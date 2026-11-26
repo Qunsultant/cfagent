@@ -1,0 +1,3 @@
+### Added
+
+- **Engine run-per-row mode (#6555):** a job definition can now opt in to one run per submission (`instanceScope: "run"`), so concurrent submissions of the same definition — for example concurrent tool calls — run concurrently instead of serializing behind the one-run-per-job guard. Each submission gets its own instance row, keyed by the submission in the existing `job_id` column (no migration); a live row under the same key is a true duplicate and is refused, a terminal row allows a re-dispatch, and a proven replay of the same workflow instance resumes inline. Definitions that do not opt in keep the single-row behaviour exactly as before.

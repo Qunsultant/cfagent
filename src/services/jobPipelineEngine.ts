@@ -1288,32 +1288,126 @@ export class JobPipelineControl {
    * fresh run id, execute, and return the sync outcome or the handle.
    * Shared by `runJob` and `replayRun` so a replay cannot drift into a
    * second execution path.
+   *
+   * Issue #6555 — run-per-row mode: when the definition's instance
+   * scope is "run", dispatch keys the run by its own instance row
+   * (`dispatchPerRun`) instead of the job's single row, so concurrent
+   * submissions of the definition run concurrently. The single-row
+   * path below is unchanged: the guard, its order (guard first,
+   * then mode/scope asserts), and its refusal are exactly as before.
    */
   private async dispatchResolved(
     definition: JobDefinition,
     opts: { trigger?: JobRunTrigger; kind?: JobRunKind; originRunId?: string | null; scopePath?: string; scheduleId?: string; asyncJobId?: string; workflowInstanceId?: string },
   ): Promise<JobDispatchResult> {
     const jobId = definition.jobId;
-    const instance = await this.requireInstance(jobId);
+    let runId: string;
+    let completion: Promise<JobRunOutcome>;
+    if (definition.config.instanceScope === "run") {
+      assertExecutionModeSupported(definition.config.executionMode);
+      this.assertScopeNotRetired(definition, opts.scopePath ?? "");
+      ({ runId, completion } = await this.dispatchPerRun(definition, opts));
+    } else {
+      const instance = await this.requireInstance(jobId);
+      if (
+        instance.state === "queued" ||
+        instance.state === "running" ||
+        instance.state === "paused"
+      ) {
+        throw new JobPipelineError(
+          "job_already_running",
+          `Job "${jobId}" is ${instance.state} (run ${instance.currentRunId ?? "unknown"}); resume or cancel it before dispatching a new run.`,
+        );
+      }
+      assertExecutionModeSupported(definition.config.executionMode);
+      this.assertScopeNotRetired(definition, opts.scopePath ?? "");
+      runId = this.newRunId();
+      completion = this.executeRun(definition, {
+        runId,
+        trigger: normalizeJobRunTrigger(opts.trigger),
+        // Issue #4767 — a fresh dispatch is an original unless the
+        // caller is retryJob, which passes kind "re-run" + the origin
+        // run id it retried. The kind is normalized, never trusted.
+        kind: normalizeJobRunKind(opts.kind),
+        originRunId: normalizeOriginRunId(opts.originRunId),
+        scopePath: opts.scopePath ?? "",
+        scheduleId: opts.scheduleId ?? null,
+        asyncJobId: opts.asyncJobId ?? null,
+        workflowInstanceId: opts.workflowInstanceId ?? null,
+        resuming: false,
+        runInstanceKey: null,
+      });
+    }
+    this.inflight.set(runId, completion);
+    if (definition.config.executionMode.delivery === "sync") {
+      const outcome = await completion;
+      return { jobId, runId, state: outcome.state };
+    }
+    return { jobId, runId, state: "queued", completion };
+  }
+
+  /**
+   * Issue #6555 — the per-run dispatch tail. Each submission gets
+   * its own instance row, keyed by the submission: the dispatching
+   * async job id when one dispatched it, else the run id itself.
+   * A live row under the same key is a true duplicate — the same
+   * submission dispatched twice — and refuses `job_already_running`;
+   * a terminal row under the same key is a re-dispatch (retry),
+   * which proceeds with a fresh run. A submission with no async
+   * job id has nothing to dedupe against, so every such dispatch
+   * is a new run.
+   *
+   * Duplicate semantics, stated honestly: this is check-then-write,
+   * not an atomic claim — two simultaneous dispatches of the same
+   * key can both pass the check. The queue's guarded claim remains
+   * the atomic gate on F1's path; this check is the second line.
+   *
+   * A proven replay re-enters here, not through `replayJob` (which
+   * addresses the job's management row): when the caller proves it
+   * is the same workflow instance that dispatched the live run —
+   * the recorded workflow instance id equals the caller's — the
+   * live run resumes under its own id. An unproven re-entry
+   * refuses exactly as a duplicate does.
+   */
+  private async dispatchPerRun(
+    definition: JobDefinition,
+    opts: { trigger?: JobRunTrigger; kind?: JobRunKind; originRunId?: string | null; scopePath?: string; scheduleId?: string; asyncJobId?: string; workflowInstanceId?: string },
+  ): Promise<{ runId: string; completion: Promise<JobRunOutcome> }> {
+    const jobId = definition.jobId;
+    const runId = this.newRunId();
+    const runKey = opts.asyncJobId ?? runId;
+    const live = await this.deps.stores.instances.getInstance(jobId, runKey);
     if (
-      instance.state === "queued" ||
-      instance.state === "running" ||
-      instance.state === "paused"
+      live &&
+      (live.state === "queued" || live.state === "running" || live.state === "paused")
     ) {
+      if (
+        opts.workflowInstanceId &&
+        live.runWorkflowInstanceId === opts.workflowInstanceId &&
+        live.currentRunId
+      ) {
+        const resumed = this.executeRun(definition, {
+          runId: live.currentRunId,
+          trigger: normalizeJobRunTrigger(live.runTrigger),
+          kind: "replay",
+          originRunId: live.currentRunId,
+          scopePath: live.checkpoint?.scopePath ?? opts.scopePath ?? "",
+          scheduleId: live.runScheduleId ?? null,
+          asyncJobId: live.runAsyncJobId ?? null,
+          workflowInstanceId: opts.workflowInstanceId,
+          resuming: true,
+          runInstanceKey: runKey,
+        });
+        return { runId: live.currentRunId, completion: resumed };
+      }
       throw new JobPipelineError(
         "job_already_running",
-        `Job "${jobId}" is ${instance.state} (run ${instance.currentRunId ?? "unknown"}); resume or cancel it before dispatching a new run.`,
+        `Job "${jobId}" run "${runKey}" is ${live.state} (run ${live.currentRunId ?? "unknown"}); resume or cancel it before dispatching a new run.`,
       );
     }
-    assertExecutionModeSupported(definition.config.executionMode);
-    this.assertScopeNotRetired(definition, opts.scopePath ?? "");
-    const runId = this.newRunId();
     const completion = this.executeRun(definition, {
       runId,
       trigger: normalizeJobRunTrigger(opts.trigger),
-      // Issue #4767 — a fresh dispatch is an original unless the
-      // caller is retryJob, which passes kind "re-run" + the origin
-      // run id it retried. The kind is normalized, never trusted.
       kind: normalizeJobRunKind(opts.kind),
       originRunId: normalizeOriginRunId(opts.originRunId),
       scopePath: opts.scopePath ?? "",
@@ -1321,13 +1415,9 @@ export class JobPipelineControl {
       asyncJobId: opts.asyncJobId ?? null,
       workflowInstanceId: opts.workflowInstanceId ?? null,
       resuming: false,
+      runInstanceKey: runKey,
     });
-    this.inflight.set(runId, completion);
-    if (definition.config.executionMode.delivery === "sync") {
-      const outcome = await completion;
-      return { jobId, runId, state: outcome.state };
-    }
-    return { jobId, runId, state: "queued", completion };
+    return { runId, completion };
   }
 
   /**
@@ -1388,6 +1478,8 @@ export class JobPipelineControl {
       // with the paused outcome — the stamp clears (#4454).
       workflowInstanceId: null,
       resuming: true,
+      // Issue #6555 — resume addresses the job's management row.
+      runInstanceKey: null,
     });
     this.inflight.set(runId, completion);
     if (definition.config.executionMode.delivery === "sync") {
@@ -1456,6 +1548,8 @@ export class JobPipelineControl {
       // second eviction of the same workflow instance.
       workflowInstanceId: opts.workflowInstanceId,
       resuming: true,
+      // Issue #6555 — replay addresses the job's management row.
+      runInstanceKey: null,
     });
     this.inflight.set(runId, completion);
     if (definition.config.executionMode.delivery === "sync") {
@@ -2752,6 +2846,29 @@ export class JobPipelineControl {
     return fresh;
   }
 
+  /**
+   * Issue #6555 — load the instance row a run executes against.
+   * Null key: the job's management row (single mode). A key:
+   * the run's own row, created fresh when the dispatch is the
+   * row's first — a re-dispatch after terminal reuses the row,
+   * re-stamped by executeRun's start.
+   */
+  private async requireRunInstance(
+    jobId: string,
+    runKey: string | null,
+  ): Promise<JobInstanceRecord> {
+    if (!runKey) return this.requireInstance(jobId);
+    const existing = await this.deps.stores.instances.getInstance(jobId, runKey);
+    if (existing) return existing;
+    const fresh: JobInstanceRecord = {
+      ...this.freshInstance(jobId),
+      instanceScope: "run",
+      runKey,
+    };
+    await this.deps.stores.instances.saveInstance(fresh);
+    return fresh;
+  }
+
   private async setInstance(instance: JobInstanceRecord): Promise<void> {
     await this.deps.stores.instances.saveInstance({ ...instance, updatedAt: this.iso() });
   }
@@ -2889,11 +3006,18 @@ export class JobPipelineControl {
       forceStage: string | null;
       /** Issue #4775 S1 — the run bound the stage deadlines clamp to; absent when none applies. */
       runDeadlineMs?: number;
+      /**
+       * Issue #6555 — the run's own instance row in run-per-row
+       * mode (its dedup key); absent in single mode, where the
+       * stage checkpoint binds to the job's management row.
+       */
+      runKey?: string | null;
     },
   ): Promise<RunContext> {
     const checkpoints = createJobPipelineStageCheckpointStore(
       this.deps.stores.instances,
       definition.jobId,
+      opts.runKey ?? null,
     );
     // Issue #4767 (Q6) — the ledger carries the run's trigger and
     // kind. A fresh run stamps both; a resumed run restamps the
@@ -2947,12 +3071,18 @@ export class JobPipelineControl {
       asyncJobId: string | null;
       workflowInstanceId: string | null;
       resuming: boolean;
+      /**
+       * Issue #6555 — the run's own instance row in run-per-row
+       * mode (the submission's dedup key); null in single mode,
+       * where the run uses the job's management row.
+       */
+      runInstanceKey: string | null;
     },
   ): Promise<JobRunOutcome> {
     const { publisher } = this.deps;
     const jobId = definition.jobId;
     const startedAt = this.iso();
-    let instance = await this.requireInstance(jobId);
+    let instance = await this.requireRunInstance(jobId, opts.runInstanceKey);
     // Issue #4767 (Q6) — the resume guard: a resuming run refuses
     // a stage checkpoint stamped under a different trigger than
     // the run's own. A checkpoint belongs to exactly one
@@ -3041,6 +3171,9 @@ export class JobPipelineControl {
       instance,
       forceStage: null,
       runDeadlineMs,
+      // Issue #6555 — the stage checkpoint binds to this run's
+      // own instance row in run-per-row mode.
+      runKey: opts.runInstanceKey,
     });
     if (!opts.resuming) await this.persistLedger(ctx);
 
@@ -3067,7 +3200,7 @@ export class JobPipelineControl {
       } else {
         await execution;
       }
-      instance = await this.requireInstance(jobId);
+      instance = await this.requireRunInstance(jobId, opts.runInstanceKey);
       const descriptor =
         `run ${opts.runId}: ${ctx.stepExecutions} step executions, ${ctx.artifactKeys.length} artifacts` +
         (ctx.notes.length > 0 ? `; ${ctx.notes.join("; ")}` : "");
@@ -3091,7 +3224,7 @@ export class JobPipelineControl {
         artifactKeys: [...ctx.artifactKeys],
       };
     } catch (error) {
-      instance = await this.requireInstance(jobId);
+      instance = await this.requireRunInstance(jobId, opts.runInstanceKey);
       if (error instanceof RunStopped && error.reason === "paused") {
         // The boundary that stopped already persisted the checkpoint + paused state.
         return { jobId, runId: opts.runId, state: "paused", artifactKeys: [...ctx.artifactKeys] };

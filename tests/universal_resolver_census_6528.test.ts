@@ -12,7 +12,7 @@
  *    function — a 6th fails);
  *  - a new definition whose NAME already exists in the baseline at another
  *    file fails as a same-question duplicate;
- *  - the resolver definition total above its baselined 596 fails;
+ *  - the resolver definition total above its baselined 597 fails;
  *  - decreases and vanished rows pass — that is the shrink the programme
  *    wants, and retiring a duplicate means lowering or removing its
  *    baseline entry in the same PR.
@@ -83,6 +83,17 @@
  * (`sourceOfEnvironmentName`, `sourceOfBrokerBaseUrl`) are not
  * `resolve*`-named and are internal to the universal-resolution
  * module, hence 0 separate resolvers by the §2.1 counting rule.
+ *
+ * Phase 3 (#6555, 2026-11-25) raises the baseline 596 → 597 with ONE
+ * row: `resolveInstanceScope` (`src/services/jobPipelineConfig.ts`,
+ * standalone, CANONICAL) — the run-per-row mode resolver. It answers
+ * a NEW question no existing resolver answers (which instance scope
+ * a job definition runs under: one row per job, or one row per run),
+ * applying the same allow-list + default cascade as its neighbour
+ * `resolveExecutionMode` in the same module, so the old resolvers'
+ * rows are untouched and the count grows by exactly one.
+ * Disposition: CANONICAL — it is the single home for the
+ * instance-scope question, the one the engine resolves against.
  *
  * Exclusions (recorded as data, not follow-up notes — #3786 Scope):
  * - Aliases (0 definitions): `resolveTradeEnvironmentFromSettings`
@@ -557,6 +568,7 @@ const BASELINE: Array<[string, string, Kind, number, Disposition]> = [
   ["src/services/indexListConsumer.ts", "resolveStoredIndexList", "standalone", 1, "CANONICAL"],
   ["src/services/jobDefinitionParamBinders.ts", "SettingResolver", "resolver-type", 1, "CANONICAL"],
   ["src/services/jobPipelineConfig.ts", "resolveExecutionMode", "standalone", 1, "CANONICAL"],
+  ["src/services/jobPipelineConfig.ts", "resolveInstanceScope", "standalone", 1, "CANONICAL"],
   ["src/services/jobPipelineConfig.ts", "resolveJobDefinition", "standalone", 1, "CANONICAL"],
   ["src/services/jobPipelineConfig.ts", "resolveNode", "standalone", 1, "CANONICAL"],
   ["src/services/jobPipelineConfig.ts", "resolveSchedule", "standalone", 1, "CANONICAL"],
@@ -1149,9 +1161,9 @@ describe("universal resolver census (#6528 Phase 1)", () => {
   it("the distinct-question count is a range, never an exact number", () => {
     expect(QUESTION_RANGE_LOW).toBeLessThan(QUESTION_CENTRAL_ESTIMATE);
     expect(QUESTION_CENTRAL_ESTIMATE).toBeLessThan(QUESTION_RANGE_HIGH);
-    // Implied copies at the seeded total: 596 − 320 = 276 … 596 − 285 = 311.
-    expect(baselineTotal - QUESTION_RANGE_HIGH).toBe(276);
-    expect(baselineTotal - QUESTION_RANGE_LOW).toBe(311);
+    // Implied copies at the seeded total: 597 − 320 = 277 … 597 − 285 = 312.
+    expect(baselineTotal - QUESTION_RANGE_HIGH).toBe(277);
+    expect(baselineTotal - QUESTION_RANGE_LOW).toBe(312);
   });
 
   it("no test-only or scripts-only resolver is counted as production", () => {
@@ -1210,12 +1222,12 @@ describe("universal resolver census (#6528 Phase 1)", () => {
       expect(count, `${kind} count`).toBeGreaterThan(0);
       expect(DISPOSITIONS.has(disposition), `unknown disposition ${disposition}`).toBe(true);
     }
-    expect(baselineTotal).toBe(596);
+    expect(baselineTotal).toBe(597);
     const byKind = new Map<Kind, number>();
     for (const [, , kind, count] of BASELINE) {
       byKind.set(kind, (byKind.get(kind) ?? 0) + count);
     }
-    expect(byKind.get("standalone")).toBe(565);
+    expect(byKind.get("standalone")).toBe(566);
     expect(byKind.get("class-method")).toBe(18);
     expect(byKind.get("resolver-type")).toBe(9);
     expect(byKind.get("interface-method")).toBe(4);
