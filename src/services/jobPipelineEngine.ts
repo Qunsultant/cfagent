@@ -53,8 +53,8 @@
  * resumable and never recorded as failed. Cancel is terminal:
  * the in-flight unit and every outstanding unit are recorded
  * cancelled, and downstream stages never proceed. Resume
- * re-reads the definition (configuration is read at run
- * start) and continues under the runner's decisions: completed
+ * executes the definition version the run started under (#5278)
+ * and continues under the runner's decisions: completed
  * stages/units are read back from their persisted hand-offs,
  * never re-executed; the stopped unit continues from its
  * recorded progress.
