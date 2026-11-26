@@ -57,6 +57,7 @@
  */
 
 import type { CommercialAccount } from "../services/cfpayMonetization";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import type { PaymentWorkflowEventParams } from "../workflows/paymentWorkflow";
 import { startManagedWorkflowInstance } from "../workflows/workflowInstanceSeam";
 import type { WorkflowJobCommand } from "../workflows/workflowPorts";
@@ -66,7 +67,8 @@ export const PAYMENT_WORKFLOW_BINDING = "PAYMENT_WORKFLOW" as const;
 export interface PaymentWorkflowSubmissionInput {
   runRequestId: string;
   family: "stock" | "goal" | "options" | "strategy";
-  trigger: "manual" | "scheduled";
+  // Issue #6503 — the one five-mode dispatch definition.
+  trigger: JobRunTrigger;
   scheduleKind?: "one_off" | "recurring";
   authorizedAtSubmission?: boolean;
   tenantId: string;

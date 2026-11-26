@@ -566,11 +566,16 @@ describe("5880-P09 census: every known job resolves to one entry", () => {
     }
   });
 
-  it("covers the Worker-cron duties by their dispatch crons", () => {
+  it("the former Worker-cron duties now carry the monthly interval, not dispatch crons (#6503)", () => {
     expect(WORKER_CRON_TRIGGERS_INVENTORY).toEqual(["0 3 * * *", "*/30 * * * *", "0 4 * * *"]);
-    expect(jobCatalogueEntryForId("token-renewal")?.defaultCron).toBe("0 3 * * *");
-    expect(jobCatalogueEntryForId("retention")?.defaultCron).toBe("0 4 * * *");
-    // The */30 tick is the alarm substrate, not a job: no entry claims it.
+    // #6503: token-renewal and retention are real stored schedules on the
+    // monthly interval (2,592,000s) by default — their dispatch crons are
+    // retired, not carried forward. The */30 tick is the alarm substrate,
+    // not a job: no entry claims it.
+    expect(jobCatalogueEntryForId("token-renewal")?.defaultCron).toBeUndefined();
+    expect(jobCatalogueEntryForId("retention")?.defaultCron).toBeUndefined();
+    expect(jobCatalogueEntryForId("token-renewal")?.defaultIntervalSeconds).toBe(2592000);
+    expect(jobCatalogueEntryForId("retention")?.defaultIntervalSeconds).toBe(2592000);
     expect(getJobCatalogue().filter((j) => j.defaultCron === "*/30 * * * *")).toHaveLength(0);
   });
 });

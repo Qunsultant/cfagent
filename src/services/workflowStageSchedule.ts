@@ -194,6 +194,12 @@ export interface WorkflowStageScheduleAdapterDeps {
   /** Dispatch one schedule callback now (the trigger path's firing). */
   runCallback: (callback: string, payload: unknown) => Promise<void>;
   nowIso: () => string;
+  /**
+   * Issue #6503 — the start-paused control's value, resolved by the
+   * caller from the managed setting: false starts a created schedule
+   * active (resume arms it); absent keeps the #6482 paused default.
+   */
+  startPaused?: boolean;
 }
 
 /**
@@ -253,7 +259,7 @@ export function createWorkflowStageScheduleAdapter(
         timing,
         payload,
         ownerLogin: input.ownerLogin ?? null,
-      }, deps.nowIso());
+      }, deps.nowIso(), { startPaused: deps.startPaused });
       if (!created.ok) throw new Error(created.error);
       return created.record;
     },

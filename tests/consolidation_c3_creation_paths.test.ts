@@ -95,8 +95,8 @@ const ARMING_PATTERN = /\.(schedule|scheduleEvery)\s*\(/;
 /** Post-C3 enumeration: file → number of arming call sites + role. */
 const ARMING_SITES: Record<string, { count: number; role: string }> = {
   "src/agents/orchestrator.ts": {
-    count: 7,
-    role: "context binding arrows for the remaining class-owned modules + the stale-task sweep arm (non-screening) + the stale-async-job sweep arm (#3784, non-screening: the 15-min sweepStaleAsyncJobs interval, armed idempotently from onStart beside the #618 ledger sweep) + the schedule-watchdog sweep arm (#3788, non-screening: the 15-min watchdogMissedSchedules interval, armed idempotently from onStart beside the #3784 sweep); the six dispatcher arrows moved to orchestrator/routeRequest.ts by #2942 (12 = 6 + 6: the move's 11 plus the #3784 arm)",
+    count: 6,
+    role: "context binding arrows for the remaining class-owned modules + the #6503 onStart reconcile's makeScheduleAlarmsPort binding arrows (schedule/scheduleEvery bound into the reconcile context; actual arming happens in the alarms port, not inline). #6503 retired the three inline sweep arms as arms — the stale-ledger sweep (#618, 6h), the stale-async-job sweep (#3784, 15m) and the schedule-watchdog sweep (#3788, 15m) are stored schedules now, seeded/reconciled on start by reconcileSystemScheduleRecords (all-monthly per #6489); the six dispatcher arrows moved to orchestrator/routeRequest.ts by #2942 (12 = 6 + 6: the move's 11 plus the #3784 arm)",
   },
   "src/agents/orchestrator/routeRequest.ts": {
     count: 7,
@@ -109,6 +109,14 @@ const ARMING_SITES: Record<string, { count: number; role: string }> = {
   "src/agents/routes/schedules.ts": {
     count: 3,
     role: "the alarms adapter arm only (makeScheduleAlarmsPort, 3: cron/interval/delayed, #3123 unified-store alarms port) — the create route and the approve path write paused records instead of arming (#6482 P12), and resume/update re-arm through the adapter; payloads arrive builder-validated",
+  },
+  // #6503 — the capability module's alarms-port arm (makeScheduleAlarmsPort,
+  // 3: cron/interval/delayed — the same shape as the schedules.ts port):
+  // resume/update re-arm through it; the create path writes paused
+  // records instead of arming, so no screening payload is built here.
+  "src/services/agentScheduleCapability.ts": {
+    count: 3,
+    role: "the alarms adapter arm only (makeScheduleAlarmsPort, 3: cron/interval/delayed) — resume/update re-arm through the adapter; payloads arrive builder-validated",
   },
   "src/agents/scheduled-agent.ts": {
     count: 1,

@@ -266,6 +266,14 @@ describe("adminTenantQueues (#2457)", () => {
     expect(forwarded).toHaveLength(1);
     expect(forwarded[0].login).toBe("alice");
     expect(forwarded[0].url).toBe("https://agent.internal/schedules");
+    // Issue #6503 step 8c — the fan-out still routes to the target
+    // instance (per-login stub), but the forwarded identity is the
+    // verified admin, never the target login (the dump read ignores
+    // the header — it returns the instance's own list — so the
+    // identity switch changes no read behavior).
+    expect(forwarded[0].headers["x-user-login"]).toBe("admin");
+    expect(forwarded[0].headers["x-admin-actor"]).toBe("admin");
+    expect(forwarded[0].headers["x-admin-tenant"]).toBe("tenant-a");
   });
 
   it("cancel-all preview cancels nothing and writes no audit", async () => {
@@ -324,7 +332,11 @@ describe("adminTenantQueues (#2457)", () => {
     expect(body.unmappedMembers).toEqual(["user-ghost"]);
     const cancel = forwarded.find((f) => f.method === "POST");
     expect(cancel?.url).toBe("https://agent.internal/schedules/cancel-all");
-    expect(cancel?.headers["x-user-login"]).toBe("alice");
+    // Issue #6503 step 8c — the forwarded identity is the verified
+    // admin login, not the target login: the target's step-8 gate
+    // re-verifies the platform-admin binding, so a target login
+    // would 403 the fan-out in production.
+    expect(cancel?.headers["x-user-login"]).toBe("admin");
     expect(cancel?.headers["x-admin-actor"]).toBe("admin");
     expect(cancel?.headers["x-admin-tenant"]).toBe("tenant-a");
     expect(cancel?.body).toEqual({ confirm: true });
@@ -375,7 +387,7 @@ describe("adminTenantQueues (#2457)", () => {
   });
 
   it("clear-table forwards the allowlist decision from the target (refusals pass through per login)", async () => {
-    const { ctx, audit } = makeCtx({
+    const { ctx, audit, forwarded } = makeCtx({
       callerMemberships: ADMIN_MEMBERSHIPS,
       targets: {
         alice: {
@@ -395,6 +407,16 @@ describe("adminTenantQueues (#2457)", () => {
     };
     expect(body.perLogin[0].error).toMatch(/never bulk-clearable/);
     expect(audit).toHaveBeenCalledTimes(1);
+    // Issue #6503 step 8c — the clear-table fan-out carries the
+    // verified admin login, not the target login: the target's
+    // step-8b gate requires platform-admin for mas_events, so a
+    // target login would 403 the fan-out in production.
+    const clear = forwarded.find((f) => f.url === "https://agent.internal/maintenance/clear-table");
+    expect(clear?.login).toBe("alice");
+    expect(clear?.headers["x-user-login"]).toBe("admin");
+    expect(clear?.headers["x-admin-actor"]).toBe("admin");
+    expect(clear?.headers["x-admin-tenant"]).toBe("tenant-a");
+    expect(clear?.body).toEqual({ table: "mas_events", confirm: true });
   });
 
   it("405 for a wrong method on a matched action", async () => {

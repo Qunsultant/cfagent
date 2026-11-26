@@ -97,6 +97,10 @@ import type { PriceCatalogue, PriceFamily } from "../data/priceCataloguePorts";
 import { isUnlimitedFreeGrantActive, type UnlimitedFreeGrant } from "../data/commercialPorts";
 import { freeRunMonthKey, type FreeRunCounter } from "../data/freeRunCounterPorts";
 import type { RunsPackBalancePort } from "../data/runsPackPorts";
+import {
+  isAttendedTrigger,
+  type JobRunTrigger,
+} from "../data/jobRunRecordPorts";
 import type { CodeRunsBalancePort } from "../data/referralCodePorts";
 import {
   approvedFreeQuotaPeriodKey,
@@ -114,7 +118,14 @@ import {
 import type { CheckoutPorts, CheckoutRail } from "./checkoutPorts";
 
 export type NativeScreenerFamily = PriceFamily;
-export type NativeRunTrigger = "manual" | "scheduled";
+/**
+ * Issue #6503 — the money gate carries the one five-mode dispatch
+ * definition (JobRunTrigger, #5028/#3214), not a parallel two-valued
+ * vocabulary. triggered = manual-side (user-initiated, may checkout);
+ * copilot/autopilot = scheduled-like (unattended, coverage-only).
+ * Build decision for Mars to confirm at the #6503 debrief.
+ */
+export type NativeRunTrigger = JobRunTrigger;
 export type NativeScheduleKind = "one_off" | "recurring";
 
 export interface NativeCommercialAccount {
@@ -777,7 +788,11 @@ export class NativeMonetizationGate {
     // run (recurring, or no scheduleKind stated) is coverage-only.
     const isOneOffScheduled =
       run.trigger === "scheduled" && run.scheduleKind === "one_off" && run.authorizedAtSubmission === true;
-    if (run.trigger === "scheduled" && !isOneOffScheduled) {
+    // Issue #6503 — only an unattended run is coverage-only: a timer
+    // firing, or a copilot/autopilot dispatch, never takes an
+    // unattended card charge. A user-initiated run (manual, or a
+    // Run-now "triggered" click) may checkout at submission.
+    if (!isAttendedTrigger(run.trigger) && !isOneOffScheduled) {
       return { allowed: false, status: "coverage_required", httpStatus: 402, runRequestId: run.id, priceUSD, family: run.family, reason: "Scheduled runs need subscription included usage or prepaid credits. No unattended card charge is taken.", productId, versionId };
     }
     if (existing?.status === "payment_required") {

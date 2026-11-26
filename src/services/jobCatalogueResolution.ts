@@ -16,9 +16,9 @@
  * - The operation: a goal/planner operation names its catalogue
  *   entry (`jobCatalogueEntryForOperation`).
  * - The record id: a record's id is the list id
- *   (`unifiedScheduleManagement.ts:1140-1146`) — a derived record
- *   resolves by its record id even when the value carries no
- *   callback, and pause stores the record under
+ *   (`unifiedScheduleManagement.ts:1140-1146`) — a stored system
+ *   record resolves by its record id even when the value carries
+ *   no callback, and pause stores the record under
  *   `recordId = declaredTaskId ?? id` (`:1376-1380`).
  *
  * Dedupe still lives where it lived: `canonicalJson` /
@@ -82,8 +82,8 @@ export function jobCatalogueIdOf(value: JobCatalogueIdValue): string | null {
     const byOperation = jobCatalogueEntryForOperation(operation);
     if (byOperation) return byOperation.id;
   }
-  // A record's id is the list id: a derived record resolves by its
-  // record id even when the value carries no callback.
+  // A record's id is the list id: a stored system record resolves
+  // by its record id even when the value carries no callback.
   const id = holder.id;
   if (typeof id === "string" && id) {
     const byId = jobCatalogueEntryForId(id);

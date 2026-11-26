@@ -58,6 +58,22 @@ import { AGENT_SCHEDULABLE_GOAL_OPERATIONS } from "../src/services/agentSchedule
 import { BudgetGuard } from "../src/payments/budget-guard";
 import { GUARD_ALLOWLIST } from "../src/agents/payments-agent";
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { goalToRecord } from "../src/services/unifiedScheduleManagement";
+
+/**
+ * Issue #6503 — the fixture goal is planted in the D1 schedule
+ * store, not the DO KV "goals" key (which the agent no longer
+ * reads). Planting exactly one goal keeps each tick isolated: an
+ * empty store would re-seed all nine built-in goals.
+ */
+async function plantGoals(mockD1: MockD1Database, goals: Array<Record<string, unknown>>) {
+  const store = createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules;
+  for (const goal of goals) {
+    await store.save(goalToRecord(goal as never));
+  }
+}
 import {
   runAutopilotMonthlyEvaluation,
   AUTOPILOT_MONTHLY_EVALUATION_REQUESTED_BY,
@@ -183,8 +199,10 @@ describe("monthly Autopilot evaluation schedule (#4411)", () => {
   it("a forced tick with a passing executor stamps lastRun and names the verdict", async () => {
     // 2026-11-01 is a Sunday and the 1st of the month.
     vi.setSystemTime(new Date("2026-11-01T09:00:00Z"));
-    const ctx = makeCtx([monthlyGoal()]);
-    const env = makeEnv();
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [monthlyGoal()]);
+    const ctx = makeCtx();
+    const env = makeEnv({ AGENT_DB: mockD1 });
     const agent = new ScheduledAgent(ctx as never, env as never);
     const executor = vi.fn(
       async (): Promise<AutopilotMonthlyEvaluationResult> => ({
@@ -202,14 +220,16 @@ describe("monthly Autopilot evaluation schedule (#4411)", () => {
     expect(executor).toHaveBeenCalledWith(expect.objectContaining({ id: MONTHLY_GOAL_ID }));
     expect(tick.jobsCreated).toBe(1);
     expect(tick.errors).toEqual([]);
-    const goals = ctx._store.get("goals") as any[];
+    const goals = await agent.listGoals();
     expect(goals[0].lastRun).toBe("2026-11-01T09:00:00.000Z");
   });
 
   it("a forced tick with a failing executor leaves the goal due", async () => {
     vi.setSystemTime(new Date("2026-11-01T09:00:00Z"));
-    const ctx = makeCtx([monthlyGoal()]);
-    const env = makeEnv();
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [monthlyGoal()]);
+    const ctx = makeCtx();
+    const env = makeEnv({ AGENT_DB: mockD1 });
     const agent = new ScheduledAgent(ctx as never, env as never);
     const executor = vi.fn(
       async (): Promise<AutopilotMonthlyEvaluationResult> => ({
@@ -223,14 +243,16 @@ describe("monthly Autopilot evaluation schedule (#4411)", () => {
     } as never);
     expect(tick.errors.join(" ")).toMatch(/HTTP 500/);
     expect(tick.jobsSkipped).toBe(1);
-    const goals = ctx._store.get("goals") as any[];
+    const goals = await agent.listGoals();
     expect(goals[0].lastRun).toBeUndefined();
   });
 
   it("a forced tick with a throwing executor records a failure and leaves the goal due", async () => {
     vi.setSystemTime(new Date("2026-11-01T09:00:00Z"));
-    const ctx = makeCtx([monthlyGoal()]);
-    const env = makeEnv();
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [monthlyGoal()]);
+    const ctx = makeCtx();
+    const env = makeEnv({ AGENT_DB: mockD1 });
     const agent = new ScheduledAgent(ctx as never, env as never);
     const executor = vi.fn(async (): Promise<AutopilotMonthlyEvaluationResult> => {
       throw new Error("orchestrator unreachable");
@@ -240,31 +262,35 @@ describe("monthly Autopilot evaluation schedule (#4411)", () => {
       autopilotEvaluateExecutor: executor,
     } as never);
     expect(tick.errors.join(" ")).toMatch(/orchestrator unreachable/);
-    const goals = ctx._store.get("goals") as any[];
+    const goals = await agent.listGoals();
     expect(goals[0].lastRun).toBeUndefined();
   });
 
   it("with no executor and no service identity the goal is skipped visibly, not silently", async () => {
     vi.setSystemTime(new Date("2026-11-01T09:00:00Z"));
-    const ctx = makeCtx([monthlyGoal()]);
-    const env = makeEnv();
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [monthlyGoal()]);
+    const ctx = makeCtx();
+    const env = makeEnv({ AGENT_DB: mockD1 });
     const agent = new ScheduledAgent(ctx as never, env as never);
     const tick = await agent.onCron(env as never, { halted: false } as never);
     expect(tick.errors.join(" ")).toMatch(/SERVICE_USER_LOGIN/);
     expect(tick.jobsSkipped).toBe(1);
-    const goals = ctx._store.get("goals") as any[];
+    const goals = await agent.listGoals();
     expect(goals[0].lastRun).toBeUndefined();
   });
 
   it("with a service identity but no OrchestratorAgent binding the goal is skipped visibly", async () => {
     vi.setSystemTime(new Date("2026-11-01T09:00:00Z"));
-    const ctx = makeCtx([monthlyGoal()]);
-    const env = makeEnv({ SERVICE_USER_LOGIN: "service-user" });
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [monthlyGoal()]);
+    const ctx = makeCtx();
+    const env = makeEnv({ SERVICE_USER_LOGIN: "service-user", AGENT_DB: mockD1 });
     const agent = new ScheduledAgent(ctx as never, env as never);
     const tick = await agent.onCron(env as never, { halted: false } as never);
     expect(tick.errors.join(" ")).toMatch(/ORCHESTRATOR_AGENT/);
     expect(tick.jobsSkipped).toBe(1);
-    const goals = ctx._store.get("goals") as any[];
+    const goals = await agent.listGoals();
     expect(goals[0].lastRun).toBeUndefined();
   });
 });

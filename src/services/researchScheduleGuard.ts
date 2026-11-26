@@ -27,12 +27,6 @@ import {
 export type ResearchFireHourConfig = Pick<ResearchJobConfig, "scheduleUtcHour">;
 
 /**
- * Durable marker key for the last day the scheduled research run fired,
- * stored in the orchestrator's mas_settings (YYYY-MM-DD, UTC).
- */
-export const RESEARCH_SCHEDULED_LAST_RUN_KEY = "research_scheduled_last_run";
-
-/**
  * Issue #3121 #4241 — the unified-store record id of the nightly
  * research run, named once here beside its firing rule: the record
  * is derived from this duty, so the id lives with the duty's

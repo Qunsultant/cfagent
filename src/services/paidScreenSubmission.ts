@@ -51,6 +51,10 @@ import {
   type ScreenerFamily,
 } from "./cfpayMonetization";
 import {
+  isAttendedTrigger,
+  type JobRunTrigger,
+} from "../data/jobRunRecordPorts";
+import {
   toCommercialAccount,
   type CommercialAccountRecord,
   type CommercialStore,
@@ -123,7 +127,11 @@ export type PaidScreenAction =
  */
 export function resolvePaidScreenAction(input: {
   monetizationOn: boolean;
-  trigger: "manual" | "scheduled";
+  // Issue #6503 — the one five-mode dispatch definition: a
+  // user-initiated run (manual, or Run-now "triggered") may
+  // checkout at submission; an unattended run (scheduled,
+  // copilot, autopilot) is coverage-only below.
+  trigger: JobRunTrigger;
   scheduleKind?: ScheduleKind;
   authorizedAtSubmission?: boolean;
   coverage: PaidScreenCoverage;
@@ -135,7 +143,7 @@ export function resolvePaidScreenAction(input: {
       reason: "Monetization flag is OFF; the existing free path applies.",
     };
   }
-  if (input.trigger === "manual") {
+  if (isAttendedTrigger(input.trigger)) {
     return {
       action: "start_payment",
       reason:
@@ -299,7 +307,7 @@ export async function resolveTickTenant(
 export interface PaidScreenSubmissionInput {
   runRequestId: string;
   family: ScreenerFamily;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   scheduleKind?: ScheduleKind;
   authorizedAtSubmission?: boolean;
   tenantId: string;

@@ -43,6 +43,22 @@ vi.mock("../src/orchestrate", () => ({
 }));
 
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { goalToRecord } from "../src/services/unifiedScheduleManagement";
+
+/**
+ * Issue #6503 — the fixture goal is planted in the D1 schedule
+ * store, not the DO KV "goals" key (which the agent no longer
+ * reads). Planting exactly one goal keeps each tick isolated: an
+ * empty store would re-seed all nine built-in goals.
+ */
+async function plantGoals(mockD1: MockD1Database, goals: Array<Record<string, unknown>>) {
+  const store = createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules;
+  for (const goal of goals) {
+    await store.save(goalToRecord(goal as never));
+  }
+}
 
 function makeCtx(initialGoals?: any[]) {
   const store = new Map<string, unknown>();
@@ -56,13 +72,14 @@ function makeCtx(initialGoals?: any[]) {
   };
 }
 
-function makeEnv() {
+function makeEnv(mockD1?: MockD1Database) {
   return {
     PAYMENTS_AGENT: {
       idFromName: () => "default",
       get: () => ({ budgetCheck: async () => ({ allowed: true }) }),
     },
     SESSION_STORE: null,
+    ...(mockD1 ? { AGENT_DB: mockD1 } : {}),
   };
 }
 
@@ -92,8 +109,10 @@ describe("index.refresh_wikipedia via onCron (#1980)", () => {
   it("fires Sunday 04:00 UTC, stamps lastRun, and names partial failures", async () => {
     // 2026-11-01 is a Sunday.
     vi.setSystemTime(new Date("2026-11-01T04:00:00Z"));
-    const ctx = makeCtx([indexGoal()]);
-    const env = makeEnv();
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [indexGoal()]);
+    const ctx = makeCtx();
+    const env = makeEnv(mockD1);
     const agent = new ScheduledAgent(ctx as never, env as never);
     const executor = vi.fn(async () => ({
       status: "partial" as const,
@@ -105,15 +124,17 @@ describe("index.refresh_wikipedia via onCron (#1980)", () => {
     expect(executor).toHaveBeenCalledWith("index.refresh_wikipedia");
     expect(tick.jobsCreated).toBe(1);
     expect(tick.errors.join(" ")).toMatch(/sp500/);
-    const goals = ctx._store.get("goals") as any[];
+    const goals = await agent.listGoals();
     expect(goals[0].lastRun).toBe("2026-11-01T04:00:00.000Z");
   });
 
   it("does not fire Saturday 04:00 UTC (wrong weekday)", async () => {
     // 2026-10-31 is a Saturday.
     vi.setSystemTime(new Date("2026-10-31T04:00:00Z"));
-    const ctx = makeCtx([indexGoal()]);
-    const env = makeEnv();
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [indexGoal()]);
+    const ctx = makeCtx();
+    const env = makeEnv(mockD1);
     const agent = new ScheduledAgent(ctx as never, env as never);
     const executor = vi.fn(async () => ({
       status: "completed" as const,
@@ -127,8 +148,10 @@ describe("index.refresh_wikipedia via onCron (#1980)", () => {
 
   it("all-failed job errors and stays due", async () => {
     vi.setSystemTime(new Date("2026-11-01T04:00:00Z"));
-    const ctx = makeCtx([indexGoal()]);
-    const env = makeEnv();
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [indexGoal()]);
+    const ctx = makeCtx();
+    const env = makeEnv(mockD1);
     const agent = new ScheduledAgent(ctx as never, env as never);
     const executor = vi.fn(async () => {
       throw new Error("Index-list refresh failed for every index (dow: down)");
@@ -136,7 +159,7 @@ describe("index.refresh_wikipedia via onCron (#1980)", () => {
     const tick = await agent.onCron(env as never, { halted: false, indexRefreshExecutor: executor } as never);
     expect(tick.jobsSkipped).toBe(1);
     expect(tick.errors.join(" ")).toMatch(/every index/);
-    const goals = ctx._store.get("goals") as any[];
+    const goals = await agent.listGoals();
     expect(goals[0].lastRun).toBeUndefined();
   });
 
@@ -146,17 +169,20 @@ describe("index.refresh_wikipedia via onCron (#1980)", () => {
     const env = makeEnv();
     const agent = new ScheduledAgent(ctx as never, env as never);
     const tick = await agent.onCron(env as never, { halted: false } as never);
-    expect(tick.jobsSkipped).toBe(1);
+    // Issue #6503 — the load itself is fail-closed now: the tick
+    // refuses before any goal is evaluated, so nothing is skipped
+    // (0, not 1) and nothing is created; the error names AGENT_DB.
+    expect(tick.jobsSkipped).toBe(0);
+    expect(tick.jobsCreated).toBe(0);
     expect(tick.errors.join(" ")).toMatch(/AGENT_DB/);
-    const goals = ctx._store.get("goals") as any[];
-    expect(goals[0].lastRun).toBeUndefined();
   });
 });
 
 describe("index.refresh_holdings via onCron (#1980)", () => {
   it("holdings goal with no executor fails visibly and stays due (no invented URL)", async () => {
     vi.setSystemTime(new Date("2026-11-02T03:00:00Z"));
-    const ctx = makeCtx([
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [
       indexGoal({
         id: "index-refresh-holdings",
         name: "Index-list refresh (ETF holdings)",
@@ -165,18 +191,20 @@ describe("index.refresh_holdings via onCron (#1980)", () => {
         enabled: true,
       }),
     ]);
-    const env = makeEnv();
+    const ctx = makeCtx();
+    const env = makeEnv(mockD1);
     const agent = new ScheduledAgent(ctx as never, env as never);
     const tick = await agent.onCron(env as never, { halted: false } as never);
     expect(tick.jobsSkipped).toBe(1);
     expect(tick.errors.join(" ")).toMatch(/holdings fetcher not bound/);
-    const goals = ctx._store.get("goals") as any[];
+    const goals = await agent.listGoals();
     expect(goals[0].lastRun).toBeUndefined();
   });
 
   it("forced trigger fires the disabled holdings goal through an injected executor", async () => {
     vi.setSystemTime(new Date("2026-11-02T03:00:00Z"));
-    const ctx = makeCtx([
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [
       indexGoal({
         id: "index-refresh-holdings",
         name: "Index-list refresh (ETF holdings)",
@@ -185,7 +213,8 @@ describe("index.refresh_holdings via onCron (#1980)", () => {
         enabled: false,
       }),
     ]);
-    const env = makeEnv();
+    const ctx = makeCtx();
+    const env = makeEnv(mockD1);
     const agent = new ScheduledAgent(ctx as never, env as never);
     const executor = vi.fn(async () => ({
       status: "completed" as const,

@@ -22,6 +22,7 @@
  */
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
+import { createMemoryAuditStore } from "../src/security/iaaaAudit";
 
 import {
   ensureAsyncJobGraphColumns,
@@ -43,6 +44,59 @@ import { chainRowsFromSql } from "../src/services/shardJobs";
 import { readWorkflowRunJobs } from "../src/agents/routes/workflowRuns";
 import { handleMaintenanceRoutes } from "../src/agents/routes/maintenance";
 import { createChainLegExecutor } from "../src/agentic/chainExecutor";
+
+// Issue #6503 step 8b — the platform-admin identity stubs for the
+// one gated clear in this file (mas_job_outcomes); same shape as
+// tests/maintenanceClearTable.test.ts. The mas_async_jobs clears
+// stay anonymous: that table is ungated by design.
+const ADMIN_LOGIN = "venus-admin";
+const ADMIN_USER_ID = "user-admin-1";
+
+function stubKv(entries: Record<string, string>) {
+  const store = new Map<string, string>();
+  for (const [login, userId] of Object.entries(entries)) {
+    store.set(`iaaa-alias:login:${login}`, JSON.stringify({ internalUserId: userId }));
+  }
+  return {
+    get: async (key: string) => store.get(key) ?? null,
+    put: async (key: string, value: string) => {
+      store.set(key, value);
+    },
+    delete: async (key: string) => {
+      store.delete(key);
+    },
+  };
+}
+
+function stubMembershipStore() {
+  const byUser: Record<string, Array<Record<string, unknown>>> = {
+    [ADMIN_USER_ID]: [
+      {
+        membershipId: "m-admin-1",
+        internalUserId: ADMIN_USER_ID,
+        tenantId: "platform",
+        roleBindings: [{ role: "platform-admin", scope: "platform", grantedBy: "test" }],
+        createdBy: "test",
+        createdAtMs: 1,
+      },
+    ],
+  };
+  return {
+    getMembershipsByUser: async (internalUserId: string) => byUser[internalUserId] ?? [],
+    put: async () => {},
+    revokeMembership: async () => false,
+  };
+}
+
+/** The step-8b gate inputs for a maintenance ctx (admin identity). */
+function withAdminIdentity(ctx: any) {
+  return {
+    ...ctx,
+    getScreenerExecutionContext: async () => undefined,
+    flagAliasKv: stubKv({ [ADMIN_LOGIN]: ADMIN_USER_ID }),
+    flagMembershipStore: stubMembershipStore(),
+  };
+}
 
 /** SqlStorage-shaped executor over node:sqlite (real semantics,
  *  rowsWritten surfaced like the DO cursor). */
@@ -559,14 +613,21 @@ describe("characterization 4a: maintenance clears", () => {
     const ctx = {
       agentCtx: { storage: { sql } },
       audit,
+      // Issue #6503 step 9 (G2) — the gated mas_job_outcomes clear
+      // blocks without a working audit store; the fixture carries
+      // the memory store.
+      auditStore: createMemoryAuditStore(),
     } as never;
     return { db, ctx, audit };
   }
 
-  async function postClear(ctx: never, sessionId: string, body: Record<string, unknown>) {
+  async function postClear(ctx: never, sessionId: string, body: Record<string, unknown>, login?: string) {
     const req = new Request("https://agent.test/api/maintenance/clear-table", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(login ? { "x-user-login": login } : {}),
+      },
       body: JSON.stringify(body),
     });
     const res = await handleMaintenanceRoutes(
@@ -607,7 +668,8 @@ describe("characterization 4a: maintenance clears", () => {
 
   it("the job-outcomes clear preserves the pruned_at watermark exactly", async () => {
     const { db, ctx } = maintenanceHarness();
-    const done = await postClear(ctx, "sess-1", { table: "mas_job_outcomes", confirm: true });
+    // Issue #6503 step 8b — mas_job_outcomes is platform-admin only.
+    const done = await postClear(withAdminIdentity(ctx), "sess-1", { table: "mas_job_outcomes", confirm: true }, ADMIN_LOGIN);
     expect(done.body.deleted).toBe(1);
     expect((db.prepare("SELECT COUNT(*) AS n FROM mas_job_outcomes").get() as { n: number }).n).toBe(0);
     const meta = db.prepare("SELECT v FROM mas_job_outcomes_meta WHERE k = 'pruned_at'").get() as { v: string };

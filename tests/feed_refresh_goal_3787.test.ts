@@ -65,10 +65,14 @@ vi.mock("../src/orchestrate", () => ({
 
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
 import { DEFAULT_SCHEDULES } from "../src/schedule";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 
-function makeCtx(initialGoals?: any[]) {
+// #6503 — the "goals" KV key is dead: goals live in the D1 unified
+// store only (fail-closed without AGENT_DB). Fixtures plant via D1.
+function makeCtx() {
   const store = new Map<string, unknown>();
-  if (initialGoals) store.set("goals", initialGoals);
   return {
     storage: {
       get: async (k: string) => (store.has(k) ? store.get(k) : undefined),
@@ -80,6 +84,9 @@ function makeCtx(initialGoals?: any[]) {
 
 function makeEnv() {
   return {
+    // #6503 — goals live in the D1 unified store only (fail-closed
+    // without AGENT_DB); the agent never reads the "goals" KV key.
+    AGENT_DB: new MockD1Database(),
     PAYMENTS_AGENT: {
       idFromName: () => "default",
       get: () => ({ budgetCheck: async () => ({ allowed: true }) }),
@@ -99,6 +106,20 @@ function storedFeedGoal() {
     budgetCents: 1,
     enabled: true,
   };
+}
+
+/** Plant `goals` into `mockD1`, sweeping migration-0092's seeds. */
+async function plantGoals(mockD1: MockD1Database, goals: any[]) {
+  const store = createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules;
+  for (const goal of goals) await store.save(goalToRecord(goal));
+  // The first store op lazily ensures the schema, and migration
+  // 0092's goals seed lands the 9 built-in goals — sweep them, so
+  // the tick sees ONLY the fixture goals (same pattern as the
+  // #6503 G3 goals-tick file).
+  const keep = new Set(goals.map((goal) => String(goal.id)));
+  for (const row of await store.listByKind("goal")) {
+    if (!keep.has(row.id)) await store.remove(row.id);
+  }
 }
 
 beforeEach(() => {
@@ -155,8 +176,10 @@ describe("feed-refresh goal removal (#4306 S2)", () => {
 
   it("a stored feed-refresh goal left behind dispatches nothing and fails visibly", async () => {
     vi.setSystemTime(new Date("2026-11-08T03:00:00Z"));
-    const ctx = makeCtx([storedFeedGoal()]);
-    const agent = new ScheduledAgent(ctx as never, makeEnv() as never);
+    const ctx = makeCtx();
+    const env = makeEnv();
+    await plantGoals(env.AGENT_DB as MockD1Database, [storedFeedGoal()]);
+    const agent = new ScheduledAgent(ctx as never, env as never);
     const tick = await agent.onCron(makeEnv() as never, {
       halted: false,
     } as never);

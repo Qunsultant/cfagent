@@ -32,6 +32,7 @@ import {
 } from "../observability/aspects";
 import type { ObservabilitySink } from "../observability/observabilityPorts";
 import type { ScenarioDefinition } from "./goalScenarioEngine";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
@@ -47,7 +48,8 @@ export interface GoalScreenSubmissionInput {
   jobId: string;
   /** Trigger source for audit (never branched on): "manual" or "scheduled-tasks". */
   source: string;
-  trigger: "manual" | "scheduled";
+  // Issue #6503 — the one five-mode dispatch definition.
+  trigger: JobRunTrigger;
   /** Owner login. Required — fail closed without an identity (#1185). */
   userLogin: string;
   /** Tenant id resolved by the starter (absent → projection best-effort skipped). */

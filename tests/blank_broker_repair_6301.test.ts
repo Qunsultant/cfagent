@@ -53,7 +53,8 @@ import { MockSqlStorage } from "./mock-sql";
 import { resolveScreenSelection } from "../src/services/providerConnections";
 import { resolveTenantProviders } from "../src/services/tenantProviders";
 import { resolveValidatedExecutionAccountContext } from "../src/services/accountBindings";
-import { createUnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { MockD1Database } from "./mock-d1";
 import { strategyScanBaselineToRecord } from "../src/services/unifiedScheduleManagement";
 
 vi.mock("../src/services/providerConnections", async (importOriginal) => {
@@ -97,9 +98,12 @@ function maintenanceCtx(): any {
   };
 }
 
+// #6503 — the maintenance path reads the unified store from D1
+// (unifiedScheduleStore in scheduleMaintenance.ts resolves the D1
+// store from env.AGENT_DB, null when unbound); the old DO sync
+// store this helper wrapped is retired.
 function unifiedStore() {
-  return createUnifiedSchedulePorts({ sql: agent.ctx.storage.sql, storage: agent.ctx.storage })
-    .unifiedSchedulesSync;
+  return createD1UnifiedSchedulePorts({ d1: agent.env.AGENT_DB as never }).unifiedSchedules;
 }
 
 function blankBaseline(id = "TTvDxrpaP") {
@@ -119,7 +123,9 @@ beforeEach(() => {
   sql = new MockSqlStorage();
   agent = Object.create(OrchestratorAgent.prototype);
   agent.ctx = { storage: { sql }, id: { toString: () => "blank-broker-repair-test" } };
-  agent.env = {};
+  // #6503 — the repair/adopt path resolves the D1 unified store
+  // from env.AGENT_DB (best-effort null when unbound).
+  agent.env = { AGENT_DB: new MockD1Database() };
   agent.listSchedules = async () => existing;
   agent.schedule = async (when: any, callback: string, payload: any, options: any) => {
     scheduleCalls.push([when, callback, payload, options]);
@@ -163,7 +169,7 @@ describe("repairBlankBrokerSchedules (#6301)", () => {
   it("re-stamps a blank baseline: stamped alarm first, blank cancelled after, record swapped", async () => {
     existing = [blankBaseline()];
     // The pre-repair unified record (as the adopt path would have saved it).
-    unifiedStore().save(
+    await unifiedStore().save(
       strategyScanBaselineToRecord(
         { id: "TTvDxrpaP", callback: "autonomousOptionsAnalysis", payload: { userLogin: "venus" } },
         { userLogin: "venus", cron: "35 * * * *" },
@@ -187,8 +193,8 @@ describe("repairBlankBrokerSchedules (#6301)", () => {
       "orchestrator",
       expect.objectContaining({ scheduleId: "TTvDxrpaP", newScheduleId: "scan-1", brokerId: "alpaca", mode: "paper" }),
     ]);
-    expect(unifiedStore().get("TTvDxrpaP")).toBeUndefined();
-    const newRecord = unifiedStore().get("scan-1");
+    expect(await unifiedStore().get("TTvDxrpaP")).toBeUndefined();
+    const newRecord = await unifiedStore().get("scan-1");
     expect(newRecord).toBeDefined();
     expect((newRecord as any).definition.payload.brokerId).toBe("alpaca");
   });
@@ -260,7 +266,7 @@ describe("repairBlankBrokerSchedules (#6301)", () => {
       { userLogin: "venus", cron: "35 * * * *" },
       new Date().toISOString(),
     );
-    unifiedStore().save({ ...record, state: "paused" });
+    await unifiedStore().save({ ...record, state: "paused" });
     await repairBlankBrokerSchedules(maintenanceCtx(), { userLogin: "venus" }, existing);
 
     expect(scheduleCalls).toHaveLength(0);

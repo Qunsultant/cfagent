@@ -100,3 +100,100 @@ export function decideHeartbeatWatchdog(
     detail: `heartbeat alarm present; last tick ${minutesAgo(nowMs, lastTickAtMs)} minutes ago`,
   };
 }
+
+/* =================================================================
+ * Issue #6503 step 12 — the schedule-watchdog self-watch: the
+ * outer observation's decision half. Pure, like
+ * `decideHeartbeatWatchdog` above: given the newest
+ * `schedule.watchdog_heartbeat` ledger row (or its absence) it
+ * answers whether the schedule watchdog itself is alive. It does
+ * no I/O and performs no alerting; the entry point in
+ * `src/services/consolidatedCronEntries.ts` owns the read and the
+ * audit + Slack alert.
+ *
+ * Findings:
+ * - `healthy` — a heartbeat-operation row exists within the
+ *   staleness threshold. No alert.
+ * - `missing` — no heartbeat-operation row exists at all (the
+ *   watchdog never ran, or its rows aged out of the merged read).
+ *   Alert: the watchdog is dead until proven otherwise.
+ * - `stale` — the newest heartbeat-operation row is older than
+ *   the threshold (the watchdog ran once, then stopped). Alert.
+ *
+ * The threshold is the heartbeat watchdog's own `staleAfterMs`
+ * (HEARTBEAT_WATCHDOG_STALE_AFTER_MINUTES, default 120 minutes),
+ * already resolved by the entry point: the heartbeat row is
+ * written once per onCron tick, the same cadence the threshold
+ * already judges for the tick itself, so one staleness rule
+ * covers the tick path. No new literal lives here — step 13
+ * externalizes the threshold's home, not this call site. A row
+ * whose timestamp is unparseable reads as missing (no usable
+ * evidence of a recent heartbeat), the alarm check's
+ * unparseable-tick → null precedent.
+ */
+
+export type ScheduleWatchdogHeartbeatFinding = "healthy" | "missing" | "stale";
+
+export interface ScheduleWatchdogHeartbeatObservation {
+  /**
+   * Epoch ms of the newest `schedule.watchdog_heartbeat` ledger
+   * row, or null when no such row exists (or its timestamp is
+   * unparseable). The caller filters by operation first — the
+   * same job id is also written by the sweep
+   * (`schedule.watchdog_sweep`), and a fresh sweep row must never
+   * mask a stale heartbeat row.
+   */
+  lastHeartbeatAtMs: number | null;
+  /** Epoch ms at which the watchdog is deciding. */
+  nowMs: number;
+  /** Ms since the last heartbeat row after which the watchdog counts as dead. */
+  staleAfterMs: number;
+  /** Seconds between onCron ticks — the watchdog's expected cadence, used only to name the heartbeat that was expected next. */
+  intervalSeconds: number;
+}
+
+export interface ScheduleWatchdogHeartbeatDecision {
+  finding: ScheduleWatchdogHeartbeatFinding;
+  /** Human-readable detail for the dispatch row (never a raw error). */
+  detail: string;
+  /** ISO of the heartbeat that was expected next (last + one interval); absent when no heartbeat row exists. */
+  expectedTickIso?: string;
+  /** ISO of the newest heartbeat row, or null when none exists. */
+  lastRunIso: string | null;
+}
+
+/**
+ * Decide the schedule watchdog's state from its newest heartbeat
+ * row. Pure: no I/O, no env, no clock read — `nowMs` is injected
+ * by the caller.
+ */
+export function decideScheduleWatchdogHeartbeat(
+  observation: ScheduleWatchdogHeartbeatObservation,
+): ScheduleWatchdogHeartbeatDecision {
+  const { lastHeartbeatAtMs, nowMs, staleAfterMs, intervalSeconds } =
+    observation;
+  if (lastHeartbeatAtMs === null) {
+    return {
+      finding: "missing",
+      detail:
+        "schedule-watchdog heartbeat missing — no schedule.watchdog_heartbeat ledger row; the schedule watchdog has never run (or its rows aged out)",
+      lastRunIso: null,
+    };
+  }
+  const lastRunIso = new Date(lastHeartbeatAtMs).toISOString();
+  if (nowMs - lastHeartbeatAtMs > staleAfterMs) {
+    return {
+      finding: "stale",
+      detail: `schedule-watchdog heartbeat stale — last schedule.watchdog_heartbeat row ${minutesAgo(nowMs, lastHeartbeatAtMs)} minutes ago`,
+      expectedTickIso: new Date(
+        lastHeartbeatAtMs + intervalSeconds * 1000,
+      ).toISOString(),
+      lastRunIso,
+    };
+  }
+  return {
+    finding: "healthy",
+    detail: `schedule-watchdog heartbeat fresh; last schedule.watchdog_heartbeat row ${minutesAgo(nowMs, lastHeartbeatAtMs)} minutes ago`,
+    lastRunIso,
+  };
+}

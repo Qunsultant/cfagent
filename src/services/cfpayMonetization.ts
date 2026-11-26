@@ -30,6 +30,9 @@
  *   submission (scheduleKind "one_off" + authorizedAtSubmission), which
  *   may checkout at submission; execution happens later, on schedule.
  *   A scheduled run with no scheduleKind is treated as recurring.
+ *   Issue #6503 — the same coverage-only rule covers the unattended
+ *   modes "copilot" and "autopilot"; a user-initiated "triggered"
+ *   (Run-now) run rides the manual side and may checkout.
  * - Tenant isolation: run tenant must equal the verified account tenant.
  * - Confirm paid only via cfpay checkout.status == fulfilled.
  *   Stripe return page is never proof. Replay of a tx hash / payment
@@ -49,9 +52,20 @@
  *   This module holds no price table at all.
  */
 import type { PriceCatalogue } from "../data/priceCataloguePorts";
+import {
+  isAttendedTrigger,
+  type JobRunTrigger,
+} from "../data/jobRunRecordPorts";
 
 export type ScreenerFamily = "stock" | "goal" | "options" | "strategy";
-export type RunTrigger = "manual" | "scheduled";
+/**
+ * Issue #6503 — the draining cfpay gate carries the same one
+ * five-mode dispatch definition as the live native gate
+ * (JobRunTrigger, #5028/#3214), not a parallel two-valued
+ * vocabulary. triggered = manual-side; copilot/autopilot =
+ * scheduled-like (unattended, coverage-only).
+ */
+export type RunTrigger = JobRunTrigger;
 export type ScheduleKind = "one_off" | "recurring";
 
 /**
@@ -239,7 +253,10 @@ export class CfPayMonetizationGate {
     // run (recurring, or no scheduleKind stated) is coverage-only.
     const isOneOffScheduled =
       run.trigger === "scheduled" && run.scheduleKind === "one_off" && run.authorizedAtSubmission === true;
-    if (run.trigger === "scheduled" && !isOneOffScheduled) {
+    // Issue #6503 — only an unattended run is coverage-only (see
+    // the native gate for the same rule): manual and Run-now
+    // "triggered" runs may checkout at submission.
+    if (!isAttendedTrigger(run.trigger) && !isOneOffScheduled) {
       this.events.push({ runRequestId: run.id, type: "scheduled.skipped_uncovered" });
       return { allowed: false, status: "coverage_required", httpStatus: 402, runRequestId: run.id, priceUSD, family: run.family, reason: "Scheduled runs need subscription included usage or prepaid credits. No unattended card charge is taken." };
     }

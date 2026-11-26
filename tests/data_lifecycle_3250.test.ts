@@ -169,9 +169,14 @@ interface FakeInstance {
   fetch(req: Request): Promise<Response>;
 }
 
-function makeInstance(): FakeInstance {
+function makeInstance(kv: KvLike, membershipStore: MembershipStore): FakeInstance {
   const db = new DatabaseSync(":memory:");
   seedInstanceDb(db);
+  // Issue #6503 step 9 (G2) — the instance's maintenance route
+  // audits gated clears before the write through this store;
+  // without it the wired fallback (no SESSION_STORE in tests)
+  // blocks every clear with 503.
+  const instanceAuditStore = createMemoryAuditStore();
   const inst: FakeInstance = {
     schedules: [
       { id: "s1", callback: "autonomousMarketScreen" },
@@ -209,7 +214,18 @@ function makeInstance(): FakeInstance {
           url,
           path,
           "sess-1",
-          { agentCtx: { storage: { sql: makeSql(db) } } as any, audit: inst.audit },
+          {
+            agentCtx: { storage: { sql: makeSql(db) } } as any,
+            audit: inst.audit,
+            auditStore: instanceAuditStore,
+            // Issue #6503 step 8b — the instance gate resolves the
+            // forwarded admin's identity against the world's shared
+            // alias KV + membership store, exactly as production
+            // resolves it against the shared session store.
+            getScreenerExecutionContext: async () => undefined,
+            flagAliasKv: kv,
+            flagMembershipStore: membershipStore,
+          },
         );
         return res ?? Response.json({ error: "no route" }, { status: 404 });
       }
@@ -332,7 +348,7 @@ async function makeWorld(
   etrade.set("etrade:token:PROD:alice", "{}");
   // Instances for every login.
   for (const login of [OP, ALICE, BOB, CAROL, FOUNDER]) {
-    instances.set(login, makeInstance());
+    instances.set(login, makeInstance(kv, membershipStore));
   }
   // Directory tenants (account-row world, as in #2221).
   directory.register("tenant-a", [ALICE, BOB]);

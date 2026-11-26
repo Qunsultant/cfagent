@@ -64,6 +64,9 @@ import type { Env } from "../types";
 import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
 import { createPendingScheduleApprovalPort } from "../data/doSqlitePendingScheduleApprovalsAdapter";
 import type {
+  ResolvedScheduleTiming,
+  ScheduleAlarmLike,
+  ScheduleAlarms,
   UnifiedOpResult,
   UnifiedStoreLike,
 } from "./unifiedScheduleManagement";
@@ -72,13 +75,13 @@ import type { JobNodeConfig } from "../data/jobPipelinePorts";
 import { isExternalSendStage } from "./workflowStageSchedule";
 import type { ResolvedWorkflowStage } from "./workflowStageSchedule";
 import {
+  activateCreatedSchedule,
   pauseUnifiedSchedule,
   pausedScreenScheduleToRecord,
   resumeUnifiedSchedule,
   screenScheduleToRecord,
   triggerUnifiedSchedule,
   updateUnifiedSchedule,
-  type ScheduleAlarms,
 } from "./unifiedScheduleManagement";
 import { resolveEnvironmentConfig } from "../config/environment";
 import {
@@ -1564,11 +1567,16 @@ export async function executeAgentScheduleAction(
  * as an AgentScheduleItem (the executor's shape). Fail-closed: with
  * no store there is nowhere to record a paused schedule, so
  * creation is refused instead of silently arming active.
+ * Issue #6503 — when `opts.startPaused` is false, the schedule
+ * starts active: resume arms it through `opts.alarms` (the one
+ * arming template). Starting active without an alarms port is
+ * refused fail-closed rather than silently creating paused.
  */
 export async function createPausedAgentSdkScheduleRecord(
   store: UnifiedStoreLike | undefined,
   input: { timing: AgentSdkTiming; callback: string; payload?: unknown },
   nowIso: string,
+  opts?: { startPaused?: boolean; alarms?: ScheduleAlarms },
 ): Promise<AgentScheduleItem> {
   if (!store) {
     throw new Error(
@@ -1590,6 +1598,21 @@ export async function createPausedAgentSdkScheduleRecord(
     nowIso,
   );
   await store.save(record);
+  // Issue #6503 — start active when the control is off (see the
+  // doc comment above). The activation removes the record itself on
+  // an arm refusal, so a failed activation leaves nothing behind.
+  if (opts?.startPaused === false) {
+    if (!opts.alarms) {
+      try {
+        await store.remove(record.id);
+      } catch {
+        // Best-effort: the refusal below is what the caller sees.
+      }
+      throw new Error("Cannot start the schedule active: no alarms port is available to arm it.");
+    }
+    const activated = await activateCreatedSchedule({ store, alarms: opts.alarms }, record, nowIso);
+    if (!activated.ok) throw new Error(activated.error);
+  }
   return {
     id: record.id,
     callback: input.callback,
@@ -1674,6 +1697,55 @@ export async function removeAgentSdkScheduleRecord(
 }
 
 /**
+ * Issue #6503 — the alarms port over the NLQ scheduling port, so a
+ * schedule created through the chat/NLQ capability can start active
+ * when the start-paused control is off: resume arms through it. The
+ * floor decision is the one helper (refuseBelowFloorTiming); the
+ * timing conversion matches makeScheduleAlarmsPort's timingForFloor
+ * in routes/schedules.ts (cron/interval carry a frequency; one-shot
+ * timings pass through). getScheduleById is the port's list filtered
+ * by id — the NLQ port carries no direct get.
+ */
+export function nlqPortToScheduleAlarms(
+  port: NLQSchedulingPort,
+  resolveFloor?: () => number,
+): ScheduleAlarms {
+  const floorSeconds = () => resolveFloor?.() ?? DEFAULT_SCHEDULE_MIN_INTERVAL_SECONDS;
+  const floorTiming = (timing: ResolvedScheduleTiming): ScheduleFloorTiming =>
+    timing.type === "cron"
+      ? { type: "cron", cron: timing.cron }
+      : timing.type === "interval"
+        ? { type: "interval", intervalSeconds: timing.intervalSeconds }
+        : { type: "scheduled", time: timing.time };
+  return {
+    list: () => port.listSchedules().then((s) => s as unknown as ScheduleAlarmLike[]),
+    get: async (id) => {
+      const found = (await port.listSchedules()).find((item) => item.id === id);
+      return found ? (found as unknown as ScheduleAlarmLike) : undefined;
+    },
+    cancel: (id) => port.cancelSchedule(id),
+    checkFloor: (timing) => {
+      const refusal = refuseBelowFloorTiming(floorTiming(timing), floorSeconds());
+      return refusal.ok ? { ok: true } : { ok: false, message: refusal.message };
+    },
+    arm: async (timing, callback, payload, options) => {
+      const refusal = refuseBelowFloorTiming(floorTiming(timing), floorSeconds());
+      if (!refusal.ok) throw refusal.error;
+      // Issue #6482 — a recorded idempotent opt-out rides the SDK
+      // arm (default idempotent: true); interval arms take no options.
+      const idempotent = options?.idempotent ?? true;
+      if (timing.type === "cron")
+        return port.schedule(timing.cron, callback, payload, { idempotent }).then((s) => s as unknown as ScheduleAlarmLike);
+      if (timing.type === "interval")
+        return port.scheduleEvery(timing.intervalSeconds, callback, payload).then((s) => s as unknown as ScheduleAlarmLike);
+      return port
+        .schedule(new Date(timing.time * 1000), callback, payload, { idempotent })
+        .then((s) => s as unknown as ScheduleAlarmLike);
+    },
+  };
+}
+
+/**
  * Adapt the NLQ scheduling port to the capability's SDK adapter. The
  * port implements only create/list/cancel — pause/resume/trigger/update
  * are absent, so the executor returns `unsupported` for those actions
@@ -1687,6 +1759,7 @@ export async function removeAgentSdkScheduleRecord(
 export function nlqPortToAgentSdkAdapter(
   port: NLQSchedulingPort,
   store?: UnifiedStoreLike,
+  opts?: { startPaused?: boolean; alarms?: ScheduleAlarms },
   management?: AgentSdkScheduleManagement,
 ): AgentSdkScheduleAdapter {
   const managementDeps = management && store
@@ -1723,7 +1796,7 @@ export function nlqPortToAgentSdkAdapter(
       return stored.find((item) => item.id === id);
     },
     create: async ({ timing, callback, payload }) =>
-      createPausedAgentSdkScheduleRecord(store, { timing, callback, payload }, new Date().toISOString()),
+      createPausedAgentSdkScheduleRecord(store, { timing, callback, payload }, new Date().toISOString(), opts),
     cancel: async (id) => {
       const cancelled = await port.cancelSchedule(id);
       if (cancelled) {

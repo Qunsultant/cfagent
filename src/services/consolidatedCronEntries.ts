@@ -59,6 +59,7 @@
  */
 import {
   buildLedgerLinkage,
+  postGoalScheduleAuditEvent,
   WORKER_CRONS,
   WORKER_TICK_CRON,
 } from "./consolidatedScheduling";
@@ -69,7 +70,16 @@ import {
   HEARTBEAT_WATCHDOG_CRON,
   type HeartbeatWatchdogConfig,
 } from "../config/heartbeatWatchdog";
-import { decideHeartbeatWatchdog } from "./heartbeatWatchdog";
+import {
+  decideHeartbeatWatchdog,
+  decideScheduleWatchdogHeartbeat,
+} from "./heartbeatWatchdog";
+import {
+  MISSED_FIRE_CODE,
+  SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID,
+  SCHEDULE_WATCHDOG_HEARTBEAT_OPERATION,
+} from "./scheduleWatchdog";
+import { renderChannelText } from "../outcomes/outcomeAspects";
 import { dispatchTickRiders } from "./tickRiders";
 
 /** Re-exported so the router's watchdog cron is one named value (#4234). */
@@ -290,6 +300,17 @@ export interface CronEntryPointDeps {
       intervalSeconds: number,
       opts?: { force?: boolean },
     ) => Promise<{ armed: boolean; alreadyArmed: boolean }>;
+    /**
+     * Issue #6503 step 12 — newest-first run history for one
+     * ledger job (outer observation only): the ScheduledAgent's
+     * public `listJobRuns`, the same merged read the Schedules
+     * home's last-run joins use. The observation filters it by
+     * operation (see `observeScheduleWatchdogHeartbeat`).
+     */
+    listJobRuns?: (
+      jobId?: string,
+      limit?: number,
+    ) => Promise<Array<{ jobId: string; operation: string; started: string }>>;
   };
   /**
    * Watchdog config (watchdog entry point only; resolved by the
@@ -614,6 +635,151 @@ export async function runRetentionEntryPoint(
 }
 
 /**
+ * Issue #6503 step 12 — the schedule-watchdog self-watch: the
+ * outer observation's read + alert half. The pure finding lives
+ * in `decideScheduleWatchdogHeartbeat`
+ * (src/services/heartbeatWatchdog.ts); this function owns the
+ * ledger read through the ScheduledAgent stub and the alert.
+ *
+ * Read: `listJobRuns` for the heartbeat job id, newest first,
+ * filtered by operation to `schedule.watchdog_heartbeat`. The
+ * same job id is also written by the Orchestrator sweep
+ * (`schedule.watchdog_sweep`), so the filter is the point — a
+ * fresh sweep row must never mask a stale heartbeat row, and a
+ * plain latest-by-job read would do exactly that.
+ *
+ * Alert (missing or stale): the same shape the watchdog itself
+ * uses — a `schedule.missed_fire` audit event naming the watchdog
+ * as the missed job (scheduleId the heartbeat job id, callback
+ * the heartbeat operation, code `missed_fire`, expected tick +
+ * last run), plus the catalog missed-schedule Slack text through
+ * the entry point's Slack poster. Both deliveries are
+ * best-effort: a failed audit post or Slack post is logged, never
+ * thrown — the finding is already in the dispatch row's detail.
+ *
+ * No claim row is written: a missed-fire claim under the observed
+ * operation would read back as a fresh heartbeat and
+ * self-suppress the next hourly run, so the alert repeats while
+ * the condition persists and clears the moment the watchdog runs
+ * again.
+ *
+ * Throws only when the run history itself cannot be read (a
+ * non-list reply counts as unreadable); the caller catches that
+ * as an observation failure and the cron run continues.
+ */
+export interface ScheduleWatchdogHeartbeatObservationResult {
+  /**
+   * "unavailable" = the stub exposes no run history (an unwired
+   * caller); the alarm check already ran and the dispatch row is
+   * untouched.
+   */
+  finding: "healthy" | "missing" | "stale" | "unavailable";
+  /** One line for the watchdog dispatch row's detail. */
+  detail: string;
+  /** Whether the missed-watchdog alert (audit + Slack) went out. */
+  alerted: boolean;
+}
+
+export async function observeScheduleWatchdogHeartbeat(
+  deps: CronEntryPointDeps,
+  config: HeartbeatWatchdogConfig,
+  nowMs: number,
+): Promise<ScheduleWatchdogHeartbeatObservationResult> {
+  const listJobRuns = deps.scheduledAgent.listJobRuns;
+  if (typeof listJobRuns !== "function") {
+    return {
+      finding: "unavailable",
+      detail:
+        "schedule-watchdog heartbeat observation unavailable — scheduled agent exposes no run history (listJobRuns)",
+      alerted: false,
+    };
+  }
+  const rows = await listJobRuns(SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID, 200);
+  if (!Array.isArray(rows)) {
+    throw new Error(
+      "scheduled agent run history is not a list (listJobRuns)",
+    );
+  }
+  const heartbeatRow = rows.find(
+    (row) => row.operation === SCHEDULE_WATCHDOG_HEARTBEAT_OPERATION,
+  );
+  const startedMs = heartbeatRow ? Date.parse(heartbeatRow.started) : NaN;
+  const decision = decideScheduleWatchdogHeartbeat({
+    lastHeartbeatAtMs:
+      heartbeatRow && Number.isFinite(startedMs) ? startedMs : null,
+    nowMs,
+    staleAfterMs: config.staleAfterMs,
+    intervalSeconds: config.intervalSeconds,
+  });
+  if (decision.finding === "healthy") {
+    return {
+      finding: "healthy",
+      detail: `schedule-watchdog heartbeat: ${decision.detail}`,
+      alerted: false,
+    };
+  }
+  const lastRunIso = decision.lastRunIso;
+  const expectedTick =
+    decision.expectedTickIso ?? "never (no heartbeat row recorded)";
+  const detail =
+    `missed-fire: expected ${expectedTick} ` +
+    `(last run: ${lastRunIso ?? "never"}) | callback: ${SCHEDULE_WATCHDOG_HEARTBEAT_OPERATION}`;
+  const audited = await postGoalScheduleAuditEvent(
+    (request) => deps.orchestrator.fetch(request),
+    {
+      type: "schedule.missed_fire",
+      agent: "orchestrator",
+      payload: {
+        scheduleId: SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID,
+        callback: SCHEDULE_WATCHDOG_HEARTBEAT_OPERATION,
+        code: MISSED_FIRE_CODE,
+        ...(decision.expectedTickIso !== undefined
+          ? { expectedTick: decision.expectedTickIso }
+          : {}),
+        lastRun: lastRunIso,
+      },
+    },
+  );
+  if (!audited) {
+    deps.logError(
+      "[scheduled] schedule-watchdog heartbeat alert: audit event not recorded (schedule.missed_fire) — the finding is in the dispatch row",
+    );
+  }
+  try {
+    await deps.slackPoster(
+      renderChannelText(
+        "missed_schedule_alert",
+        "slack",
+        {
+          scheduleId: SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID,
+          kind: "schedule",
+          callback: SCHEDULE_WATCHDOG_HEARTBEAT_OPERATION,
+          expectedTick,
+          lastRun: lastRunIso ?? "never",
+          detail,
+        },
+        "legacy_missed_schedule_alert",
+      ),
+    );
+  } catch (err) {
+    deps.logError(
+      "[scheduled] schedule-watchdog heartbeat alert: Slack post failed:",
+      errorMessage(err),
+    );
+    return {
+      finding: decision.finding,
+      detail: `schedule-watchdog heartbeat: ${decision.detail} (Slack alert failed)`,
+      alerted: false,
+    };
+  }
+  return {
+    finding: decision.finding,
+    detail: `schedule-watchdog heartbeat: ${decision.detail}`,
+    alerted: true,
+  };
+}
+
+/**
  * Issue #4234 (ADR 0030) — the hourly heartbeat watchdog entry point.
  *
  * Reads the alarm list + last tick from the ScheduledAgent stub,
@@ -666,13 +832,39 @@ export async function runWatchdogEntryPoint(
         force: decision.forceRearm,
       });
     }
+    // Issue #6503 step 12 — the schedule-watchdog self-watch: the
+    // outer observation also reads the watchdog's own heartbeat
+    // row. Best-effort and never fatal: a read failure is logged
+    // and noted in the dispatch row, and the run continues — the
+    // heartbeat-alarm re-arm above already ran.
+    let observationDetail = "";
+    try {
+      const observation = await observeScheduleWatchdogHeartbeat(
+        deps,
+        config,
+        deps.now().getTime(),
+      );
+      if (observation.finding === "unavailable") {
+        deps.logError(
+          "[scheduled] heartbeat watchdog: " + observation.detail,
+        );
+      } else {
+        observationDetail = `; ${observation.detail}`;
+      }
+    } catch (err) {
+      deps.logError(
+        "[scheduled] heartbeat watchdog: schedule-watchdog heartbeat observation failed:",
+        errorMessage(err),
+      );
+      observationDetail = `; schedule-watchdog heartbeat observation failed: ${errorMessage(err)}`;
+    }
     await deps.recordDispatch({
       cron: deps.cron,
       entryPoint: "watchdog",
       outcome: "success",
       started,
       finished: deps.now().toISOString(),
-      detail: `heartbeat watchdog: ${decision.finding} — ${decision.detail}`,
+      detail: `heartbeat watchdog: ${decision.finding} — ${decision.detail}${observationDetail}`,
     });
   } catch (err) {
     await deps.recordDispatch({

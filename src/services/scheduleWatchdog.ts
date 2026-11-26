@@ -49,6 +49,26 @@ export const SCHEDULE_WATCHDOG_FIRST_SEEN_KEY = "scheduleWatchdogFirstSeen";
 /** The watchdog's own heartbeat job id (one ledger row per tick). */
 export const SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID = "schedule-watchdog-heartbeat";
 
+/**
+ * Issue #6503 step 12 — the two `operation` values written under
+ * the one heartbeat job id above. The same job id is written by
+ * two watchdogs, so any reader that cares which watchdog ran must
+ * filter by operation:
+ * - `schedule.watchdog_heartbeat`: the ScheduledAgent goals
+ *   watchdog's heartbeat, one row per onCron tick
+ *   (src/agents/scheduled-agent.ts `runScheduleWatchdog`).
+ * - `schedule.watchdog_sweep`: the Orchestrator durable-schedule
+ *   sweep's heartbeat, one row per sweep
+ *   (src/agents/orchestrator/scheduleWatchdog.ts).
+ * A plain latest-by-job read returns whichever wrote most
+ * recently — a fresh row of one operation masks a stale row of
+ * the other. The outer observation (step 12) reads the heartbeat
+ * operation's row, not the sweep's.
+ */
+export const SCHEDULE_WATCHDOG_HEARTBEAT_OPERATION =
+  "schedule.watchdog_heartbeat";
+export const SCHEDULE_WATCHDOG_SWEEP_OPERATION = "schedule.watchdog_sweep";
+
 /** Audit codes for missed firings (never a raw message, #1743). */
 export const MISSED_FIRE_CODE = "missed_fire";
 export const INVALID_CRON_CODE = "invalid_cron";
@@ -144,6 +164,15 @@ export interface DurableScheduleShape {
   cron?: string;
   /** Gap between executions, seconds (SDK `intervalSeconds`). */
   intervalSeconds?: number;
+  /**
+   * Issue #6503 (G3) — the stored row behind this alarm is paused
+   * (or deleted): it has no expected tick while paused, so it is
+   * never flagged as missed. Set by the sweep from the unified
+   * store; absent reads as "not paused" (a legacy alarm-only
+   * firing with no stored row). The goals half reads the same rule
+   * off `goal.enabled` instead.
+   */
+  paused?: boolean;
 }
 
 export interface DurableScheduleWatchdogInput {
@@ -192,6 +221,11 @@ export function findMissedDurableSchedule(
 ): MissedFiringFinding | null {
   const { schedule, latestRun, firstSeenAtMs, nowMs, graceMs } = input;
   if (!(graceMs > 0)) return null;
+  // Issue #6503 (G3) — a paused (or deleted) row has no expected
+  // tick: its alarm should have been cancelled at pause time, and
+  // a stale live alarm is not a missed firing. The goals half
+  // reads the same rule off goal.enabled.
+  if (schedule.paused === true) return null;
   const expected = expectedDurableScheduleTickMs(schedule, nowMs);
   if (expected === undefined) return null;
   // No first-seen stamp means the observation is unattributable

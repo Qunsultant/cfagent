@@ -29,6 +29,7 @@ import {
 import { RENEWAL_DISPATCH_CRON, RETENTION_DISPATCH_CRON, RETENTION_RECORD_ID, TOKEN_RENEWAL_RECORD_ID } from "./heartbeatDueChecks";
 import { SCHEDULE_WATCHDOG_RECORD_ID } from "./sweepWatchdogSchedule";
 import { SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID } from "./scheduleWatchdog";
+import { DEFAULT_GOAL_RUN_JOB_RUN_RECORD_CAP } from "../config/goalRunRetention";
 
 export type {
   JobRunLedgerTrigger,
@@ -44,8 +45,15 @@ export { isMissingIdLiteral } from "./consolidatedScheduling";
 
 export { JOB_RUN_RECORDS_PER_JOB_CAP } from "../data/jobRunRecordPorts";
 
-/** Newest-first records kept for the ScheduledAgent's own key. */
-export const SCHEDULED_AGENT_JOB_RUN_CAP = 500;
+/**
+ * Newest-first records kept for the ScheduledAgent's own key.
+ * Issue #6503 step 13 — the single home for the 500 is
+ * `DEFAULT_GOAL_RUN_JOB_RUN_RECORD_CAP` in
+ * src/config/goalRunRetention.ts (managed `goalRun.jobRunRecordCap`
+ * > env `SCHEDULED_AGENT_JOB_RUN_CAP` > default 500); this export
+ * stays as the default's alias for the existing import sites.
+ */
+export const SCHEDULED_AGENT_JOB_RUN_CAP = DEFAULT_GOAL_RUN_JOB_RUN_RECORD_CAP;
 
 /** Default list limit for run-history reads. */
 export const JOB_RUN_LIST_DEFAULT_LIMIT = 50;

@@ -419,6 +419,13 @@ export async function handleScheduledEvent(event: any, env: Env, ctx?: any): Pro
       orchestrator: agent,
       scheduledAgent: actorGateway.stub<{
         onCron(): Promise<unknown>;
+        /** Issue #6503 step 12 — the outer observation's run-history read (ScheduledAgent.listJobRuns). */
+        listJobRuns(
+          jobId?: string,
+          limit?: number,
+        ): Promise<
+          Array<{ jobId: string; operation: string; started: string }>
+        >;
       }>(env.SCHEDULED_AGENT, "default"),
       // The renewal call lives in the entry point; this only binds
       // the environment (the S5-P08 thinness pin keeps the call
