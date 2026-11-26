@@ -33,6 +33,7 @@ import {
   resolveThinkWebhookSecret,
   signThinkWebhookSignature,
 } from "../actors/thinkPortMapping";
+import { parseIntClamped } from "../data/d1RetryPolicy";
 import type { Env } from "../types";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
@@ -96,6 +97,41 @@ function orchestratorNamespace(env: Partial<Env>): SettingsWebhookNamespace | nu
 }
 
 /**
+ * Issue #6547 — the delivery's bound, and why it exists.
+ *
+ * The delivery is deferred through the DO context's `waitUntil`, so its promise
+ * is what keeps the object's work open. With no timeout and no abort signal a
+ * hung self-delivery never settled: a pending I/O operation can hold a Durable
+ * Object in memory for up to 15 minutes, and because this leg never throws by
+ * contract, the residency was silent rather than an error. The bound makes the
+ * promise settle — the write stands, the notification is reported as not
+ * delivered.
+ *
+ * The value is configuration (`SETTINGS_WEBHOOK_TIMEOUT_MS`), clamped instead
+ * of trusted: a blank or garbage value can neither disable the bound nor make
+ * it absurd, and a too-large one cannot hold the object for minutes.
+ */
+export const SETTINGS_WEBHOOK_TIMEOUT_ENV_VAR = "SETTINGS_WEBHOOK_TIMEOUT_MS";
+
+/** One minute is already far past useful for a best-effort notification. */
+const SETTINGS_WEBHOOK_TIMEOUT_MAX_MS = 60_000;
+const SETTINGS_WEBHOOK_TIMEOUT_MIN_MS = 1;
+const DEFAULT_SETTINGS_WEBHOOK_TIMEOUT_MS = 10_000;
+
+/** The effective bound: env, clamped, else the default. Never zero, never unbounded. */
+export function resolveSettingsWebhookTimeoutMs(env: Partial<Env>): number {
+  return (
+    parseIntClamped(
+      (env as Record<string, unknown>)[SETTINGS_WEBHOOK_TIMEOUT_ENV_VAR] as
+        | string
+        | undefined,
+      SETTINGS_WEBHOOK_TIMEOUT_MIN_MS,
+      SETTINGS_WEBHOOK_TIMEOUT_MAX_MS,
+    ) ?? DEFAULT_SETTINGS_WEBHOOK_TIMEOUT_MS
+  );
+}
+
+/**
  * Deliver one settings-change webhook to the login's instance.
  * NEVER throws: every failure mode is a `{ delivered: false }`
  * result with a named reason plus a loud structured log — the
@@ -118,6 +154,9 @@ export async function deliverSettingsChangeWebhook(
     });
     return { delivered: false, reason };
   };
+  // Issue #6547 — the bound is resolved once, before any work, so the
+  // fetch below can never run unbounded.
+  const timeoutMs = resolveSettingsWebhookTimeoutMs(env);
   const secret = resolveThinkWebhookSecret(env);
   if (!secret) {
     return fail(
@@ -148,6 +187,9 @@ export async function deliverSettingsChangeWebhook(
           [THINK_WEBHOOK_SIGNATURE_HEADER]: signature,
         },
         body: rawBody,
+        // Issue #6547 — the mechanism that makes the platform fetch give
+        // up: without it a hung delivery holds the object resident.
+        signal: AbortSignal.timeout(timeoutMs),
       },
     );
     const response = await stub.fetch(request);
@@ -156,6 +198,15 @@ export async function deliverSettingsChangeWebhook(
     }
     return { delivered: true };
   } catch (err) {
+    // Issue #6547 — a timed-out delivery names its bound, so the log says
+    // "the instance did not answer" rather than a generic transport error.
+    const name = err instanceof Error ? err.name : "";
+    if (name === "TimeoutError" || name === "AbortError") {
+      return fail(
+        `the instance did not answer within ${timeoutMs}ms ` +
+          `(${SETTINGS_WEBHOOK_TIMEOUT_ENV_VAR}); the binding is still in force`,
+      );
+    }
     return fail(
       `delivery error: ${err instanceof Error ? err.message : String(err)}`,
     );

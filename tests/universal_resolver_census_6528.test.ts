@@ -84,6 +84,15 @@
  * `resolve*`-named and are internal to the universal-resolution
  * module, hence 0 separate resolvers by the §2.1 counting rule.
  *
+ * Issue #6547 (2026-11-26) raises the baseline 596 → 597 with ONE row:
+ * `resolveSettingsWebhookTimeoutMs` (`src/agents/settingsWebhookNotify.ts`,
+ * standalone, CANONICAL) — the single home for the settings-change
+ * delivery's bound. It is a NEW question (the delivery's timeout), not a
+ * second answer to an existing one: before it, that bound had no resolver
+ * and the delivery ran unbounded, which is the defect #6547 fixes. No
+ * baseline entry is raised or duplicated; the row's disposition is
+ * CANONICAL and its reason is stated in the PR that adds it.
+ *
  * Issue #6103 (2026-11-25) lowers the baseline 596 → 595 by removing
  * ONE row: `resolveLedgerReadMode` (`src/services/runLedgerReads.ts`)
  * — the resolver is deleted with the merged read path; there is one
@@ -232,6 +241,7 @@ const BASELINE: Array<[string, string, Kind, number, Disposition]> = [
   ["src/agents/routes/serviceUser.ts", "resolveTokenStore", "standalone", 1, "CANONICAL"],
   ["src/agents/scheduled-agent.ts", "resolveReaderHalt", "standalone", 1, "CANONICAL"],
   ["src/agents/screenerAgentName.ts", "resolveScreenerAgentName", "standalone", 1, "CANONICAL"],
+  ["src/agents/settingsWebhookNotify.ts", "resolveSettingsWebhookTimeoutMs", "standalone", 1, "CANONICAL"],
   ["src/agents/social/briefStore.ts", "resolveBriefDate", "standalone", 1, "CANONICAL"],
   ["src/agents/social/config.ts", "resolveChannelDisposition", "standalone", 1, "CANONICAL"],
   ["src/agents/social/delivery.ts", "resolveSocialSlackChannel", "standalone", 1, "CANONICAL"],
@@ -1166,9 +1176,10 @@ describe("universal resolver census (#6528 Phase 1)", () => {
   it("the distinct-question count is a range, never an exact number", () => {
     expect(QUESTION_RANGE_LOW).toBeLessThan(QUESTION_CENTRAL_ESTIMATE);
     expect(QUESTION_CENTRAL_ESTIMATE).toBeLessThan(QUESTION_RANGE_HIGH);
-    // Implied copies at the seeded total: 596 − 320 = 276 … 596 − 285 = 311.
-    expect(baselineTotal - QUESTION_RANGE_HIGH).toBe(276);
-    expect(baselineTotal - QUESTION_RANGE_LOW).toBe(311);
+    // Implied copies at the seeded total: 597 − 320 = 277 … 597 − 285 = 312
+    // (the seed moved 596 → 597 with #6547's one CANONICAL row).
+    expect(baselineTotal - QUESTION_RANGE_HIGH).toBe(277);
+    expect(baselineTotal - QUESTION_RANGE_LOW).toBe(312);
   });
 
   it("no test-only or scripts-only resolver is counted as production", () => {
@@ -1227,12 +1238,12 @@ describe("universal resolver census (#6528 Phase 1)", () => {
       expect(count, `${kind} count`).toBeGreaterThan(0);
       expect(DISPOSITIONS.has(disposition), `unknown disposition ${disposition}`).toBe(true);
     }
-    expect(baselineTotal).toBe(596);
+    expect(baselineTotal).toBe(597);
     const byKind = new Map<Kind, number>();
     for (const [, , kind, count] of BASELINE) {
       byKind.set(kind, (byKind.get(kind) ?? 0) + count);
     }
-    expect(byKind.get("standalone")).toBe(565);
+    expect(byKind.get("standalone")).toBe(566);
     expect(byKind.get("class-method")).toBe(18);
     expect(byKind.get("resolver-type")).toBe(9);
     expect(byKind.get("interface-method")).toBe(4);
