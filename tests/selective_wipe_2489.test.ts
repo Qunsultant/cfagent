@@ -20,6 +20,49 @@ import {
   type KvWipeStores,
 } from "../src/agents/routes/kvWipe";
 import type { SqlStorage } from "../src/orm";
+import { createMemoryAuditStore } from "../src/security/iaaaAudit";
+
+// Issue #6503 step 8b — the clear-table rows this file pins are all
+// platform-admin only, so the fixture carries the platform-admin
+// identity (same stub shape as tests/maintenanceClearTable.test.ts).
+const ADMIN_LOGIN = "venus-admin";
+const ADMIN_USER_ID = "user-admin-1";
+
+function stubKv(entries: Record<string, string>) {
+  const store = new Map<string, string>();
+  for (const [login, userId] of Object.entries(entries)) {
+    store.set(`iaaa-alias:login:${login}`, JSON.stringify({ internalUserId: userId }));
+  }
+  return {
+    get: async (key: string) => store.get(key) ?? null,
+    put: async (key: string, value: string) => {
+      store.set(key, value);
+    },
+    delete: async (key: string) => {
+      store.delete(key);
+    },
+  };
+}
+
+function stubMembershipStore() {
+  const byUser: Record<string, Array<Record<string, unknown>>> = {
+    [ADMIN_USER_ID]: [
+      {
+        membershipId: "m-admin-1",
+        internalUserId: ADMIN_USER_ID,
+        tenantId: "platform",
+        roleBindings: [{ role: "platform-admin", scope: "platform", grantedBy: "test" }],
+        createdBy: "test",
+        createdAtMs: 1,
+      },
+    ],
+  };
+  return {
+    getMembershipsByUser: async (internalUserId: string) => byUser[internalUserId] ?? [],
+    put: async () => {},
+    revokeMembership: async () => false,
+  };
+}
 
 function makeSql(db: DatabaseSync): SqlStorage {
   return {
@@ -49,6 +92,13 @@ function makeCtx(db: DatabaseSync) {
   const ctx = {
     agentCtx: { storage: { sql: makeSql(db) } },
     audit: vi.fn(),
+    // Issue #6503 step 9 (G2) — the gated clear-table audit blocks
+    // without a working audit store; the fixture carries the
+    // memory store (same pattern as maintenanceClearTable.test.ts).
+    auditStore: createMemoryAuditStore(),
+    getScreenerExecutionContext: async () => undefined,
+    flagAliasKv: stubKv({ [ADMIN_LOGIN]: ADMIN_USER_ID }),
+    flagMembershipStore: stubMembershipStore(),
   } as unknown as MaintenanceRouteContext;
   return ctx;
 }
@@ -61,7 +111,7 @@ async function postMaintenance(
 ) {
   const req = new Request(`https://agent.test${path}`, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "x-user-login": ADMIN_LOGIN },
     body: method === "POST" ? JSON.stringify(body) : undefined,
   });
   const res = await handleMaintenanceRoutes(req, new URL(`https://agent.test${path}`), path, "sess-1", ctx);

@@ -121,7 +121,11 @@ describe("4331-P04 counts per kind", () => {
 
 describe("4331-P05 one list on the page", () => {
   it("the table lists every durable schedule", () => {
-    expect(panel).toContain("const allSchedules = schedules;");
+    // Issue #6503 step 14 — the one list is the schedule rows: the
+    // ticker-push feed is split out by kind into its own card, so
+    // the table lists every durable schedule and no feed row.
+    expect(panel).toContain("const allSchedules = scheduleRows;");
+    expect(panel).toContain('const scheduleRows = schedules.filter((s) => s.kind !== "ticker-push");');
     expect(panel).not.toContain("schedules.filter((s) => !SCREENING_CALLBACKS.has(s.callback))");
     expect(panel).toContain("Every durable schedule, one row each");
   });

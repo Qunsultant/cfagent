@@ -1,9 +1,10 @@
 /**
  * Issue #275 — the hourly full-catalog strategy scan is armed once per
  * authenticated user (cron 35 * * * *, staggered off the equity-screen
- * minutes), following the ensureStaleSweepSchedule pattern. It must
- * never double-arm, and it must respect a scan the user paused in the
- * Schedules tab (#273's unified store, state paused).
+ * minutes), following the ensure-on-start pattern (arm once, never
+ * double-arm). It must never double-arm, and it must respect a scan
+ * the user paused in the Schedules tab (#273's unified store, state
+ * paused).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -45,7 +46,9 @@ vi.mock("agents", () => {
   };
 });
 import { OrchestratorAgent, STRATEGY_SCAN_CRON } from "../src/agents/orchestrator";
-import { SqlUnifiedScheduleStore } from "../src/data/doSqliteUnifiedScheduleAdapter";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import type { UnifiedScheduleRecord } from "../src/data/unifiedSchedulePorts";
 import { MockSqlStorage } from "./mock-sql";
 import { resolveScreenSelection } from "../src/services/providerConnections";
 import { resolveTenantProviders } from "../src/services/tenantProviders";
@@ -73,6 +76,21 @@ vi.mock("../src/services/accountBindings", async (importOriginal) => {
 const mockedResolveScreenSelection = vi.mocked(resolveScreenSelection);
 const mockedResolveTenantProviders = vi.mocked(resolveTenantProviders);
 const mockedResolveValidatedExecutionAccountContext = vi.mocked(resolveValidatedExecutionAccountContext);
+
+/**
+ * Issue #6503 — the paused record lives in D1 now (the unified
+ * store is the D1 port over env.AGENT_DB, read by
+ * ensureStrategyScanSchedule's pause check); seed it there and bind
+ * the mock as AGENT_DB so the check reads it. The migration-89
+ * goals seed fires on first D1 use, but its rows are enabled, never
+ * paused, so listByState("paused") returns only the seeded row.
+ */
+async function seedPausedRecordInD1(record: UnifiedScheduleRecord): Promise<void> {
+  const mockD1 = new MockD1Database();
+  const store = createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules;
+  await store.save(record);
+  agent.env = { AGENT_DB: mockD1 };
+}
 
 let scheduleCalls: any[];
 let existing: any[];
@@ -184,8 +202,7 @@ describe("ensureStrategyScanSchedule (#275)", () => {
   });
 
   it("respects a paused scan (#273): a paused record blocks re-arming", async () => {
-    const store = new SqlUnifiedScheduleStore(sql as any);
-    store.save({
+    await seedPausedRecordInD1({
       id: "paused-scan",
       kind: "screen",
       state: "paused",
@@ -206,8 +223,7 @@ describe("ensureStrategyScanSchedule (#275)", () => {
   });
 
   it("an unrelated paused job does not block arming", async () => {
-    const store = new SqlUnifiedScheduleStore(sql as any);
-    store.save({
+    await seedPausedRecordInD1({
       id: "paused-screen",
       kind: "screen",
       state: "paused",

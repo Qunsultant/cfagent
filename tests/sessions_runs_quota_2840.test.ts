@@ -65,6 +65,9 @@ vi.mock("../src/security/etradeOAuth", () => ({
 
 import { createJob } from "../src/orchestrate";
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 import {
   DEFAULT_MAX_CONCURRENT_SESSIONS_PER_USER,
   activeSessionsForUser,
@@ -383,9 +386,10 @@ describe("screens: cross-login dedup + already-in-flight (#2840 Q2)", () => {
 });
 
 describe("scheduled goals: cross-login in-flight guard (#2840 Q2)", () => {
-  function makeCtx(initialGoals: any[]) {
+  // #6503 — the "goals" KV key is dead: goals live in the D1 unified
+  // store only (fail-closed without AGENT_DB). Fixtures plant via D1.
+  function makeCtx() {
     const store = new Map<string, unknown>();
-    store.set("goals", initialGoals);
     return {
       storage: {
         get: async (k: string) => (store.has(k) ? store.get(k) : undefined),
@@ -397,9 +401,26 @@ describe("scheduled goals: cross-login in-flight guard (#2840 Q2)", () => {
   }
   function makeEnv() {
     return {
+      // #6503 — goals live in the D1 unified store only (fail-closed
+      // without AGENT_DB); the agent never reads the "goals" KV key.
+      AGENT_DB: new MockD1Database(),
       PAYMENTS_AGENT: { idFromName: () => "default", get: () => ({ budgetCheck: async () => ({ allowed: true }) }) },
       SESSION_STORE: null,
     };
+  }
+
+  /** Plant `goals` into `mockD1`, sweeping migration-0092's seeds. */
+  async function plantGoals(mockD1: MockD1Database, goals: any[]) {
+    const store = createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules;
+    for (const goal of goals) await store.save(goalToRecord(goal));
+    // The first store op lazily ensures the schema, and migration
+    // 0092's goals seed lands the 9 built-in goals — sweep them, so
+    // the trigger sees ONLY the fixture goal (same pattern as the
+    // #6503 G3 goals-tick file).
+    const keep = new Set(goals.map((goal) => String(goal.id)));
+    for (const row of await store.listByKind("goal")) {
+      if (!keep.has(row.id)) await store.remove(row.id);
+    }
   }
   function testGoal() {
     return {
@@ -422,8 +443,10 @@ describe("scheduled goals: cross-login in-flight guard (#2840 Q2)", () => {
       await gate;
       return { jobId: "job_test_1", ...req, status: "pending" };
     });
-    const ctx = makeCtx([testGoal()]);
-    const agent = new ScheduledAgent(ctx as never, makeEnv() as never);
+    const ctx = makeCtx();
+    const env = makeEnv();
+    await plantGoals(env.AGENT_DB as MockD1Database, [testGoal()]);
+    const agent = new ScheduledAgent(ctx as never, env as never);
     // Session A starts the firing and blocks inside createJob.
     const first = agent.triggerGoal("test-goal");
     // Let the first firing reach the gate.
@@ -477,14 +500,17 @@ describe("scheduled goals: cross-login in-flight guard (#2840 Q2)", () => {
     vi.setSystemTime(new Date("2026-11-03T06:00:00Z"));
     vi.mocked(createJob).mockImplementation(async (_env: any, req: any) => ({ jobId: "job_seq", ...req, status: "pending" }));
     const store = new Map<string, unknown>();
-    store.set("goals", [testGoal()]);
     const ctx = {
       storage: {
         get: async (k: string) => (store.has(k) ? store.get(k) : undefined),
         put: async (k: string, v: unknown) => void store.set(k, v),
       },
     };
-    const agent = new ScheduledAgent(ctx as never, makeEnv() as never);
+    // #6503 — the goal is planted in D1 (the "goals" KV key is dead);
+    // the put-only ctx.storage still carries the firing markers.
+    const env = makeEnv();
+    await plantGoals(env.AGENT_DB as MockD1Database, [testGoal()]);
+    const agent = new ScheduledAgent(ctx as never, env as never);
     const first = await agent.triggerGoal("test-goal");
     expect(first.jobsCreated).toBe(1);
     const second = await agent.triggerGoal("test-goal");

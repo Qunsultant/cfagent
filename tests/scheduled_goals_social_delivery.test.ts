@@ -33,6 +33,9 @@ vi.mock("../src/orchestrate", () => ({
 }));
 
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 import type { SlackPostFn } from "../src/agents/social/delivery";
 
 const MON_0900 = "2026-10-26T13:00:00Z";
@@ -51,9 +54,10 @@ function socialGoal(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeCtx(initialGoals?: unknown[]) {
+// #6503 — the "goals" KV key is dead: goals live in the D1 unified
+// store only (fail-closed without AGENT_DB). Fixtures plant via D1.
+function makeCtx() {
   const store = new Map<string, unknown>();
-  if (initialGoals) store.set("goals", initialGoals);
   return {
     storage: {
       get: async (k: string) => (store.has(k) ? store.get(k) : undefined),
@@ -94,6 +98,9 @@ function makeSessionStore() {
 
 function makeEnv(sessionStore?: unknown, extra: Record<string, unknown> = {}) {
   return {
+    // #6503 — goals live in the D1 unified store only (fail-closed
+    // without AGENT_DB); the agent never reads the "goals" KV key.
+    AGENT_DB: new MockD1Database(),
     PAYMENTS_AGENT: { idFromName: () => "payments-default", get: () => makePayments() },
     SESSION_STORE: sessionStore,
     SOCIAL_POSTING_ENABLED: "1",
@@ -112,10 +119,32 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** Plant the enabled social goal into `mockD1`, sweeping the seeds. */
+async function plantSocialGoal(mockD1: MockD1Database) {
+  const store = createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules;
+  await store.save(goalToRecord(socialGoal()));
+  // The first store op lazily ensures the schema, and migration
+  // 0092's goals seed lands the 9 built-ins — with daily-social-post
+  // PAUSED (config enabled: false). The fixture enables it; the other
+  // eight are swept so the tick sees ONLY the enabled social goal
+  // (same pattern as the #6503 G3 goals-tick file).
+  for (const row of await store.listByKind("goal")) {
+    if (row.id !== "daily-social-post") await store.remove(row.id);
+  }
+}
+
+/** One agent over a fresh D1 with the enabled social goal planted. */
+async function socialAgent(sessionStore: unknown, extra: Record<string, unknown> = {}) {
+  const env = makeEnv(sessionStore, extra);
+  await plantSocialGoal(env.AGENT_DB as MockD1Database);
+  const agent = new (ScheduledAgent as any)(makeCtx(), env);
+  return { agent, env };
+}
+
 describe("onCron social delivery pass", () => {
   it("delivers pending approval cards after the goal fires", async () => {
     const session = makeSessionStore();
-    const agent = new (ScheduledAgent as any)(makeCtx([socialGoal()]), makeEnv(session.namespace));
+    const agent = (await socialAgent(session.namespace)).agent;
     const posted: { url: string; body: string }[] = [];
     const poster: SlackPostFn = async (url, headers, body) => {
       posted.push({ url, body });
@@ -140,8 +169,7 @@ describe("onCron social delivery pass", () => {
 
   it("does not re-deliver on the next day's firing when the brief is missing", async () => {
     const session = makeSessionStore();
-    const ctx = makeCtx([socialGoal()]);
-    const agent = new (ScheduledAgent as any)(ctx, makeEnv(session.namespace));
+    const { agent } = await socialAgent(session.namespace);
     const posted: string[] = [];
     const poster: SlackPostFn = async (_url, _headers, body) => {
       posted.push(body);
@@ -166,7 +194,7 @@ describe("onCron social delivery pass", () => {
 
   it("delivery failure is a tick error, never a goal failure", async () => {
     const session = makeSessionStore();
-    const agent = new (ScheduledAgent as any)(makeCtx([socialGoal()]), makeEnv(session.namespace));
+    const agent = (await socialAgent(session.namespace)).agent;
     const poster: SlackPostFn = async () => ({ status: 500, body: "" });
     const tick = await agent.onCron(makeEnv(session.namespace), {
       socialBriefProvider: () => "Morning brief.",
@@ -178,10 +206,7 @@ describe("onCron social delivery pass", () => {
 
   it("posting disabled skips delivery entirely", async () => {
     const session = makeSessionStore();
-    const agent = new (ScheduledAgent as any)(
-      makeCtx([socialGoal()]),
-      makeEnv(session.namespace, { SOCIAL_POSTING_ENABLED: "0" }),
-    );
+    const { agent } = await socialAgent(session.namespace, { SOCIAL_POSTING_ENABLED: "0" });
     const posted: string[] = [];
     const poster: SlackPostFn = async (_url, _headers, body) => {
       posted.push(body);

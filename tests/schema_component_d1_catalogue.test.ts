@@ -180,6 +180,11 @@ const D1_MIGRATION_SQL_SHA256: Record<number, string> = {
   90: "e01a768735f78765dca5c8175b0a4fa47445da5d44698fcdc51dcf0cc02fc9fc",
   // Issue #6557 — the four #3655 provenance columns on the run record.
   91: "512b256bba92bf3f267fb058cfa9245485b3c2bf4333ee2c36fb311a5a49f3f3",
+  // #6503 adds migration 0092 (D1 unified_schedules table + 3
+  // indexes + the built-in-goals seed): 5 statements. The five
+  // system-schedule seeds are Recreate steps, not migration-applied
+  // (#6503 step 7: a fresh store starts empty).
+  92: "c79093d94c6ee5eec808cb3f449619ba1de498d2ebf77d53a00c98a84a60a421",
 };
 
 /** Per-version statement counts, measured from the base runner. */
@@ -289,9 +294,14 @@ const D1_MIGRATION_STATEMENT_COUNTS: Record<number, number> = {
   // Issue #6557 — one instance ALTER, four record ALTERs.
   90: 1,
   91: 4,
+  // #6503 adds migration 0092 (D1 unified_schedules table + 3
+  // indexes + the built-in-goals seed): 5 statements. The five
+  // system-schedule seeds are Recreate steps, not migration-applied
+  // (#6503 step 7: a fresh store starts empty).
+  92: 5,
 };
 
-/** The 13 seed-DML statements, exact text, measured from the base runner. */
+/** The 19 seed-DML statements, exact text, measured from the base runner. */
 const D1_SEED_STATEMENTS: string[] = [
   "INSERT OR IGNORE INTO agent_referral_rules (id, earn_amount_usd, vesting_delay_ms, redemption_scope, updated_at_ms) VALUES ('default', 0.5, 604800000, 'pay-per-run', 0)",
   "INSERT OR IGNORE INTO agent_free_run_allowances (family, runs, updated_at_ms) VALUES\n  ('stock', 10, 0),\n  ('goal', 10, 0),\n  ('options', 10, 0),\n  ('strategy', 10, 0)",
@@ -307,7 +317,15 @@ const D1_SEED_STATEMENTS: string[] = [
   "INSERT OR IGNORE INTO job_pipeline_definition_versions (id, job_id, version, definition_json, updated_at) SELECT job_id || ':' || version, job_id, version, definition_json, updated_at FROM job_pipeline_definitions",
   // #5160 adds migration 0087 (IDP attributes profile: the legacy
   // backfill INSERT — the rebuild's INSERT ... SELECT).
-  "INSERT INTO agent_user_profiles (user_login, display_name, phone, email, updated_at_ms, internal_user_id, tenant_id, idp_issuer, idp_attributes_json, provenance_json, idp_updated_at_ms)\n  SELECT user_login, display_name, phone, email, updated_at_ms, NULL, NULL, NULL, NULL, NULL, NULL\n  FROM agent_user_profiles_legacy"
+  "INSERT INTO agent_user_profiles (user_login, display_name, phone, email, updated_at_ms, internal_user_id, tenant_id, idp_issuer, idp_attributes_json, provenance_json, idp_updated_at_ms)\n  SELECT user_login, display_name, phone, email, updated_at_ms, NULL, NULL, NULL, NULL, NULL, NULL\n  FROM agent_user_profiles_legacy",
+  // #6503 adds migration 0092 (D1 unified_schedules seeds: five
+  // system schedules + the nine built-in goals).
+  `INSERT OR IGNORE INTO unified_schedules (id, kind, state, callback, operation, definition_json, owner_login, provenance_json, alarm_id, paused_at, created_at, updated_at) VALUES ('token-renewal', 'internal', 'paused', 'autoRenewETradeTokens', NULL, '{"type":"interval","intervalSeconds":2592000,"callback":"autoRenewETradeTokens"}', NULL, '{"origin":"system","createdBy":"system","reason":"token-renewal","createdAt":"2026-11-25T00:00:00.000Z"}', NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z')`,
+  `INSERT OR IGNORE INTO unified_schedules (id, kind, state, callback, operation, definition_json, owner_login, provenance_json, alarm_id, paused_at, created_at, updated_at) VALUES ('retention', 'internal', 'paused', 'retention', NULL, '{"type":"interval","intervalSeconds":2592000,"callback":"retention"}', NULL, '{"origin":"system","createdBy":"system","reason":"retention","createdAt":"2026-11-25T00:00:00.000Z"}', NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z')`,
+  `INSERT OR IGNORE INTO unified_schedules (id, kind, state, callback, operation, definition_json, owner_login, provenance_json, alarm_id, paused_at, created_at, updated_at) VALUES ('nightly-research', 'internal', 'paused', 'runResearchSchedule', NULL, '{"type":"interval","intervalSeconds":2592000,"callback":"runResearchSchedule"}', NULL, '{"origin":"system","createdBy":"system","reason":"nightly-research","createdAt":"2026-11-25T00:00:00.000Z"}', NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z')`,
+  `INSERT OR IGNORE INTO unified_schedules (id, kind, state, callback, operation, definition_json, owner_login, provenance_json, alarm_id, paused_at, created_at, updated_at) VALUES ('sweep-stale-async-jobs', 'internal', 'paused', 'sweepStaleAsyncJobs', NULL, '{"type":"interval","intervalSeconds":2592000,"callback":"sweepStaleAsyncJobs"}', NULL, '{"origin":"system","createdBy":"system","reason":"sweep-stale-async-jobs","createdAt":"2026-11-25T00:00:00.000Z"}', NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z')`,
+  `INSERT OR IGNORE INTO unified_schedules (id, kind, state, callback, operation, definition_json, owner_login, provenance_json, alarm_id, paused_at, created_at, updated_at) VALUES ('schedule-watchdog', 'internal', 'paused', 'watchdogMissedSchedules', NULL, '{"type":"interval","intervalSeconds":2592000,"callback":"watchdogMissedSchedules"}', NULL, '{"origin":"system","createdBy":"system","reason":"schedule-watchdog","createdAt":"2026-11-25T00:00:00.000Z"}', NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z')`,
+  `INSERT OR IGNORE INTO unified_schedules (id, kind, state, callback, operation, definition_json, owner_login, provenance_json, alarm_id, paused_at, created_at, updated_at) VALUES ('daily-qa-sweep', 'goal', 'active', NULL, 'qa.run_sweep', '{"budgetCents":500,"cron":"0 6 * * *","enabled":true,"id":"daily-qa-sweep","name":"Daily QA sweep","operation":"qa.run_sweep"}', NULL, NULL, NULL, NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z'), ('opportunity-hunt', 'goal', 'active', NULL, 'search.opportunity_hunt', '{"budgetCents":1000,"cron":"0 7 * * *","enabled":true,"id":"opportunity-hunt","name":"Opportunity hunt","operation":"search.opportunity_hunt"}', NULL, NULL, NULL, NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z'), ('daily-social-post', 'goal', 'paused', NULL, 'social.publish', '{"budgetCents":1,"cron":"0 9 * * 1-5","enabled":false,"id":"daily-social-post","name":"Daily social post","operation":"social.publish","timeZone":"America/New_York"}', NULL, NULL, NULL, NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z'), ('resource-daily-rollup', 'goal', 'active', NULL, 'resource.rollup_daily', '{"budgetCents":1,"cron":"30 1 * * *","enabled":true,"id":"resource-daily-rollup","name":"SessionStore daily resource rollup","operation":"resource.rollup_daily","timeZone":"UTC"}', NULL, NULL, NULL, NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z'), ('resource-cap-alert', 'goal', 'active', NULL, 'resource.cap_alert', '{"budgetCents":1,"cron":"0 0 * * *","enabled":true,"id":"resource-cap-alert","name":"SessionStore 70% cap alert","operation":"resource.cap_alert","timeZone":"UTC"}', NULL, NULL, NULL, NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z'), ('resource-dashboard-comparison', 'goal', 'active', NULL, 'resource.dashboard_comparison', '{"budgetCents":1,"cron":"0 2 * * *","enabled":true,"id":"resource-dashboard-comparison","name":"SessionStore dashboard comparison","operation":"resource.dashboard_comparison","timeZone":"UTC"}', NULL, NULL, NULL, NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z'), ('index-refresh-wikipedia', 'goal', 'active', NULL, 'index.refresh_wikipedia', '{"budgetCents":1,"cron":"0 4 * * 0","enabled":true,"id":"index-refresh-wikipedia","name":"Index-list refresh (Wikipedia)","operation":"index.refresh_wikipedia","timeZone":"UTC"}', NULL, NULL, NULL, NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z'), ('index-refresh-holdings', 'goal', 'paused', NULL, 'index.refresh_holdings', '{"budgetCents":1,"cron":"0 3 * * *","enabled":false,"id":"index-refresh-holdings","name":"Index-list refresh (ETF holdings)","operation":"index.refresh_holdings","timeZone":"UTC"}', NULL, NULL, NULL, NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z'), ('autopilot-monthly-evaluation', 'goal', 'active', NULL, 'autopilot.evaluate', '{"budgetCents":1,"cron":"0 9 1 * *","enabled":true,"id":"autopilot-monthly-evaluation","name":"Autopilot monthly evaluation","operation":"autopilot.evaluate","timeZone":"UTC"}', NULL, NULL, NULL, NULL, '2026-11-25T00:00:00.000Z', '2026-11-25T00:00:00.000Z')`
 ];
 
 const FIXTURE_PATH = path.join(
@@ -332,7 +350,7 @@ function expectedD1Model(): SchemaModel {
 }
 
 describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
-  it("catalogues all 295 runner statements: 282 schema + 13 seed", () => {
+  it("catalogues all 305 runner statements: 286 schema + 19 seed", () => {
     const catalogue = buildD1Catalogue();
     // #5086 adds migration 0070 (otel_config_overrides table): 224 → 225.
     // #4767 adds migrations 0071/0072 (4 D1 ALTERs): 225 → 229.
@@ -354,10 +372,11 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
     // #6102 adds migration 0089 (mas_events D1 table + six indexes): 283 → 290.
     // #6557 adds migrations 0090/0091 (instance provenance carrier + four
     // record provenance columns): 290 → 295.
-    // Union: 295 (schema 282, seeds 13).
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(295);
-    expect(catalogue.size()).toBe(295);
-    expect(catalogue.byKind("schema").length).toBe(282);    expect(catalogue.byKind("seed").length).toBe(13);
+    // #6503 adds migration 0092 (D1 unified_schedules table + 3 indexes + 6 seeds): 295 → 305.
+    // Union: 305 (schema 286, seeds 19).
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(305);
+    expect(catalogue.size()).toBe(305);
+    expect(catalogue.byKind("schema").length).toBe(286);    expect(catalogue.byKind("seed").length).toBe(19);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
       const upper = statement.trim().toUpperCase();
@@ -381,11 +400,11 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
       const verb = classify(entry.statement);
       verbs.set(verb, (verbs.get(verb) ?? 0) + 1);
     }
-    expect(verbs.get("CREATE TABLE")).toBe(115);
-    expect(verbs.get("CREATE INDEX")).toBe(66);
+    expect(verbs.get("CREATE TABLE")).toBe(116);
+    expect(verbs.get("CREATE INDEX")).toBe(69);
     expect(verbs.get("CREATE UNIQUE INDEX")).toBe(11);
     expect(verbs.get("ALTER TABLE")).toBe(88);    expect(verbs.get("DROP TABLE")).toBe(2);
-    expect(verbs.get("INSERT OR IGNORE")).toBe(8);
+    expect(verbs.get("INSERT OR IGNORE")).toBe(14);
     expect(verbs.get("INSERT INTO")).toBe(2);
     expect(verbs.get("UPDATE")).toBe(3);
   });
@@ -404,8 +423,10 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
     // for the nav admin config).
     // #6102 adds migration 0089 (mas_events D1 table + six indexes).
     // #6557 adds migrations 0090/0091 (provenance).
+    // #6503 adds migration 0092 (unified_schedules D1 table + goals
+    // seed; renumbered 0089 -> 0092 on rebase: main took 0089-0091).
     expect(versions).toEqual(
-      Array.from({ length: 91 }, (_, i) => i + 1),
+      Array.from({ length: 92 }, (_, i) => i + 1),
     );    const allCodes = new Set<string>();
     for (const version of versions) {
       const codes = D1_MIGRATION_CODES[version];
@@ -416,10 +437,26 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
       }
     }
     const entryCodes = new Set(D1_CATALOGUE_ENTRIES.map((e) => e.code));
+    // Issue #6503 step 7 — the five system-schedule seeds are
+    // Recreate steps, not migration-applied: a fresh store starts
+    // empty and the onStart reconcile seeds them, so they are the
+    // one deliberate exception to the no-orphan rule (the goals
+    // seed IS migration-applied, as before).
+    const recreateOnlyCodes = new Set([
+      "seed.d1.unified_schedules.insert_token_renewal",
+      "seed.d1.unified_schedules.insert_retention",
+      "seed.d1.unified_schedules.insert_nightly_research",
+      "seed.d1.unified_schedules.insert_sweep_stale_async_jobs",
+      "seed.d1.unified_schedules.insert_schedule_watchdog",
+    ]);
+    for (const code of recreateOnlyCodes) {
+      expect(entryCodes.has(code)).toBe(true);
+      entryCodes.delete(code);
+    }
     expect(allCodes).toEqual(entryCodes);
   });
 
-  it("the 13 seed entries carry the exact base seed statements", () => {
+  it("the 19 seed entries carry the exact base seed statements", () => {
     const catalogue = buildD1Catalogue();
     const seedStatements = catalogue
       .byKind("seed")

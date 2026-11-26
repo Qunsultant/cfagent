@@ -185,6 +185,8 @@ vi.mock("agents", () => {
   };
 });
 import { OrchestratorAgent } from "../src/agents/orchestrator";
+import { MockD1Database } from "./mock-d1";
+import { createD1CommercialDb, ensureCommercialSchema } from "../src/data/d1CommercialAdapter";
 import { handleEtradeBrokerRoutes } from "../src/agents/routes/etradeBroker";
 import { handleEtradeOptionsRoutes } from "../src/agents/routes/etradeOptions";
 import { DatabaseORM } from "../src/orm";
@@ -687,7 +689,7 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
     await seedNlqBindings(env, sessionId);
   });
 
-  function makeAgent() {
+  async function makeAgent() {
     const sql = new MockSqlStorage();
     const ctx = { storage: { sql }, id: { toString: () => "screening-schema-parity" } } as any;
     const agent: any = Object.create(OrchestratorAgent.prototype);
@@ -706,7 +708,33 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
         { broker: "etrade", mode: "paper", accountType: "options", scope: "tenant", accountId: "ET-123" },
       ])
     );
-    agent.env = { APP_ENV: "TEST", SESSION_STORE: sessionStoreNs } as any;
+    agent.env = {
+      APP_ENV: "TEST",
+      SESSION_STORE: sessionStoreNs,
+      // #6503 — the schedules create route persists the row in the
+      // D1 unified store (fail-closed without AGENT_DB: 503).
+      AGENT_DB: new MockD1Database(),
+    } as any;
+    // #6503 — binding AGENT_DB also makes the commercial adapter
+    // real, so the create route reads the tenant broker selection
+    // from D1 instead of falling back to the legacy E*TRADE leg:
+    // with no selection stored the tenant resolves to the vocabulary
+    // default (alpaca) and creation refuses 409 for want of an
+    // Alpaca credential. These tests pin creation for the bound
+    // E*TRADE paper account, so seed the tenant's selection as
+    // etrade (tenant "primary", the IAAA default) — same shape as
+    // tests/schedules_create_route.test.ts.
+    const d1 = agent.env.AGENT_DB as MockD1Database;
+    await ensureCommercialSchema(createD1CommercialDb(d1 as never));
+    d1.sqlite
+      .prepare(
+        // The data_provider_id column carries a legacy DB default
+        // of 'etrade' (the ALTER that added it); the builder under
+        // test expects the vocabulary default 'alpaca', so seed it
+        // explicitly — same as the 6482 seedEtradeBroker helper.
+        "INSERT OR REPLACE INTO agent_tenant_settings (tenant_id, ads_enabled, updated_at_ms, broker_id, data_provider_id) VALUES ('primary', 0, ?, 'etrade', 'alpaca')",
+      )
+      .run(Date.now());
     agent.schedule = async (when: any, callback: string, payload: any, options: any) => {
       scheduleCalls.push([when, callback, payload, options]);
       return { id: `real-schedule-${scheduleCalls.length}`, callback, payload };
@@ -730,7 +758,7 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
   }
 
   it("options analysis: REST-armed payload equals the builder's for the same criteria + identity", async () => {
-    const agent = makeAgent();
+    const agent = await makeAgent();
     const { status, body } = await postCreate(agent, {
       scheduleType: "cron",
       // Issue #6482 — a yearly cron: creation lands PAUSED and
@@ -779,7 +807,7 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
   });
 
   it("discovery saved-request: REST-armed payload equals the builder's", async () => {
-    const agent = makeAgent();
+    const agent = await makeAgent();
     const { status, body } = await postCreate(agent, {
       scheduleType: "cron",
       // Issue #6482 — a yearly cron (see the options parity test
@@ -817,7 +845,7 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
   });
 
   it("REST create still enforces its explicit-universe policy for stock schedules (route policy over the shared builder)", async () => {
-    const agent = makeAgent();
+    const agent = await makeAgent();
     const { status, body } = await postCreate(agent, {
       scheduleType: "cron",
       // Issue #6482 — a yearly cron: the policy error under test

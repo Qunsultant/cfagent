@@ -81,6 +81,7 @@ vi.mock("@cloudflare/ai-chat", () => {
 const mockRunScreen = vi.fn();
 
 import { DatabaseORM } from "../src/orm";
+import { MockD1Database } from "./mock-d1";
 import { MockSqlStorage } from "./mock-sql";
 import { TradingPlatformRegistry } from "../src/trading/registry";
 import { DynamicMarketScreener } from "../src/trading/screener";
@@ -170,6 +171,9 @@ describe("Scheduled job failure semantics (#112)", () => {
     auditStore = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
     env = {
       APP_ENV: "TEST",
+      // #6503 — the /api/schedules list route reads the D1 unified
+      // store (fail-closed without AGENT_DB: 500).
+      AGENT_DB: new MockD1Database(),
       APP_BASE_URL: "https://agent.openaimp.com",
       AI_SEARCH_ENDPOINT: "https://ai-search.internal",
       ETRADE_ENVIRONMENT: "sandbox",

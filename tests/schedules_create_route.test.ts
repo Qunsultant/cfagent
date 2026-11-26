@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { makeFakeSessionStore } from "./fake-session-store";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { createD1CommercialDb, ensureCommercialSchema } from "../src/data/d1CommercialAdapter";
 
 // The orchestrator extends AIChatAgent from @cloudflare/ai-chat, whose real
 // module graph pulls in `cloudflare:` protocol imports the node test loader
@@ -48,6 +51,77 @@ vi.mock("agents", () => {
 import { OrchestratorAgent, CREATABLE_SCHEDULE_CALLBACKS } from "../src/agents/orchestrator";
 import { MockSqlStorage } from "./mock-sql";
 
+/** Minimal D1Database stand-in over node:sqlite (same as the #6503 repro). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: {
+                changes: info.changes,
+                last_row_id: info.lastInsertRowid,
+              },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+  async batch(statements: any[]) {
+    const results: any[] = [];
+    this.sqlite.exec("BEGIN");
+    try {
+      for (const stmt of statements) {
+        results.push(await stmt.run());
+      }
+      this.sqlite.exec("COMMIT");
+    } catch (err) {
+      this.sqlite.exec("ROLLBACK");
+      throw err;
+    }
+    return results;
+  }
+}
+
+/**
+ * A D1 that fails writes only: upserts into unified_schedules
+ * throw, while reads and schema work delegate to the real store.
+ * The create route's honest 503 comes from the schedule-store
+ * write itself, not from a broken schema.
+ */
+class ThrowingWritesD1 {
+  constructor(private readonly inner: MockD1Database) {}
+  prepare(sql: string) {
+    // Drizzle quotes the table name: insert into "unified_schedules" ...
+    if (/INSERT\s+INTO\s+"?unified_schedules"?/i.test(sql) && /ON CONFLICT/i.test(sql)) {
+      throw new Error("store down (test stub)");
+    }
+    return this.inner.prepare(sql);
+  }
+  async batch(statements: any[]) {
+    return this.inner.batch(statements);
+  }
+}
+
 /**
  * Issue #111 — POST /api/schedules/create must never fabricate success.
  *
@@ -76,7 +150,7 @@ describe("POST /api/schedules/create (#111)", () => {
     userLogin: authenticatedLogin,
   });
 
-  function makeAgent({ bound = true }: { bound?: boolean } = {}) {
+  async function makeAgent({ bound = true }: { bound?: boolean } = {}) {
     const sql = new MockSqlStorage();
     const ctx = {
       storage: { sql },
@@ -109,7 +183,24 @@ describe("POST /api/schedules/create (#111)", () => {
     agent.env = {
       APP_ENV: "TEST",
       SESSION_STORE: sessionStoreNs,
+      // Issue #6503 — the unified store is D1 only (fail-closed).
+      AGENT_DB: new MockD1Database(),
     } as any;
+    // Issue #6503 — binding AGENT_DB also makes the commercial
+    // adapter real, so the create route reads the tenant broker
+    // selection from D1 instead of falling back to the legacy
+    // E*TRADE leg: with no selection stored the tenant resolves to
+    // the vocabulary default (alpaca) and creation refuses 409 for
+    // want of an Alpaca credential. These tests pin creation for
+    // the bound E*TRADE paper account, so seed the tenant's
+    // selection as etrade (tenant "primary", the IAAA default).
+    const d1 = agent.env.AGENT_DB as MockD1Database;
+    await ensureCommercialSchema(createD1CommercialDb(d1 as never));
+    d1.sqlite
+      .prepare(
+        "INSERT OR REPLACE INTO agent_tenant_settings (tenant_id, ads_enabled, updated_at_ms, broker_id) VALUES ('primary', 0, ?, 'etrade')",
+      )
+      .run(Date.now());
     agent.schedule = async (when: any, callback: string, payload: any, options: any) => {
       scheduleCalls.push([when, callback, payload, options]);
       return { id: `real-schedule-${scheduleCalls.length}`, callback, payload };
@@ -163,7 +254,7 @@ describe("POST /api/schedules/create (#111)", () => {
   });
 
   it("rejects an unknown callback with 400 and creates no schedule", async () => {
-    const agent = makeAgent();
+    const agent = await makeAgent();
     const { status, body } = await postCreate(agent, {
       scheduleType: "cron",
       cron: "0 3 * * *",
@@ -179,7 +270,14 @@ describe("POST /api/schedules/create (#111)", () => {
   });
 
   it("preserves account-owned stock/options screens while retiring only legacy maintenance schedules", async () => {
-    const agent = makeAgent();
+    const agent = await makeAgent();
+    // The D1 store auto-seeds built-in goal rows on first use;
+    // clear them so the list shows only the legacy screens (#6503).
+    const store = createD1UnifiedSchedulePorts({ d1: agent.env.AGENT_DB as never }).unifiedSchedules;
+    await store.list();
+    for (const goal of await store.listByKind("goal")) {
+      await store.remove(goal.id);
+    }
     const stored = new Map<string, unknown>();
     agent.ctx.storage.get = async (key: string) => stored.get(key);
     agent.ctx.storage.put = async (key: string, value: unknown) => { stored.set(key, value); };
@@ -199,16 +297,12 @@ describe("POST /api/schedules/create (#111)", () => {
     const body = await response.json() as any;
 
     expect(response.status).toBe(200);
-    // Issue #3121 #4239 — the legacy token-renewal alarm stays retired
-    // (it is not listed), but the derived token-renewal record IS listed:
-    // the list appends the renewal row for the live heartbeat duty.
-    // Issue #3121 #4240 — the derived retention record IS listed too:
-    // the list appends the retention row after the renewal row.
-    // Issue #3121 #4241 — the derived nightly research record IS listed too:
-    // the list appends the nightly research row after the retention row.
-    // Issue #3121 #4242 — the three derived sweep/watchdog records ARE listed too:
-    // the list appends the sweep rows and the watchdog row after the research row.
-    expect(body.schedules.map((schedule: any) => schedule.id)).toEqual(["legacy-stock-screen", "legacy-options-screen", "token-renewal", "retention", "nightly-research", "sweep-stale-ledger-tasks", "sweep-stale-async-jobs", "schedule-watchdog"]);
+    // Issue #6503 — the six system duties are stored rows now, and
+    // no stored row exists in this fixture's empty D1 store, so the
+    // list shows only the two legacy screens. The legacy
+    // token-renewal / iv alarms stay retired (they are not listed),
+    // and nothing synthesizes in their place.
+    expect(body.schedules.map((schedule: any) => schedule.id)).toEqual(["legacy-stock-screen", "legacy-options-screen"]);
   });
 
   it.each([
@@ -224,7 +318,7 @@ describe("POST /api/schedules/create (#111)", () => {
   ])(
     "creation succeeds as a paused record when the SDK scheduling call throws (%s mode)",
     async (_mode, fields) => {
-      const agent = makeAgent();
+      const agent = await makeAgent();
       agent.schedule = async () => {
         throw new Error("schedule() unavailable in this runtime (test stub)");
       };
@@ -249,17 +343,15 @@ describe("POST /api/schedules/create (#111)", () => {
     // Issue #6482 — the SDK no longer fails creation, so the honest
     // 503 now covers the store: a creation whose unified-store write
     // cannot happen reports {success:false} and creates nothing.
-    const agent = makeAgent();
-    // Fail only the unified-schedules table: table setup (ensureTables)
-    // and the fail-safe settings reads must still work, so the 503
-    // comes from the schedule-store write itself.
-    const realSql = agent.ctx.storage.sql as { exec(query: string, ...args: unknown[]): unknown };
-    agent.ctx.storage.sql = {
-      exec: (query: string, ...args: unknown[]) => {
-        if (/unified_schedules/i.test(query)) throw new Error("store down (test stub)");
-        return realSql.exec(query, ...args);
-      },
-    };
+    // Issue #6503 — the store is D1 now, so the failure injection
+    // swaps in a D1 that fails writes only: warm the store first
+    // (ensureSchema + the goal seed), then arm the throwing D1 so
+    // the create's save() throws and the route answers 503.
+    const agent = await makeAgent();
+    const d1 = agent.env.AGENT_DB as MockD1Database;
+    const store = createD1UnifiedSchedulePorts({ d1: d1 as never }).unifiedSchedules;
+    await store.list();
+    agent.env.AGENT_DB = new ThrowingWritesD1(d1) as never;
     const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
       intervalSeconds: 2_592_000,
@@ -274,7 +366,7 @@ describe("POST /api/schedules/create (#111)", () => {
   });
 
   it("creation succeeds as a paused record when the SDK scheduling call throws", async () => {
-    const agent = makeAgent();
+    const agent = await makeAgent();
     agent.schedule = async () => {
       throw new Error("durable object storage exploded");
     };
@@ -316,7 +408,7 @@ describe("POST /api/schedules/create (#111)", () => {
   });
 
   it("returns the existing schedule for a duplicate submit instead of arming a second (#2071)", async () => {
-    const first = makeAgent();
+    const first = await makeAgent();
     const body = {
       scheduleType: "interval",
       // Issue #6482 — monthly (the old 3600s value is now refused
@@ -331,7 +423,7 @@ describe("POST /api/schedules/create (#111)", () => {
     expect(created.body.paused).toBe(true);
     const stampedPayload = created.body.schedule.definition.payload;
 
-    const second = makeAgent();
+    const second = await makeAgent();
     second.listSchedules = async () => [
       {
         id: "existing-1",
@@ -359,7 +451,7 @@ describe("POST /api/schedules/create (#111)", () => {
     });
 
     it("rejects a sub-daily interval without the opt-in and arms nothing", async () => {
-      const agent = makeAgent();
+      const agent = await makeAgent();
       const { status, body } = await postCreate(agent, optionsBody({ scheduleType: "interval", intervalSeconds: 3600 }));
       expect(status).toBe(400);
       expect(body.success).toBe(false);
@@ -368,7 +460,7 @@ describe("POST /api/schedules/create (#111)", () => {
     });
 
     it("a sub-daily interval with the opt-in is refused by the monthly floor (#6482)", async () => {
-      const agent = makeAgent();
+      const agent = await makeAgent();
       const { status, body } = await postCreate(
         agent,
         optionsBody({ scheduleType: "interval", intervalSeconds: 3600, subDailyOptIn: true }),
@@ -383,7 +475,7 @@ describe("POST /api/schedules/create (#111)", () => {
     });
 
     it("rejects a sub-daily cron without the opt-in and arms nothing", async () => {
-      const agent = makeAgent();
+      const agent = await makeAgent();
       const { status, body } = await postCreate(agent, optionsBody({ scheduleType: "cron", cron: "0 * * * *" }));
       expect(status).toBe(400);
       expect(body.success).toBe(false);
@@ -392,7 +484,7 @@ describe("POST /api/schedules/create (#111)", () => {
     });
 
     it("a yearly cron is created paused without any opt-in", async () => {
-      const agent = makeAgent();
+      const agent = await makeAgent();
       const { status, body } = await postCreate(agent, optionsBody({ scheduleType: "cron", cron: "0 0 1 1 *" }));
       expect(status).toBe(200);
       expect(body.success).toBe(true);
@@ -402,7 +494,7 @@ describe("POST /api/schedules/create (#111)", () => {
     });
 
     it("a 1st-of-month cron is refused by the monthly floor (#6482)", async () => {
-      const agent = makeAgent();
+      const agent = await makeAgent();
       const { status, body } = await postCreate(agent, optionsBody({ scheduleType: "cron", cron: "0 9 1 * *" }));
       // Issue #6482 — strict by design: a 1st-of-month cron's
       // tightest gap is February's 28 days, below the 30-day floor.
@@ -414,7 +506,7 @@ describe("POST /api/schedules/create (#111)", () => {
     });
 
     it("rejects an out-of-range cron with 400 instead of a 503 from the SDK", async () => {
-      const agent = makeAgent();
+      const agent = await makeAgent();
       const { status, body } = await postCreate(agent, optionsBody({ scheduleType: "cron", cron: "99 99 * * *" }));
       expect(status).toBe(400);
       expect(body.success).toBe(false);
@@ -424,7 +516,7 @@ describe("POST /api/schedules/create (#111)", () => {
 
   describe("bound-account enforcement (#5100, F3 of #5094)", () => {
     it("bound creation stamps the resolved tuple on the stored payload", async () => {
-      const agent = makeAgent();
+      const agent = await makeAgent();
       const { status, body } = await postCreate(agent, {
         scheduleType: "interval",
         // Issue #6482 — monthly (the old 3600s value is now refused
@@ -446,7 +538,7 @@ describe("POST /api/schedules/create (#111)", () => {
     });
 
     it("unbound creation is refused with the coded failure and arms nothing", async () => {
-      const agent = makeAgent({ bound: false });
+      const agent = await makeAgent({ bound: false });
       const { status, body } = await postCreate(agent, {
         scheduleType: "interval",
         // Issue #6482 — monthly, so the request reaches the binding

@@ -46,6 +46,9 @@ vi.mock("../src/orchestrate", () => ({
 
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
 import { createSocialBriefStoreFromNamespace } from "../src/agents/social/briefStore";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 
 // Monday 2026-10-26 09:00 EDT = 13:00Z.
 const MON_0900 = "2026-10-26T13:00:00Z";
@@ -64,9 +67,10 @@ function pipelineGoal(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeCtx(initialGoals?: unknown[]) {
+// #6503 — the "goals" KV key is dead: goals live in the D1 unified
+// store only (fail-closed without AGENT_DB). Fixtures plant via D1.
+function makeCtx() {
   const store = new Map<string, unknown>();
-  if (initialGoals) store.set("goals", initialGoals);
   return {
     storage: {
       get: async (k: string) => (store.has(k) ? store.get(k) : undefined),
@@ -111,6 +115,9 @@ function makeSessionStore() {
 
 function makeEnv(sessionStore: unknown, extra: Record<string, unknown> = {}) {
   return {
+    // #6503 — goals live in the D1 unified store only (fail-closed
+    // without AGENT_DB); the agent never reads the "goals" KV key.
+    AGENT_DB: new MockD1Database(),
     PAYMENTS_AGENT: { idFromName: () => "payments-default", get: () => makePayments() },
     SESSION_STORE: sessionStore,
     SOCIAL_POSTING_ENABLED: "1",
@@ -119,6 +126,27 @@ function makeEnv(sessionStore: unknown, extra: Record<string, unknown> = {}) {
     THREADS_ACCESS_TOKEN: PLACEHOLDER_TOKEN,
     ...extra,
   } as any;
+}
+
+/** Plant the pipeline goal into `mockD1`, sweeping the seeds. */
+async function plantPipelineGoal(mockD1: MockD1Database) {
+  const store = createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules;
+  await store.save(goalToRecord(pipelineGoal()));
+  // The first store op lazily ensures the schema, and migration
+  // 0092's goals seed lands the 9 built-ins — sweep them, so the
+  // tick sees ONLY the pipeline goal (same pattern as the #6503 G3
+  // goals-tick file).
+  for (const row of await store.listByKind("goal")) {
+    if (row.id !== "social-daily-pipeline") await store.remove(row.id);
+  }
+}
+
+/** One agent over a fresh D1 with the pipeline goal planted. */
+async function pipelineAgent(sessionStore: unknown) {
+  const env = makeEnv(sessionStore);
+  await plantPipelineGoal(env.AGENT_DB as MockD1Database);
+  const agent = new (ScheduledAgent as any)(makeCtx(), env);
+  return { agent, env };
 }
 
 /** Global fetch stub answering the Threads two-step sequence. */
@@ -152,7 +180,7 @@ describe("onCron pipeline-branch live-transport wiring", () => {
   it("resolves the fetch transport when no transport is injected, and posts live", async () => {
     const session = makeSessionStore();
     await seedBrief(session.namespace, "2026-10-26", "Pipeline brief.");
-    const agent = new (ScheduledAgent as any)(makeCtx([pipelineGoal()]), makeEnv(session.namespace));
+    const agent = (await pipelineAgent(session.namespace)).agent;
     const { stub, calls } = stubThreadsFetch();
     const tick = await agent.onCron(makeEnv(session.namespace));
     expect(tick.jobsCreated).toBe(1);
@@ -169,7 +197,7 @@ describe("onCron pipeline-branch live-transport wiring", () => {
   it("live without a token errors and never touches fetch", async () => {
     const session = makeSessionStore();
     await seedBrief(session.namespace, "2026-10-26", "Pipeline brief.");
-    const agent = new (ScheduledAgent as any)(makeCtx([pipelineGoal()]), makeEnv(session.namespace));
+    const agent = (await pipelineAgent(session.namespace)).agent;
     const { stub } = stubThreadsFetch();
     const env = makeEnv(session.namespace, { THREADS_ACCESS_TOKEN: undefined });
     const tick = await agent.onCron(env);

@@ -38,6 +38,7 @@ import {
   DEFAULT_SCHEDULES,
 } from "../src/schedule";
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
+import { MockD1Database } from "./mock-d1";
 import { resolveScheduleUpdate } from "../src/services/unifiedScheduleManagement";
 import {
   CRON_PRESETS,
@@ -56,6 +57,9 @@ function makeAgent() {
     },
   };
   const env = {
+    // #6503 — goals live in the D1 unified store only (fail-closed
+    // without AGENT_DB); the agent never reads the "goals" KV key.
+    AGENT_DB: new MockD1Database(),
     PAYMENTS_AGENT: {
       idFromName: () => "payments-default",
       get: () => ({ budgetCheck: async () => ({ allowed: true }) }),

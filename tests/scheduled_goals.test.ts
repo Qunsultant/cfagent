@@ -29,6 +29,7 @@ vi.mock("../src/orchestrate", () => ({
 }));
 
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
+import { MockD1Database } from "./mock-d1";
 
 function makeCtx() {
   const store = new Map<string, unknown>();
@@ -48,6 +49,9 @@ function makePayments() {
 
 function makeEnv() {
   return {
+    // #6503 — goals live in the D1 unified store only (fail-closed
+    // without AGENT_DB); the agent never reads the "goals" KV key.
+    AGENT_DB: new MockD1Database(),
     PAYMENTS_AGENT: {
       idFromName: () => "payments-default",
       get: () => makePayments(),

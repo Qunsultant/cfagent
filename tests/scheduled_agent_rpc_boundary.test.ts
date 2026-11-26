@@ -37,13 +37,17 @@ vi.mock("../src/orchestrate", () => ({
 }));
 
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 import { PaymentsAgent } from "../src/agents/payments-agent";
 import { createJob } from "../src/orchestrate";
 import { zonedDateParts } from "../src/schedule";
 
-function makeCtx(initialGoals?: unknown[]) {
+// #6503 — the "goals" KV key is dead: goals live in the D1 unified
+// store only (fail-closed without AGENT_DB). Fixtures plant via D1.
+function makeCtx() {
   const store = new Map<string, unknown>();
-  if (initialGoals) store.set("goals", initialGoals);
   return {
     storage: {
       get: async (k: string) => (store.has(k) ? store.get(k) : undefined),
@@ -78,6 +82,9 @@ function makeSessionStore() {
 
 function makeEnv(sessionNamespace?: any) {
   return {
+    // #6503 — goals live in the D1 unified store only (fail-closed
+    // without AGENT_DB); the tick/trigger resolve the store from env.
+    AGENT_DB: new MockD1Database(),
     PAYMENTS_AGENT: {
       idFromName: () => "payments-default",
       get: () => ({
@@ -91,6 +98,21 @@ function makeEnv(sessionNamespace?: any) {
   } as any;
 }
 
+/** Plant `goals` into `mockD1`, sweeping migration-0092's seeds. */
+async function plantGoals(mockD1: MockD1Database, goals: any[]) {
+  const store = createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules;
+  for (const goal of goals) await store.save(goalToRecord(goal));
+  // The first store op lazily ensures the schema, and migration
+  // 0092's goals seed lands the 9 built-ins. The fixture goals
+  // overwrite same-id seeds (upsert); the other seeds are swept so
+  // the tick sees ONLY the fixture goals (same pattern as the #6503
+  // G3 goals-tick file).
+  const keep = new Set(goals.map((goal) => String(goal.id)));
+  for (const row of await store.listByKind("goal")) {
+    if (!keep.has(row.id)) await store.remove(row.id);
+  }
+}
+
 describe("ScheduledAgent DO RPC boundary (#1391)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -102,7 +124,9 @@ describe("ScheduledAgent DO RPC boundary (#1391)", () => {
   });
 
   it("onCron executes with 0 arguments using this.env", async () => {
-    const ctx = makeCtx([
+    const ctx = makeCtx();
+    const env = makeEnv();
+    await plantGoals(env.AGENT_DB as MockD1Database, [
       {
         id: "daily-qa-sweep",
         name: "Daily QA sweep",
@@ -113,7 +137,6 @@ describe("ScheduledAgent DO RPC boundary (#1391)", () => {
         enabled: true,
       },
     ]);
-    const env = makeEnv();
     const agent = new (ScheduledAgent as any)(ctx, env);
 
     // Call onCron with NO arguments, exactly as the RPC caller does
@@ -145,8 +168,9 @@ describe("ScheduledAgent DO RPC boundary (#1391)", () => {
       enabled: false, // Disabled by default!
     };
 
-    const ctx = makeCtx([disabledSocialGoal]);
+    const ctx = makeCtx();
     const env = makeEnv(ss.namespace);
+    await plantGoals(env.AGENT_DB as MockD1Database, [disabledSocialGoal]);
     const agent = new (ScheduledAgent as any)(ctx, env);
 
     // Call triggerGoal with ONLY the goal id (no env argument!)
@@ -185,7 +209,7 @@ describe("ScheduledAgent DO RPC boundary (#1391)", () => {
       enabled: false,
     };
 
-    const ctx = makeCtx([disabledSocialGoal]);
+    const ctx = makeCtx();
     const paymentsAgent = new (PaymentsAgent as any)(makeCtx(), {
       // Issue #1185: the ledger forward budgetCheck reads requires the
       // configured service identity; without it the check fails closed
@@ -200,6 +224,8 @@ describe("ScheduledAgent DO RPC boundary (#1391)", () => {
     });
 
     const env = {
+      // #6503 — goals live in the D1 unified store only.
+      AGENT_DB: new MockD1Database(),
       PAYMENTS_AGENT: {
         idFromName: () => "default",
         get: () => paymentsAgent,
@@ -209,6 +235,7 @@ describe("ScheduledAgent DO RPC boundary (#1391)", () => {
       SOCIAL_AUTONOMOUS_CHANNELS: "threads",
       THREADS_ACCESS_TOKEN: "valid-threads-token",
     } as any;
+    await plantGoals(env.AGENT_DB as MockD1Database, [disabledSocialGoal]);
 
     const agent = new (ScheduledAgent as any)(ctx, env);
     const tick = await (agent as any).triggerGoal("daily-social-post");
@@ -228,7 +255,7 @@ describe("ScheduledAgent DO RPC boundary (#1391)", () => {
       enabled: true,
     };
 
-    const ctx = makeCtx([disabledGoal]);
+    const ctx = makeCtx();
     const paymentsAgent = new (PaymentsAgent as any)(makeCtx(), {
       ORCHESTRATOR_AGENT: {
         idFromName: () => "orchestrator",
@@ -239,11 +266,14 @@ describe("ScheduledAgent DO RPC boundary (#1391)", () => {
     });
 
     const env = {
+      // #6503 — goals live in the D1 unified store only.
+      AGENT_DB: new MockD1Database(),
       PAYMENTS_AGENT: {
         idFromName: () => "default",
         get: () => paymentsAgent,
       },
     } as any;
+    await plantGoals(env.AGENT_DB as MockD1Database, [disabledGoal]);
 
     const agent = new (ScheduledAgent as any)(ctx, env);
     const tick = await (agent as any).triggerGoal("custom-unallowed-goal");

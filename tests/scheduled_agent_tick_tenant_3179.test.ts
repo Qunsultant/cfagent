@@ -74,6 +74,7 @@ vi.mock("../src/data/createChainSchedulePorts", async (importOriginal) => {
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
 import { compileGoal } from "../src/orchestrate";
 import { projectAfterTransition } from "../src/data/createChainSchedulePorts";
+import { MockD1Database } from "./mock-d1";
 
 const DEPLOY_DEFAULT = "deploy-default-tenant";
 const FALLBACK_EVENT = "scheduledAgent.tick_tenant_env_fallback";
@@ -93,6 +94,10 @@ function makeCtx() {
 
 function makeEnv(extra: Record<string, unknown> = {}) {
   return {
+    // #6503 — the tick's end-of-tick saveGoals resolves the D1
+    // unified store even with preloaded goals (fail-closed without
+    // AGENT_DB).
+    AGENT_DB: new MockD1Database(),
     PAYMENTS_AGENT: {
       idFromName: () => "payments-default",
       get: () => ({

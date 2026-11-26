@@ -106,12 +106,14 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
   // #5160 adds migration 0088 (IDP attributes profile: rebuild + index table): 513 → 519.
   // #6102 adds migration 0089 (mas_events D1 table + 6 indexes): 523 → 530.
   // Issue #6557 adds 6 provenance steps: 530 → 536.
-  // Union: 536.
-    expect(first.summary.totalSteps).toBe(536);
-    expect(first.summary.executed).toBe(536);
+  // #6503 adds migration 0092 (D1 unified_schedules table + 3
+  // indexes + 6 seed entries: 5 system schedules + the 9 built-in
+  // goals): 536 → 546. Union: 546.
+    expect(first.summary.totalSteps).toBe(546);
+    expect(first.summary.executed).toBe(546);
     expect(first.summary.failed).toBe(0);
     expect(first.summary.skipped).toBe(0);
-    expect(first.executed).toHaveLength(536);
+    expect(first.executed).toHaveLength(546);
     expect(first.failed).toEqual([]);
     expect(first.skipped).toEqual([]);
     // Uncreatable layers are deployment facts, not changes: they are
@@ -241,8 +243,8 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
     });
     // The report is truthful: everything before the failing step
     // executed, the failing step is named, everything after it is
-    // skipped — and the three counts sum to the 536 resolved steps.
-    // (#6102 adds migration 0089: 523 → 530; #6557 adds 6: → 536.)
+    // skipped — and the three counts sum to the 546 resolved steps.
+    // (#6102 adds migration 0089: 523 → 530; #6557 adds 6: → 536; #6503 adds migration 0092: 536 → 546.)
     expect(partial.summary.failed).toBe(1);
     expect(partial.failed).toHaveLength(1);
     expect(partial.failed[0].code).toBe(UNIQUE_INDEX_CODE);
@@ -250,8 +252,8 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
       partial.summary.executed +
         partial.summary.failed +
         partial.summary.skipped,
-    ).toBe(536);
-    expect(partial.summary.totalSteps).toBe(536);
+    ).toBe(546);
+    expect(partial.summary.totalSteps).toBe(546);
     // The degradation is VISIBLE, never silent: the post-run equality
     // check fails. The missing indexes are exactly the failed step's
     // index plus the indexes of the skipped steps (the run stopped in

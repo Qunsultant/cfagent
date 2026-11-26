@@ -67,6 +67,42 @@ import {
   resolveScheduleFiringRateAlertWindowMinutes,
 } from "../src/config/scheduleFiringRateAlert";
 import {
+  DEFAULT_GOAL_RUN_JOB_RUN_RECORD_CAP,
+  DEFAULT_GOAL_RUN_TICK_HISTORY_CAP,
+  resolveGoalRunJobRunRecordCap,
+  resolveGoalRunTickHistoryCap,
+} from "../src/config/goalRunRetention";
+import {
+  DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
+  DEFAULT_HEARTBEAT_WATCHDOG_STALE_AFTER_MINUTES,
+  resolveHeartbeatIntervalSecondsFrom,
+  resolveHeartbeatWatchdogConfigFrom,
+  resolveHeartbeatWatchdogStaleAfterMsFrom,
+} from "../src/config/heartbeatWatchdog";
+import {
+  DEFAULT_MISSED_SCHEDULE_GRACE_MINUTES,
+  resolveMissedScheduleGraceMsFrom,
+} from "../src/config/missedScheduleAlert";
+import {
+  parseResearchScheduleUtcHour,
+  resolveResearchJobConfig,
+  resolveResearchScheduleUtcHour,
+} from "../src/config/researchJobConfig";
+import {
+  DEFAULT_SCHEDULE_DUE_GUARD_MS,
+  resolveScheduleDueGuardMs,
+} from "../src/config/scheduleDueGuard";
+import {
+  DEFAULT_STALE_RUNNING_REAP_MS,
+  DEFAULT_STALE_SWEEP_BATCH_LIMIT,
+  resolveStaleAsyncJobReapPolicy,
+} from "../src/config/staleAsyncJobReap";
+import { isDue } from "../src/schedule";
+import {
+  isHeartbeatStale,
+  resolveStaleReapPolicy,
+} from "../src/agents/orchestrator/asyncJobs";
+import {
   SCHEDULE_BELOW_FREQUENCY_FLOOR,
   estimateCronMinGapMinutes,
   isBelowFrequencyFloorError,
@@ -79,6 +115,7 @@ import {
   checkScheduleFiringRate,
   evaluateScheduleFiringRate,
   readScheduleManagedSetting,
+  resolveEffectiveMissedScheduleGrace,
   resolveEffectiveScheduleFiringEnabled,
   resolveEffectiveScheduleFloor,
   resolveScheduleControlsView,
@@ -99,10 +136,14 @@ import {
 import {
   createWorkflowStageSchedule,
   pausedScreenScheduleToRecord,
+  reconcileSystemScheduleRecords,
   resumeUnifiedSchedule,
   updateUnifiedSchedule,
 } from "../src/services/unifiedScheduleManagement";
-import { createUnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { createD1UnifiedSchedulePorts, createUnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { createCommercialAdapter } from "../src/data/createCommercialPorts";
+import { DEFAULT_TENANT_PROVIDERS } from "../src/data/commercialPorts";
+import { resolveIaaaTenant } from "../src/security/iaaaGithubEndToEnd";
 
 /** node:sqlite double for the SqlStorage seam (same shape as #2337). */
 class SqliteTestStorage {
@@ -117,6 +158,63 @@ class SqliteTestStorage {
     }
     stmt.run(...(params as never[]));
     return [];
+  }
+}
+
+/**
+ * Minimal D1Database stand-in over node:sqlite (test-only, same as
+ * slice 1 / tests/d1_unified_schedule_6503.test.ts). #6503 step 6(c):
+ * the schedules routes build the D1 store from ctx.env.AGENT_DB and
+ * refuse fail-closed when it is unbound, so route harnesses bind a
+ * mock D1 here instead of leaving env empty.
+ */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: {
+                changes: info.changes,
+                last_row_id: info.lastInsertRowid,
+              },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+  async batch(statements: any[]) {
+    const results: any[] = [];
+    this.sqlite.exec("BEGIN");
+    try {
+      for (const stmt of statements) {
+        results.push(await stmt.run());
+      }
+      this.sqlite.exec("COMMIT");
+    } catch (err) {
+      this.sqlite.exec("ROLLBACK");
+      throw err;
+    }
+    return results;
   }
 }
 
@@ -550,9 +648,10 @@ describe("6482-P06 the managed controls round-trip through the UX route", () => 
   function makeCtx() {
     const sql = new SqliteTestStorage() as never;
     const schedules = new Map<string, Record<string, unknown>>();
+    const mockD1 = new MockD1Database();
     const audit = vi.fn();
     const ctx: Record<string, unknown> = {
-      env: {},
+      env: { AGENT_DB: mockD1 },
       agentCtx: { storage: { sql } },
       audit,
       listSchedules: async () => [...schedules.values()],
@@ -580,7 +679,29 @@ describe("6482-P06 the managed controls round-trip through the UX route", () => 
       flagAliasKv: stubKv({ [ADMIN_LOGIN]: ADMIN_USER_ID, [PLAIN_LOGIN]: PLAIN_USER_ID }),
       flagMembershipStore: stubMembershipStore([ADMIN_USER_ID]),
     };
-    return { ctx: ctx as never, sql, schedules, audit };
+    return { ctx: ctx as never, sql, schedules, audit, mockD1 };
+  }
+
+  /** Seed the five system rows the way onStart does (#6503 step 7). */
+  async function seedSystemRows(mockD1: MockD1Database, schedules: Map<string, Record<string, unknown>>) {
+    // No userLogin, so the ledger sweep is skipped and exactly the
+    // five render. Fresh seeds are paused, so reconcile arms
+    // nothing; the arm stub throws if that ever changes.
+    const alarms = {
+      list: async () => [...schedules.values()],
+      get: async (id: string) => schedules.get(id),
+      cancel: async (id: string) => schedules.delete(id),
+      arm: async () => {
+        throw new Error("reconcile must not arm on a fresh store");
+      },
+    };
+    await reconcileSystemScheduleRecords(
+      {
+        store: createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules,
+        alarms: alarms as never,
+      },
+      "2026-11-24T00:00:00.000Z",
+    );
   }
 
   function controlsRequest(method: string, body?: unknown, login?: string) {
@@ -595,7 +716,12 @@ describe("6482-P06 the managed controls round-trip through the UX route", () => 
   }
 
   it("GET returns the effective floor (default monthly) + firing on + the inventory, read-only for anonymous callers", async () => {
-    const { ctx } = makeCtx();
+    const { ctx, schedules, mockD1 } = makeCtx();
+    // #6503 step 7 — D1 starts empty: the migration no longer seeds
+    // the five system rows. The onStart reconcile seeds them, and
+    // the list renders paused stored rows — so the inventory is the
+    // five seeds, not empty. Goals are not inventory rows.
+    await seedSystemRows(mockD1, schedules);
     const res = await handleSchedulesRoutes(
       controlsRequest("GET"),
       new URL("https://agent.test/api/schedules/controls"),
@@ -611,7 +737,18 @@ describe("6482-P06 the managed controls round-trip through the UX route", () => 
     expect(body.managedMinIntervalSeconds).toBeNull();
     expect(body.firingEnabled).toBe(true);
     expect(body.canToggle).toBe(false);
-    expect(body.inventory).toEqual([]);
+    const inventory = body.inventory as Array<Record<string, unknown>>;
+    expect(inventory).toHaveLength(5);
+    expect(inventory.map((row) => row.id).sort()).toEqual([
+      "nightly-research",
+      "retention",
+      "schedule-watchdog",
+      "sweep-stale-async-jobs",
+      "token-renewal",
+    ]);
+    for (const row of inventory) {
+      expect(row).toMatchObject({ state: "paused", owner: "system", intervalSeconds: 2_592_000, cron: null });
+    }
     expect(body.firingRate).toMatchObject({ threshold: 120, windowMinutes: 60, exceeded: false });
   });
 
@@ -671,7 +808,7 @@ describe("6482-P06 the managed controls round-trip through the UX route", () => 
   });
 
   it("GET lists the armed-schedule inventory: callback + interval + owner", async () => {
-    const { ctx, schedules } = makeCtx();
+    const { ctx, schedules, mockD1 } = makeCtx();
     // The home list is alarm-driven: the live alarm carries the
     // callback + interval, its payload carries the provenance owner.
     schedules.set("alarm-1", {
@@ -681,6 +818,10 @@ describe("6482-P06 the managed controls round-trip through the UX route", () => 
       intervalSeconds: 2_592_000,
       payload: { provenance: { origin: "user", createdBy: "venus", createdAt: "2026-11-24T00:00:00.000Z" } },
     });
+    // #6503 step 7 — the five paused system rows come from the
+    // onStart reconcile now, not the migration; they render in the
+    // inventory alongside the armed row.
+    await seedSystemRows(mockD1, schedules);
     const res = await handleSchedulesRoutes(
       controlsRequest("GET"),
       new URL("https://agent.test/api/schedules/controls"),
@@ -690,13 +831,153 @@ describe("6482-P06 the managed controls round-trip through the UX route", () => 
     );
     const body = (await res!.json()) as Record<string, unknown>;
     const inventory = body.inventory as Array<Record<string, unknown>>;
-    expect(inventory).toHaveLength(1);
-    expect(inventory[0]).toMatchObject({
+    expect(inventory).toHaveLength(6);
+    const armed = inventory.find((row) => row.id === "alarm-1");
+    expect(armed).toMatchObject({
       id: "alarm-1",
       callback: "autonomousMarketScreen",
       intervalSeconds: 2_592_000,
       owner: "venus",
     });
+  });
+
+  it("GET returns the step-13 defaults for every externalized value (behavior unchanged)", async () => {
+    const { ctx } = makeCtx();
+    const res = await handleSchedulesRoutes(
+      controlsRequest("GET"),
+      new URL("https://agent.test/api/schedules/controls"),
+      "/api/schedules/controls",
+      "s",
+      ctx,
+    );
+    const body = (await res!.json()) as Record<string, unknown>;
+    expect(body.heartbeatIntervalSeconds).toBe(1_800);
+    expect(body.heartbeatIntervalSource).toBe("default");
+    expect(body.heartbeatWatchdogStaleAfterMinutes).toBe(120);
+    expect(body.heartbeatWatchdogStaleAfterSource).toBe("default");
+    expect(body.missedScheduleGraceMinutes).toBe(60);
+    expect(body.missedScheduleGraceSource).toBe("default");
+    expect(body.dueGuardMs).toBe(82_800_000);
+    expect(body.dueGuardSource).toBe("default");
+    expect(body.staleRunningReapMs).toBe(7_200_000);
+    expect(body.staleRunningReapSource).toBe("default");
+    expect(body.staleSweepBatchLimit).toBe(100);
+    expect(body.staleSweepBatchLimitSource).toBe("default");
+    expect(body.researchScheduleUtcHour).toBe(21);
+    expect(body.researchScheduleUtcHourSource).toBe("default");
+    expect(body.jobRunRecordCap).toBe(500);
+    expect(body.jobRunRecordCapSource).toBe("default");
+    expect(body.tickHistoryCap).toBe(50);
+    expect(body.tickHistoryCapSource).toBe("default");
+  });
+
+  it("POST as admin sets the step-13 values; a later GET shows the managed effective values", async () => {
+    const { ctx, audit } = makeCtx();
+    const url = new URL("https://agent.test/api/schedules/controls");
+    const res = await handleSchedulesRoutes(
+      controlsRequest(
+        "POST",
+        {
+          heartbeatIntervalSeconds: 900,
+          heartbeatWatchdogStaleAfterMinutes: 30,
+          missedScheduleGraceMinutes: 5,
+          dueGuardMs: 3_600_000,
+          staleRunningReapMs: 3_600_000,
+          staleSweepBatchLimit: 10,
+          researchScheduleUtcHour: 20,
+          jobRunRecordCap: 100,
+          tickHistoryCap: 25,
+        },
+        ADMIN_LOGIN,
+      ),
+      url,
+      "/api/schedules/controls",
+      "s",
+      ctx,
+    );
+    expect(res!.status).toBe(200);
+    const body = (await res!.json()) as Record<string, unknown>;
+    expect(body.heartbeatIntervalSeconds).toBe(900);
+    expect(body.heartbeatIntervalSource).toBe("managed");
+    expect(body.heartbeatWatchdogStaleAfterMinutes).toBe(30);
+    expect(body.heartbeatWatchdogStaleAfterSource).toBe("managed");
+    expect(body.missedScheduleGraceMinutes).toBe(5);
+    expect(body.missedScheduleGraceSource).toBe("managed");
+    expect(body.dueGuardMs).toBe(3_600_000);
+    expect(body.dueGuardSource).toBe("managed");
+    expect(body.staleRunningReapMs).toBe(3_600_000);
+    expect(body.staleRunningReapSource).toBe("managed");
+    expect(body.staleSweepBatchLimit).toBe(10);
+    expect(body.staleSweepBatchLimitSource).toBe("managed");
+    expect(body.researchScheduleUtcHour).toBe(20);
+    expect(body.researchScheduleUtcHourSource).toBe("managed");
+    expect(body.jobRunRecordCap).toBe(100);
+    expect(body.jobRunRecordCapSource).toBe("managed");
+    expect(body.tickHistoryCap).toBe(25);
+    expect(body.tickHistoryCapSource).toBe("managed");
+    expect(audit).toHaveBeenCalledWith(
+      "schedule.controls-changed",
+      "orchestrator",
+      expect.objectContaining({ missedScheduleGraceMinutes: 5, dueGuardMs: 3_600_000, changedBy: ADMIN_LOGIN }),
+    );
+    const again = await handleSchedulesRoutes(controlsRequest("GET"), url, "/api/schedules/controls", "s", ctx);
+    const againBody = (await again!.json()) as Record<string, unknown>;
+    expect(againBody.missedScheduleGraceMinutes).toBe(5);
+    expect(againBody.managedMissedScheduleGraceMinutes).toBe(5);
+    expect(againBody.researchScheduleUtcHour).toBe(20);
+    expect(againBody.jobRunRecordCap).toBe(100);
+  });
+
+  it("POST as admin can set the grace to 0 (disabled) and clear it back to the default", async () => {
+    const { ctx } = makeCtx();
+    const url = new URL("https://agent.test/api/schedules/controls");
+    const disabled = await handleSchedulesRoutes(
+      controlsRequest("POST", { missedScheduleGraceMinutes: 0 }, ADMIN_LOGIN),
+      url,
+      "/api/schedules/controls",
+      "s",
+      ctx,
+    );
+    expect(disabled!.status).toBe(200);
+    const disabledBody = (await disabled!.json()) as Record<string, unknown>;
+    expect(disabledBody.missedScheduleGraceMinutes).toBe(0);
+    expect(disabledBody.missedScheduleGraceSource).toBe("managed");
+    const cleared = await handleSchedulesRoutes(
+      controlsRequest("POST", { missedScheduleGraceMinutes: null }, ADMIN_LOGIN),
+      url,
+      "/api/schedules/controls",
+      "s",
+      ctx,
+    );
+    const clearedBody = (await cleared!.json()) as Record<string, unknown>;
+    expect(clearedBody.missedScheduleGraceMinutes).toBe(60);
+    expect(clearedBody.missedScheduleGraceSource).toBe("default");
+  });
+
+  it("POST refuses an invalid step-13 value and writes nothing", async () => {
+    const { ctx } = makeCtx();
+    const url = new URL("https://agent.test/api/schedules/controls");
+    for (const bad of [
+      { heartbeatIntervalSeconds: 0 },
+      { heartbeatWatchdogStaleAfterMinutes: -1 },
+      { missedScheduleGraceMinutes: "soon" },
+      { dueGuardMs: 0 },
+      { dueGuardMs: 61.5 },
+      { staleRunningReapMs: -100 },
+      { staleSweepBatchLimit: 0 },
+      { researchScheduleUtcHour: 24 },
+      { researchScheduleUtcHour: -1 },
+      { jobRunRecordCap: 0 },
+      { tickHistoryCap: "many" },
+    ]) {
+      const res = await handleSchedulesRoutes(controlsRequest("POST", bad, ADMIN_LOGIN), url, "/api/schedules/controls", "s", ctx);
+      expect(res!.status).toBe(400);
+    }
+    const body = (await (await handleSchedulesRoutes(controlsRequest("GET"), url, "/api/schedules/controls", "s", ctx))!.json()) as Record<string, unknown>;
+    expect(body.missedScheduleGraceMinutes).toBe(60);
+    expect(body.dueGuardMs).toBe(82_800_000);
+    expect(body.researchScheduleUtcHour).toBe(21);
+    expect(body.jobRunRecordCap).toBe(500);
   });
 });
 
@@ -868,8 +1149,9 @@ describe("6482-P10 the REST create route refuses a 1s arm even with subDailyOptI
         { broker: "etrade", mode: "paper", accountType: "options", scope: "tenant", accountId: "ET-123" },
       ]),
     );
+    const mockD1 = new MockD1Database();
     const ctx: Record<string, unknown> = {
-      env: { APP_ENV: "TEST", SESSION_STORE: sessionStoreNs },
+      env: { APP_ENV: "TEST", SESSION_STORE: sessionStoreNs, AGENT_DB: mockD1 },
       agentCtx: { storage: { sql } },
       audit: vi.fn(),
       listSchedules: async () => [...schedules.values()],
@@ -893,7 +1175,37 @@ describe("6482-P10 the REST create route refuses a 1s arm even with subDailyOptI
       accountScopedScheduleCallbacks: new Set(["autonomousOptionsAnalysis", "autonomousMarketScreen", "autonomousStrategyDiscovery"]),
       runScheduleCallback: async () => {},
     };
-    return { ctx: ctx as never, sql, scheduleEveryCalls, scheduleCalls };
+    return { ctx: ctx as never, sql, scheduleEveryCalls, scheduleCalls, mockD1 };
+  }
+
+  /**
+   * #6503 step 6(c): binding AGENT_DB switches the commercial read
+   * to the D1 adapter, so the tenant broker selection must be
+   * configured in the store the code now reads. Before 6(c) the
+   * read failed (store_unavailable) and the route took the legacy
+   * E*TRADE bootstrap leg; after the first submit applies the D1
+   * migrations the read succeeds-but-empty and the tenant falls to
+   * the default broker (alpaca), which refuses the second submit
+   * with a 409. Seeding etrade as the tenant's broker selection —
+   * the data-provider axis stays at the vocabulary default — keeps
+   * both submits on the E*TRADE preflight the harness seeds tokens
+   * for. Applies the D1 schema first (the store's lazy ensure).
+   */
+  async function seedEtradeBroker(mockD1: MockD1Database) {
+    await createD1UnifiedSchedulePorts({
+      d1: mockD1 as unknown as D1Database,
+    }).unifiedSchedules.list();
+    const commercial = createCommercialAdapter({ AGENT_DB: mockD1 as never });
+    await commercial?.setTenantProviders(resolveIaaaTenant({}), {
+      brokerId: "etrade",
+      dataProviderId: DEFAULT_TENANT_PROVIDERS.dataProviderId,
+    });
+  }
+
+  function d1Store(mockD1: MockD1Database) {
+    return createD1UnifiedSchedulePorts({
+      d1: mockD1 as unknown as D1Database,
+    }).unifiedSchedules;
   }
 
   async function postCreate(ctx: never, body: Record<string, unknown>) {
@@ -958,7 +1270,8 @@ describe("6482-P10 the REST create route refuses a 1s arm even with subDailyOptI
 
   it("a monthly create lands PAUSED: 200, a paused record, and the SDK is never armed", async () => {
     const sql = new SqliteTestStorage();
-    const { ctx, scheduleEveryCalls, scheduleCalls } = makeCtx(sql as never);
+    const { ctx, scheduleEveryCalls, scheduleCalls, mockD1 } = makeCtx(sql as never);
+    await seedEtradeBroker(mockD1);
     const { status, body } = await postCreate(ctx, {
       scheduleType: "interval",
       intervalSeconds: 2_592_000,
@@ -974,8 +1287,9 @@ describe("6482-P10 the REST create route refuses a 1s arm even with subDailyOptI
     const record = (body.schedule ?? {}) as Record<string, unknown>;
     expect(typeof record.id).toBe("string");
     expect(record.state).toBe("paused");
-    const stored = createUnifiedSchedulePorts({ sql: sql as never, storage: { sql } as never }).unifiedSchedulesSync;
-    const saved = stored.get(record.id as string);
+    // #6503 step 6(c): the route writes the D1 store, so the
+    // read-back reads the same D1 mock — not the DO sync store.
+    const saved = await d1Store(mockD1).get(record.id as string);
     expect(saved?.state).toBe("paused");
     expect(saved?.alarmId ?? null).toBeNull();
     expect((saved?.definition as Record<string, unknown>).intervalSeconds).toBe(2_592_000);
@@ -983,7 +1297,8 @@ describe("6482-P10 the REST create route refuses a 1s arm even with subDailyOptI
 
   it("a duplicate monthly submit returns the SAME paused record (no second row, no arm)", async () => {
     const sql = new SqliteTestStorage();
-    const { ctx, scheduleEveryCalls } = makeCtx(sql as never);
+    const { ctx, scheduleEveryCalls, mockD1 } = makeCtx(sql as never);
+    await seedEtradeBroker(mockD1);
     const payload = {
       scheduleType: "interval",
       intervalSeconds: 2_592_000,
@@ -999,8 +1314,15 @@ describe("6482-P10 the REST create route refuses a 1s arm even with subDailyOptI
       (first.body.schedule as Record<string, unknown>).id,
     );
     expect(scheduleEveryCalls).toHaveLength(0);
-    const stored = createUnifiedSchedulePorts({ sql: sql as never, storage: { sql } as never }).unifiedSchedulesSync;
-    expect(stored.list()).toHaveLength(1);
+    // #6503 step 6(c): the route writes the D1 store, so the
+    // read-back reads the same D1 mock — not the DO sync store.
+    // #6503 step 7: migration 0092 seeds only the 9 goal rows now
+    // (the five system seeds moved to the onStart reconcile), so
+    // the store holds 10 with the created row — and the created id
+    // appears exactly once, which is the no-second-row assertion.
+    const rows = await d1Store(mockD1).list();
+    expect(rows).toHaveLength(10);
+    expect(rows.filter((row) => row.id === (first.body.schedule as Record<string, unknown>).id)).toHaveLength(1);
   });
 });
 
@@ -1233,5 +1555,122 @@ describe("6482-P13 resume is the only activation", () => {
     expect(updated.record.state).toBe("paused");
     expect((updated.record.definition as Record<string, unknown>).intervalSeconds).toBe(5_184_000);
     expect(scheduling.armed).toHaveLength(0);
+  });
+});
+
+describe("6503-S13 the remaining hardcoded scheduling values are externalized (managed > env > default)", () => {
+  it("heartbeat: defaults are 1800s / 120 minutes; managed wins over env, env over default; invalid falls through", () => {
+    expect(DEFAULT_HEARTBEAT_INTERVAL_SECONDS).toBe(1_800);
+    expect(DEFAULT_HEARTBEAT_WATCHDOG_STALE_AFTER_MINUTES).toBe(120);
+    expect(resolveHeartbeatIntervalSecondsFrom({})).toBe(1_800);
+    expect(resolveHeartbeatWatchdogStaleAfterMsFrom({})).toBe(120 * 60 * 1000);
+    expect(resolveHeartbeatIntervalSecondsFrom({ managed: "900", env: "600" })).toBe(900);
+    expect(resolveHeartbeatIntervalSecondsFrom({ env: "600" })).toBe(600);
+    expect(resolveHeartbeatIntervalSecondsFrom({ managed: "soon", env: "600" })).toBe(600);
+    expect(resolveHeartbeatIntervalSecondsFrom({ managed: "0", env: "600" })).toBe(600);
+    expect(resolveHeartbeatWatchdogStaleAfterMsFrom({ managed: "30", env: "60" })).toBe(30 * 60 * 1000);
+    expect(resolveHeartbeatWatchdogStaleAfterMsFrom({ managed: "0" })).toBe(120 * 60 * 1000);
+  });
+
+  it("step-12 staleness threshold is reachable as a managed setting through the heartbeat config", () => {
+    const config = resolveHeartbeatWatchdogConfigFrom({
+      managedStaleAfterMinutes: "30",
+      envStaleAfterMinutes: "60",
+    });
+    expect(config.staleAfterMs).toBe(30 * 60 * 1000);
+    expect(config.intervalSeconds).toBe(1_800);
+    expect(
+      resolveHeartbeatWatchdogConfigFrom({ envStaleAfterMinutes: "45" }).staleAfterMs,
+    ).toBe(45 * 60 * 1000);
+  });
+
+  it("grace: default is 60 minutes; managed 0 disables; invalid falls through; the managed resolver reads the store", () => {
+    expect(DEFAULT_MISSED_SCHEDULE_GRACE_MINUTES).toBe(60);
+    expect(resolveMissedScheduleGraceMsFrom({})).toBe(60 * 60 * 1000);
+    expect(resolveMissedScheduleGraceMsFrom({ managed: "0" })).toBe(0);
+    expect(resolveMissedScheduleGraceMsFrom({ managed: "0", env: "30" })).toBe(0);
+    expect(resolveMissedScheduleGraceMsFrom({ managed: "soon", env: "30" })).toBe(30 * 60 * 1000);
+    expect(resolveMissedScheduleGraceMsFrom({ env: "0.5" })).toBe(30 * 1000);
+    const sql = new SqliteTestStorage();
+    expect(resolveEffectiveMissedScheduleGrace(sql.sql as never, {}).ms).toBe(60 * 60 * 1000);
+    writeScheduleManagedSetting(sql.sql as never, "schedule.missedScheduleGraceMinutes", "5");
+    const resolved = resolveEffectiveMissedScheduleGrace(sql.sql as never, {});
+    expect(resolved.ms).toBe(5 * 60 * 1000);
+    expect(resolved.source).toBe("managed");
+  });
+
+  it("due guard: default is 23h; managed wins over env; isDue honors the default and an override", () => {
+    expect(DEFAULT_SCHEDULE_DUE_GUARD_MS).toBe(23 * 60 * 60 * 1000);
+    expect(resolveScheduleDueGuardMs({})).toBe(23 * 60 * 60 * 1000);
+    expect(resolveScheduleDueGuardMs({ managed: "3600000", env: "7200000" })).toBe(3_600_000);
+    expect(resolveScheduleDueGuardMs({ env: "7200000" })).toBe(7_200_000);
+    expect(resolveScheduleDueGuardMs({ managed: "0" })).toBe(23 * 60 * 60 * 1000);
+    const now = new Date("2026-11-25T12:00:00.000Z");
+    const last22h = new Date(now.getTime() - 22 * 60 * 60 * 1000).toISOString();
+    const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    // Daily cron, last run 22h ago: the default 23h guard blocks; 24h ago it fires.
+    expect(isDue("0 12 * * *", last22h, now)).toBe(false);
+    expect(isDue("0 12 * * *", last24h, now)).toBe(true);
+    // The same 22h-old run fires with a 1h guard override — the seam works, the default does not move.
+    expect(isDue("0 12 * * *", last22h, now, undefined, { dueGuardMs: 60 * 60 * 1000 })).toBe(true);
+    expect(isDue("0 12 * * *", last22h, now, undefined, { dueGuardMs: 0 })).toBe(false);
+  });
+
+  it("reap: defaults are 2h / 100 rows; managed (via the context reader) wins over env, env over default", () => {
+    expect(DEFAULT_STALE_RUNNING_REAP_MS).toBe(2 * 60 * 60 * 1000);
+    expect(DEFAULT_STALE_SWEEP_BATCH_LIMIT).toBe(100);
+    expect(resolveStaleAsyncJobReapPolicy({})).toEqual({ reapMs: 7_200_000, batchLimit: 100 });
+    expect(
+      resolveStaleAsyncJobReapPolicy({ managedReapMs: "60000", envReapMs: "120000" }),
+    ).toEqual({ reapMs: 60_000, batchLimit: 100 });
+    expect(
+      resolveStaleAsyncJobReapPolicy({ managedReapMs: "soon", envReapMs: "120000" }),
+    ).toEqual({ reapMs: 120_000, batchLimit: 100 });
+    const ctx = {
+      readSettingRaw: (key: string) =>
+        key === "asyncJob.staleRunningReapMs" ? "60000" : key === "asyncJob.staleSweepBatchLimit" ? "7" : null,
+      env: {},
+    };
+    expect(resolveStaleReapPolicy(ctx as never)).toEqual({ reapMs: 60_000, batchLimit: 7 });
+    expect(resolveStaleReapPolicy({ env: { ASYNC_JOB_STALE_RUNNING_REAP_MS: "300000" } } as never)).toEqual({
+      reapMs: 300_000,
+      batchLimit: 100,
+    });
+    expect(resolveStaleReapPolicy({ env: {} } as never)).toEqual({ reapMs: 7_200_000, batchLimit: 100 });
+  });
+
+  it("reap: isHeartbeatStale honors a custom backstop for pre-heartbeat rows and keeps the default", () => {
+    const nowMs = Date.parse("2026-11-25T12:00:00.000Z");
+    const started3h = new Date(nowMs - 3 * 60 * 60 * 1000).toISOString();
+    const legacy = { last_activity_at: null, started_at: started3h };
+    expect(isHeartbeatStale(legacy, nowMs)).toBe(true);
+    expect(isHeartbeatStale(legacy, nowMs, 4 * 60 * 60 * 1000)).toBe(false);
+    expect(isHeartbeatStale(legacy, nowMs, 60 * 60 * 1000)).toBe(true);
+  });
+
+  it("research hour: default is 21 UTC; managed wins; env keeps its clamping; invalid managed falls through", () => {
+    expect(resolveResearchScheduleUtcHour({})).toBe(21);
+    expect(resolveResearchScheduleUtcHour({ managed: "20", env: "22" })).toBe(20);
+    expect(resolveResearchScheduleUtcHour({ env: "22" })).toBe(22);
+    expect(resolveResearchScheduleUtcHour({ env: "25" })).toBe(23);
+    expect(resolveResearchScheduleUtcHour({ managed: "25", env: "22" })).toBe(22);
+    expect(resolveResearchScheduleUtcHour({ managed: "soon" })).toBe(21);
+    expect(parseResearchScheduleUtcHour(24)).toBeUndefined();
+    expect(parseResearchScheduleUtcHour(-1)).toBeUndefined();
+    expect(resolveResearchJobConfig({}, { scheduleUtcHour: "20" }).scheduleUtcHour).toBe(20);
+    expect(resolveResearchJobConfig({ RESEARCH_SCHEDULE_UTC_HOUR: "22" }).scheduleUtcHour).toBe(22);
+    expect(resolveResearchJobConfig({}).scheduleUtcHour).toBe(21);
+  });
+
+  it("retention: defaults are 500 records / 50 ticks; managed wins over env, env over default", () => {
+    expect(DEFAULT_GOAL_RUN_JOB_RUN_RECORD_CAP).toBe(500);
+    expect(DEFAULT_GOAL_RUN_TICK_HISTORY_CAP).toBe(50);
+    expect(resolveGoalRunJobRunRecordCap({})).toBe(500);
+    expect(resolveGoalRunTickHistoryCap({})).toBe(50);
+    expect(resolveGoalRunJobRunRecordCap({ managed: "100", env: "200" })).toBe(100);
+    expect(resolveGoalRunJobRunRecordCap({ env: "200" })).toBe(200);
+    expect(resolveGoalRunJobRunRecordCap({ managed: "0" })).toBe(500);
+    expect(resolveGoalRunTickHistoryCap({ managed: "25", env: "40" })).toBe(25);
+    expect(resolveGoalRunTickHistoryCap({ managed: "soon", env: "40" })).toBe(40);
   });
 });

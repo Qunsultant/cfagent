@@ -6174,6 +6174,71 @@
         }
       ],
       "constraints": {}
+    },
+    "unified_schedules": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "callback",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "operation",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "definition_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "owner_login",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "provenance_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "alarm_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "paused_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
     }
   },
   "indexes": {
@@ -6796,6 +6861,32 @@
       "table": "mas_events",
       "columns": [
         "correlation_id"
+      ],
+      "unique": false
+    },
+    "unified_schedules_kind_idx": {
+      "table": "unified_schedules",
+      "columns": [
+        "kind",
+        "created_at ASC",
+        "id ASC"
+      ],
+      "unique": false
+    },
+    "unified_schedules_state_idx": {
+      "table": "unified_schedules",
+      "columns": [
+        "state",
+        "created_at ASC",
+        "id ASC"
+      ],
+      "unique": false
+    },
+    "unified_schedules_created_idx": {
+      "table": "unified_schedules",
+      "columns": [
+        "created_at ASC",
+        "id ASC"
       ],
       "unique": false
     }

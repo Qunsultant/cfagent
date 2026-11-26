@@ -98,6 +98,9 @@ vi.mock("../src/security/etradeOAuth", () => ({
 
 import { createJob } from "../src/orchestrate";
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 import {
   buildJobRunRecord,
   normalizeJobRunRecord,
@@ -178,13 +181,28 @@ function makeCtx(initialGoals?: any[]) {
   };
 }
 
-function makeEnv() {
+/**
+ * Issue #6503 — the fixture goal is planted in the D1 schedule
+ * store, not the DO KV "goals" key (which the agent no longer
+ * reads). Planting exactly one goal keeps each tick isolated: an
+ * empty store would re-seed all nine built-in goals. Same pattern
+ * as tests/index_list_goals_scheduled_1980.test.ts.
+ */
+async function plantGoals(mockD1: MockD1Database, goals: Array<Record<string, unknown>>) {
+  const store = createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules;
+  for (const goal of goals) {
+    await store.save(goalToRecord(goal as never));
+  }
+}
+
+function makeEnv(mockD1?: MockD1Database) {
   return {
     PAYMENTS_AGENT: {
       idFromName: () => "default",
       get: () => ({ budgetCheck: async () => ({ allowed: true }) }),
     },
     SESSION_STORE: null,
+    ...(mockD1 ? { AGENT_DB: mockD1 } : {}),
   };
 }
 
@@ -511,8 +529,10 @@ describe("S1-P05 write site — SDK firings and manual triggers (#3121)", () => 
 describe("S1-P06 write site — tick evaluations (#3121)", () => {
   it("a fired goal records scheduleId = goal id, trigger scheduled, asyncJobId = created job", async () => {
     vi.setSystemTime(new Date("2026-11-03T06:00:00Z"));
-    const ctx = makeCtx([testGoal()]);
-    const env = makeEnv();
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [testGoal()]);
+    const ctx = makeCtx();
+    const env = makeEnv(mockD1);
     const agent = new ScheduledAgent(ctx as never, env as never);
     await agent.onCron(env as never, { halted: false } as never);
     const runs = await agent.listJobRuns("test-goal");
@@ -528,8 +548,10 @@ describe("S1-P06 write site — tick evaluations (#3121)", () => {
 
   it("triggerGoal records trigger manual with the goal id and the created job", async () => {
     vi.setSystemTime(new Date("2026-11-03T06:00:00Z"));
-    const ctx = makeCtx([testGoal()]);
-    const env = makeEnv();
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [testGoal()]);
+    const ctx = makeCtx();
+    const env = makeEnv(mockD1);
     const agent = new ScheduledAgent(ctx as never, env as never);
     await agent.triggerGoal("test-goal");
     const latest = await agent.getLatestJobRun("test-goal");
@@ -1034,8 +1056,10 @@ describe("S1-P15 joinability — correlation ID (#3121, owner decision 665935204
 
   it("a goal firing joins to its goal, its async job, and (by null) no workflow", async () => {
     vi.setSystemTime(new Date("2026-11-03T06:00:00Z"));
-    const ctx = makeCtx([testGoal()]);
-    const env = makeEnv();
+    const mockD1 = new MockD1Database();
+    await plantGoals(mockD1, [testGoal()]);
+    const ctx = makeCtx();
+    const env = makeEnv(mockD1);
     const agent = new ScheduledAgent(ctx as never, env as never);
     await agent.onCron(env as never, { halted: false } as never);
     const [run] = await agent.listJobRuns("test-goal");

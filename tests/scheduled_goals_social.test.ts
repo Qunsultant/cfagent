@@ -33,6 +33,9 @@ vi.mock("../src/orchestrate", () => ({
 }));
 
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
+import { MockD1Database } from "./mock-d1";
+import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 import { createJob } from "../src/orchestrate";
 import { createSessionStoreSocialLedger, createSessionStorePendingApprovalStore } from "../src/agents/social/durableStores";
 import { approveDraft } from "../src/agents/social/approvals";
@@ -55,9 +58,10 @@ function socialGoal(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeCtx(initialGoals?: unknown[]) {
+// #6503 — the "goals" KV key is dead: goals live in the D1 unified
+// store only (fail-closed without AGENT_DB). Fixtures plant via D1.
+function makeCtx() {
   const store = new Map<string, unknown>();
-  if (initialGoals) store.set("goals", initialGoals);
   return {
     storage: {
       get: async (k: string) => (store.has(k) ? store.get(k) : undefined),
@@ -106,6 +110,9 @@ function makeSessionStore() {
 
 function makeEnv(sessionStore?: unknown, extra: Record<string, unknown> = {}) {
   return {
+    // #6503 — goals live in the D1 unified store only (fail-closed
+    // without AGENT_DB); the agent never reads the "goals" KV key.
+    AGENT_DB: new MockD1Database(),
     PAYMENTS_AGENT: { idFromName: () => "payments-default", get: () => makePayments() },
     SESSION_STORE: sessionStore,
     SOCIAL_POSTING_ENABLED: "1",
@@ -123,10 +130,33 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** Plant `goals` into `mockD1`, sweeping migration-0092's seeds. */
+async function plantGoals(mockD1: MockD1Database, goals: any[]) {
+  const store = createD1UnifiedSchedulePorts({ d1: mockD1 as never }).unifiedSchedules;
+  for (const goal of goals) await store.save(goalToRecord(goal));
+  // The first store op lazily ensures the schema, and migration
+  // 0092's goals seed lands the 9 built-ins — with daily-social-post
+  // PAUSED (config enabled: false). The fixture enables it; the other
+  // eight are swept so the tick sees ONLY the fixture goals (same
+  // pattern as the #6503 G3 goals-tick file).
+  const keep = new Set(goals.map((goal) => String(goal.id)));
+  for (const row of await store.listByKind("goal")) {
+    if (!keep.has(row.id)) await store.remove(row.id);
+  }
+}
+
+/** One agent over a fresh D1 with `goals` planted. */
+async function plantedAgent(goals: any[], sessionStore: unknown) {
+  const env = makeEnv(sessionStore);
+  await plantGoals(env.AGENT_DB as MockD1Database, goals);
+  const agent = new (ScheduledAgent as any)(makeCtx(), env);
+  return { agent, env };
+}
+
 describe("onCron social.publish goals", () => {
   it("fires a due social goal through the executor with durable stores, never createJob", async () => {
     const session = makeSessionStore();
-    const agent = new (ScheduledAgent as any)(makeCtx([socialGoal()]), makeEnv(session.namespace));
+    const agent = (await plantedAgent([socialGoal()], session.namespace)).agent;
     const sink = createMemoryDryRunSink();
     const tick = await agent.onCron(makeEnv(session.namespace), {
       socialBriefProvider: () => "Morning brief.",
@@ -147,7 +177,7 @@ describe("onCron social.publish goals", () => {
 
   it("leaves lastRun untouched on noBrief, so the goal stays due and retries", async () => {
     const session = makeSessionStore();
-    const agent = new (ScheduledAgent as any)(makeCtx([socialGoal()]), makeEnv(session.namespace));
+    const agent = (await plantedAgent([socialGoal()], session.namespace)).agent;
     const first = await agent.onCron(makeEnv(session.namespace), { socialBriefProvider: () => null });
     expect(first.jobsCreated).toBe(0);
     expect(first.jobsSkipped).toBe(1);
@@ -160,7 +190,7 @@ describe("onCron social.publish goals", () => {
 
   it("records an executor error and leaves the goal due", async () => {
     const session = makeSessionStore();
-    const agent = new (ScheduledAgent as any)(makeCtx([socialGoal()]), makeEnv(session.namespace));
+    const agent = (await plantedAgent([socialGoal()], session.namespace)).agent;
     const tick = await agent.onCron(makeEnv(session.namespace), {
       socialBriefProvider: () => {
         throw new Error("brief exploded");
@@ -173,7 +203,7 @@ describe("onCron social.publish goals", () => {
 
   it("approval end-to-end across two invocations with durable stores", async () => {
     const session = makeSessionStore();
-    const agent = new (ScheduledAgent as any)(makeCtx([socialGoal()]), makeEnv(session.namespace));
+    const agent = (await plantedAgent([socialGoal()], session.namespace)).agent;
     const sink = createMemoryDryRunSink();
     const opts = { socialBriefProvider: () => "Morning brief.", socialDryRunSink: sink };
     await agent.onCron(makeEnv(session.namespace), opts);
@@ -188,6 +218,10 @@ describe("onCron social.publish goals", () => {
     // draft itself is what must not republish).
     const goals = await agent.listGoals();
     goals[0].lastRun = undefined;
+    // #6503 — listGoals returns fresh objects deserialized from D1,
+    // so the mutation above touches only the copy: persist it with
+    // the no-snapshot saveGoals (re-list + diff + save the change).
+    await (agent as any).saveGoals(goals);
     const second = await agent.onCron(makeEnv(session.namespace), opts);
     expect(second.jobsCreated).toBe(1);
     expect(JSON.parse(session.rawGet("social-draft:2026-10-26:facebook")!).status).toBe("dry-run-posted");
@@ -198,7 +232,7 @@ describe("onCron social.publish goals", () => {
   it("does not fire a weekday goal on Saturday", async () => {
     vi.setSystemTime(new Date(SAT_0900));
     const session = makeSessionStore();
-    const agent = new (ScheduledAgent as any)(makeCtx([socialGoal()]), makeEnv(session.namespace));
+    const agent = (await plantedAgent([socialGoal()], session.namespace)).agent;
     const tick = await agent.onCron(makeEnv(session.namespace), {
       socialBriefProvider: () => "Morning brief.",
     });
@@ -208,7 +242,7 @@ describe("onCron social.publish goals", () => {
   });
 
   it("fails closed without a SESSION_STORE binding, goal left due", async () => {
-    const agent = new (ScheduledAgent as any)(makeCtx([socialGoal()]), makeEnv(undefined));
+    const { agent } = await plantedAgent([socialGoal()], undefined);
     const envWithoutStore = makeEnv(undefined);
     delete envWithoutStore.SESSION_STORE;
     const tick = await agent.onCron(envWithoutStore, { socialBriefProvider: () => "Morning brief." });
@@ -227,9 +261,9 @@ describe("onCron social.publish goals", () => {
       budgetCents: 100,
       enabled: true,
     };
-    const agent = new (ScheduledAgent as any)(
-      makeCtx([searchGoal, socialGoal({ enabled: false })]),
-      makeEnv(session.namespace),
+    const { agent } = await plantedAgent(
+      [searchGoal, socialGoal({ enabled: false })],
+      session.namespace,
     );
     const tick = await agent.onCron(makeEnv(session.namespace), {
       socialBriefProvider: () => "Morning brief.",

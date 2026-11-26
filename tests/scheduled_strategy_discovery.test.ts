@@ -62,6 +62,7 @@ import {
   createD1AuditEventDb,
   D1AuditEventStore,
 } from "../src/data/d1AuditEventAdapter";
+import { createD1CommercialDb, ensureCommercialSchema } from "../src/data/d1CommercialAdapter";
 import type { Env, ETradeOptionChain } from "../src/types";
 import type { StrategyRequest } from "../src/trading/options/strategyEngine";
 
@@ -751,7 +752,7 @@ describe("POST /api/schedules/create with autonomousStrategyDiscovery (#126)", (
   });
   let scheduleEveryCalls: any[];
 
-  function makeAgent() {
+  async function makeAgent() {
     const sql = new MockSqlStorage();
     const ctx = {
       storage: { sql },
@@ -782,7 +783,23 @@ describe("POST /api/schedules/create with autonomousStrategyDiscovery (#126)", (
     agent.env = {
       APP_ENV: "TEST",
       SESSION_STORE: sessionStoreNs,
+      // Issue #6503 — the unified store is D1 only (fail-closed):
+      // without a bound AGENT_DB the create route answers 503
+      // "Scheduling unavailable". Same seeding as
+      // tests/schedules_create_route.test.ts: binding AGENT_DB
+      // switches the commercial read to the D1 adapter, so seed
+      // the tenant's broker selection as etrade (tenant
+      // "primary", the IAAA default) or creation refuses 409
+      // for want of an Alpaca credential.
+      AGENT_DB: new MockD1Database(),
     } as any;
+    const d1 = agent.env.AGENT_DB as MockD1Database;
+    await ensureCommercialSchema(createD1CommercialDb(d1 as never));
+    d1.sqlite
+      .prepare(
+        "INSERT OR REPLACE INTO agent_tenant_settings (tenant_id, ads_enabled, updated_at_ms, broker_id) VALUES ('primary', 0, ?, 'etrade')",
+      )
+      .run(Date.now());
     agent.schedule = async (when: any, callback: string, payload: any, options: any) => {
       return { id: "real-schedule-1", callback, payload };
     };
@@ -809,7 +826,7 @@ describe("POST /api/schedules/create with autonomousStrategyDiscovery (#126)", (
   });
 
   it("accepts the discovery callback and stamps the trusted identity onto the payload", async () => {
-    const agent = makeAgent();
+    const agent = await makeAgent();
     const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
       // Issue #6482 — a monthly cadence (2,592,000s): creation
@@ -840,7 +857,7 @@ describe("POST /api/schedules/create with autonomousStrategyDiscovery (#126)", (
     ["an empty requests list", { requests: [] }],
     ["a malformed saved request", { requests: [{ symbol: "NVDA" }] }],
   ])("rejects a discovery payload with %s (400, no schedule created)", async (_label, payload) => {
-    const agent = makeAgent();
+    const agent = await makeAgent();
     const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
       // Issue #6482 — a monthly cadence: the 400 under test comes
@@ -857,7 +874,7 @@ describe("POST /api/schedules/create with autonomousStrategyDiscovery (#126)", (
   });
 
   it("still rejects an internal-only callback with 400", async () => {
-    const agent = makeAgent();
+    const agent = await makeAgent();
     const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
       intervalSeconds: 300,
