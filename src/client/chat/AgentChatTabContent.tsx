@@ -25,7 +25,14 @@ import {
   useChatComposerVoice,
 } from "./ChatComposerVoiceControl";
 import { createVoiceBackend } from "../voiceBackend";
-import { findCopilot, getRegisteredCopilots, hasCustomSurface, isRegisteredCopilotId } from "./copilotRegistry";
+import {
+  findCopilot,
+  getRegisteredCopilots,
+  hasCustomSurface,
+  isRegisteredCopilotId,
+  type CopilotConfig,
+} from "./copilotRegistry";
+import { SchedulerCopilotSurface } from "./SchedulerCopilotSurface";
 // Fluent v9 replaces our primitives on this page only (#3146 experiment).
 // Measured gaps vs our primitives: no danger button (secondary used),
 // no tone system (chips collapse to subtle), no strip/box Notice variant.
@@ -60,10 +67,48 @@ const surfaceStyles = {
   chatPane: "ui-chat-chat-pane",
   fullChatArea: "ui-chat-full-area",
 };
-export type ChatSubView = "general" | "options" | "stock" | (string & {});
+export type ChatSubView = "general" | "options" | "stock" | "scheduler" | (string & {});
+
+const SCHEDULER_COPILOT: CopilotConfig = {
+  id: "scheduler",
+  label: "Scheduler",
+  icon: "◷",
+  mode: "custom",
+  sourceTab: "Scheduler",
+  tooltip: {
+    eyebrow: "Agentic scheduling",
+    title: "Scheduler",
+    description: "Manage schedules, review upcoming firings and run outcomes, and decide pending approvals.",
+  },
+  hero: {
+    icon: "◷",
+    title: "Agentic Scheduler",
+    description: "Manage schedules and review their history or pending approvals.",
+  },
+  composerPlaceholder: "Ask about schedules, upcoming firings, run history, or pending approvals…",
+  quickChips: [
+    {
+      label: "Show my schedules",
+      prompt: "List my schedules and summarize their next firing times.",
+      category: "Scheduler",
+    },
+    {
+      label: "Review pending approvals",
+      prompt: "List pending schedule approvals and explain what each request would schedule.",
+      category: "Scheduler",
+    },
+  ],
+  renderCustom: ({ user }) => <SchedulerCopilotSurface userLogin={user.login} />,
+};
 
 export function isValidChatSubView(view: unknown): view is ChatSubView {
-  return typeof view === "string" && (view === "general" || view === "options" || view === "stock" || isRegisteredCopilotId(view));
+  return typeof view === "string" && (
+    view === "general" ||
+    view === "options" ||
+    view === "stock" ||
+    view === "scheduler" ||
+    isRegisteredCopilotId(view)
+  );
 }
 
 interface AgentChatTabContentProps {
@@ -110,7 +155,7 @@ export function AgentChatTabContentInner({
   });
 
   const chatCapabilityTabs: CapabilityTabItem[] = useMemo(() => {
-    return getRegisteredCopilots().map((copilot) => ({
+    const tabs: CapabilityTabItem[] = getRegisteredCopilots().map((copilot) => ({
       id: copilot.id,
       label: copilot.label,
       icon: copilot.icon,
@@ -118,9 +163,21 @@ export function AgentChatTabContentInner({
       badgeType: copilot.badgeType,
       tooltip: copilot.tooltip,
     }));
+    if (!tabs.some((tab) => tab.id === SCHEDULER_COPILOT.id)) {
+      tabs.push({
+        id: SCHEDULER_COPILOT.id,
+        label: SCHEDULER_COPILOT.label,
+        icon: SCHEDULER_COPILOT.icon,
+        badge: undefined,
+        badgeType: undefined,
+        tooltip: SCHEDULER_COPILOT.tooltip,
+      });
+    }
+    return tabs;
   }, []);
 
   const currentCopilot = useMemo(() => {
+    if (activeView === SCHEDULER_COPILOT.id) return SCHEDULER_COPILOT;
     return findCopilot(activeView) || findCopilot("general");
   }, [activeView]);
 

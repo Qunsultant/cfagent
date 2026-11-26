@@ -426,10 +426,8 @@ export interface AgentSchedulePdpDeps {
 /**
  * Evaluate the PDP for one agent schedule action. The subject is the
  * PRINCIPAL (the agent never has its own membership — it acts within the
- * principal's scope, #2331 run-as). Fail-closed: with PDP on and no
- * resolvable principal, the action is denied; with PDP off the outcome
- * is not-enforced and the capability's deterministic boundary (which
- * always applies) is the only gate.
+ * principal's scope, #2331 run-as). With PDP off this helper reports
+ * not-enforced; schedule executors must treat that state as a denial.
  */
 export async function evaluateAgentSchedulePdp(
   deps: AgentSchedulePdpDeps,
@@ -1087,7 +1085,12 @@ export async function executeAgentScheduleAction(
 
     // --- PDP.
     const pdp = await deps.pdp({ principal, tenantId, action, nowMs });
-    if (pdp.enforced && !pdp.allowed) {
+    if (!pdp.enforced) {
+      const scheduleId =
+        action !== "create" && action !== "list" ? (request as { scheduleId: string }).scheduleId : null;
+      return deny("PDP is not enabled; agent schedule actions are refused until authorization is enforced.", scheduleId);
+    }
+    if (!pdp.allowed) {
       const scheduleId =
         action !== "create" && action !== "list" ? (request as { scheduleId: string }).scheduleId : null;
       return deny(`PDP denied ${AGENT_SCHEDULE_ACTION_PERMISSIONS[action]}${pdp.reason ? `: ${pdp.reason}` : ""}`, scheduleId);

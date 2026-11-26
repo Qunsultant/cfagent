@@ -438,6 +438,32 @@ describe("3122-P13..P15 executor", () => {
     expect((ledger[0] as Record<string, unknown>).outcome).toBe("skipped");
   });
 
+  it("P13c an unenforced PDP fails closed and audits the denial", async () => {
+    const { deps, ledger, audits, sdkItems } = harness({
+      pdp: async () => ({ enforced: false as const }),
+    });
+    const out = await executeAgentScheduleAction(deps as never, {
+      action: "create",
+      kind: "sdk",
+      principal,
+      tenantId: "primary",
+      callback: "autonomousMarketScreen",
+      timing: { type: "cron", cron: "0 9 * * 1-5" },
+      payload: {},
+    });
+    expect(out).toMatchObject({
+      ok: false,
+      code: "denied",
+      reason: expect.stringContaining("PDP is not enabled"),
+    });
+    expect(sdkItems).toHaveLength(0);
+    expect(ledger).toHaveLength(1);
+    expect((ledger[0] as Record<string, unknown>).outcome).toBe("skipped");
+    expect(audits).toContainEqual(
+      expect.objectContaining({ type: "agent.schedule.denied" }),
+    );
+  });
+
   it("P14 consequential schedule without approval is refused and a pending record is created", async () => {
     const { deps, getPending, sdkItems } = harness();
     const out = await executeAgentScheduleAction(deps as never, {
