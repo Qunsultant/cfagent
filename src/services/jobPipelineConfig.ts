@@ -89,6 +89,10 @@ export type JobPipelineErrorCode =
   // platform that rejected a rewind target. Both refuse by name: the engine
   // never rewinds an entry it could not prove belongs to the run.
   | "journal_entry_not_addressed"
+  // Issue #6394 — a child run failed (or outlived its bound) and the parent's
+  // step said "fail". The child keeps its own failure; this code names the
+  // parent's reaction to it.
+  | "job_child_failed"
   | "restart_rejected"
   | "replay_pre_retention_run"
   | "replay_definition_version_unresolved"
