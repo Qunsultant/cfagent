@@ -31,9 +31,9 @@ A new ADR supersedes 0022 D-G (and 0033's rejected alternative) and records: the
 
 ## 1. What exists today (survey summary — full detail in the survey doc)
 
-- **Stock, server:** 4 sandbox ids, 2 real rules (`sma_crossover` SMA 5/20; one shared dip rule behind `rsi_reversal`/`mean_reversion`/`breakout`, no RSI computed). 6-member backtest enum whose emitted code is SMA for all 6, with hardcoded metric fallbacks (Sharpe 1.42, win rate 62.5%) that must NOT migrate. Real technicals in `technicals.ts` (RSI₁₄, MACD, ATR, Bollinger, VWAP, HV, fractals, Fib, regime, death cross, ORB, gap) unwired into any strategy. Screener labels, `screenScore`, 6-vote composite, factor grades (3 distinct "momentum" formulas). `baseBreakout.ts` (20-bar base + ladder plan).
+- **Stock, server:** 4 sandbox ids, 2 real rules (`sma_crossover` SMA 5/20; one shared dip rule behind `rsi_reversal`/`mean_reversion`/`breakout`, no RSI computed). 6-member backtest enum whose emitted code is SMA for all 6, with hardcoded metric fallbacks (Sharpe 1.42, win rate 62.5%) that must NOT migrate. Real technicals in `technicals.ts` (RSI₁₄, MACD, ATR, Bollinger, VWAP, HV, fractals, Fib, regime, death cross, ORB, gap) unwired into any strategy. Screener labels, `screenScore`, 6-vote composite, factor grades (3 distinct "momentum" formulas). `baseBreakout.ts` (20-bar base + ladder plan). A dedicated stock-patterns catalog also exists and was missed by the first four inventories (corrected 2026-11-26): `src/trading/setupCatalog.ts` (2 stock pattern families `trend_breakout`, `pullback_reversion`, plus 2 options families) with the stock-only read model `src/workflows/stockPatternCatalog.ts` (version pinned "1") and the Stock Hub Patterns view (`?tab=stock-hub&view=patterns`, `PatternsPanel`, Apply-to-New-Screen flow stamping `patternRef`). P0 stock total: 7 named entries / 5 distinct rules.
 - **Options, server:** 74 definitions in `catalog.ts` (11 categories), engine/profile/choice/risk, acceptance rules, PMCC gates, 11 discovery signals (signals, not strategies). Research side maps only 10 structures (vocabulary #6507); 64/74 have no OODA name.
-- **Client:** `STRATEGY_LIBRARY`, 73 ids; 45 overlap with server, 29 server-only, 28 client-only (mostly directional renames). Exact duplicates on the server: `short_put` ≡ `cash_secured_put`; `long_call` vs `leaps_call` (DTE parameter only). Count 73 vs 74 vs 75 unresolved — no 75th server definition exists.
+- **Client:** `STRATEGY_LIBRARY`, 73 ids; 45 overlap with server, 29 server-only, 28 client-only (mostly directional renames). Exact duplicates on the server: `short_put` ≡ `cash_secured_put`; `long_call` vs `leaps_call` (DTE parameter only). Count 73 vs 74 vs 75 unresolved — no 75th server definition exists. This reconciliation is options-only; it never included stock patterns or stock strategies.
 - **Hardcoded, to externalize:** opportunity-hunt thresholds (`opportunityHuntLevels.ts`: entry band 0.5%, stop/take 5%/10% sma, 3%/3% others); OODA `buildStructure` 10 cases (duplicate catalog templates) and `structuresForOutlook` mapping; copilot defaults/selection; screener/scoring weights; technicals parameters (functions stay, params move). Goal workflows hardcode nothing (strategy comes from the operation invoked). Autopilot hardcodes nothing (policy verdict gate). OODA research rules already externalized (`researchRules.ts`, 21 keys, versioned) — the precedent to copy. `docs/PATTERNS.md` does not exist; Thinkorswim patterns/studies/drawings exist nowhere — #6404 is a build, not a consolidation.
 - **Exposure divergence:** 4 stores for "which strategies are active"; 2 backtests (walk-forward live, sandbox never invoked); 3 engines for one NLQ screen (chat → engine, channel → listings branch, manual → panel); ≥2 ranking systems.
 - **Storage:** D1 `AGENT_DB` (`agentdb`) bound in `wrangler.jsonc`; ~130 `agent_*` tables in `drizzleSchema.ts`; **no strategy table in D1**. No strategy-definition table anywhere. DO estate: 47 adapter files, 50+ classes, 69 CREATE TABLEs in the catalogue — but the catalogue undercounts: ~90 tables per ADR 0022 survey, 186 in `table-domains.md`; ≥14 tables created inline by `src/orm/` (`mas_memory`, `mas_messages`, `mas_transactions`, `mas_trades`, …). Usage by id today: track record keyed by 10-name OODA vocabulary; outcome tracking has no strategy-id field; no usage-count table; no FK to a canonical id.
@@ -43,10 +43,10 @@ A new ADR supersedes 0022 D-G (and 0033's rejected alternative) and records: the
 
 | Phase | Work | Consumers migrated | Exit criterion |
 |---|---|---|---|
-| P0 | Stock catalog in D1: tables (`strategies`, `strategy_aliases`, `strategy_versions`, usage per run), Drizzle migration (0020 precedent), port + D1 adapter, CatalogService, alias table for all old ids, seed from code definitions. New ADR superseding 0022 D-G + 0033. Promotion-unit redesign. | — | Catalog reads return the seeded stock entries; old ids resolve via aliases; ADR accepted |
-| P1 | Migrate stock consumers, one at a time with pin tests + replay verification | Copilot loop → stock screener → opportunity-hunt (thresholds move with it) → strategy evaluation/backtest → goal operations (follow via operations) → calibration/outcomes (record `strategy_id` + version on every run) | Every stock consumer reads the catalog; old sources switched off; same inputs → same outputs on replay |
+| P0 | Stock catalog in D1: tables (`strategies`, `strategy_aliases`, `strategy_versions`, usage per run), Drizzle migration (0020 precedent), port + D1 adapter, CatalogService, alias table for all old ids, seed from code definitions — 7 named stock entries / 5 distinct rules (2 stock patterns + 4 sandbox ids + 1 base breakout). Patterns view enhanced/reused (data source moves from hardcoded `setupCatalog.ts` to D1; apply flow kept); `GET /api/trading/setup-catalog` inventoried. New ADR superseding 0022 D-G + 0033. Promotion-unit redesign. | — | Catalog reads return the seeded stock entries; old ids resolve via aliases; ADR accepted |
+| P1 | Migrate 13 stock consumers, one at a time with pin tests + replay verification, in sequence: copilot loop → on-demand evaluation → stock screener → NLQ screens → opportunity-hunt → Patterns view → base-breakout MCP → sandbox code-gen taxonomy → sandbox backtest → walk-forward backtest → goal operations → copilot panel → calibration/outcomes (last). Consumers read the catalog through the CatalogService port via DI/deps (server) or REST API (client) — not through code import; only the port type / service interface is imported. | Copilot loop → on-demand evaluation → stock screener → NLQ screens → opportunity-hunt → Patterns view → base-breakout MCP → sandbox taxonomy → sandbox backtest → walk-forward backtest → goal operations → copilot panel → calibration/outcomes (record `strategy_id` + version on every run) | Every stock consumer reads the catalog; old sources switched off; same inputs → same outputs on replay |
 | P2 | Options catalog in D1, same pattern | OODA (vocabulary extended 10 → 74) → options screener → Discovery → recommendation kernel | Same as P1 for options |
-| P3 | Patterns/studies catalog (Thinkorswim, #6404) on top of the two catalogs | Opportunity-hunt patterns, screener pattern views | No third strategy list |
+| P3 | Patterns/studies catalog (Thinkorswim, #6404) on top of the two catalogs — stock patterns are P0; P3 is the Thinkorswim patterns/studies build | Opportunity-hunt patterns, screener pattern views | No third strategy list |
 | P4 | Lifecycle UX (see §5) | — | Add/update/enable/disable/remove/clone/promote all work through `?tab=strategy-catalog`, audited |
 | P5 | Remaining DO estate → D1 (all durable application tables), sessions last (D-I step 5) | All remaining DO stores | Zero durable application tables in DO; runtime state only |
 
@@ -54,7 +54,7 @@ Autopilot needs no migration (verified: no strategy content). Stock first, optio
 
 ## 3. Benefits delivered
 
-- One answer to "which strategies are active?" (today: four — 4 sandbox ids, 6 enum members, 73 client, 75 claimed).
+- One answer to "which strategies are active?" (today: four options-side answers — 4 sandbox ids, 6 enum members, 73 client, 75 claimed — plus a separate stock-patterns catalog that was never counted).
 - One evaluator per kind, one ranker (`RecommendationKernel`), one screen engine (including channel NLQ), one backtest.
 - Every run, screen, evaluation, backtest, and paper trade records `strategy_id` + `strategy_version` — calibration per strategy becomes honest; enable/disable becomes safe.
 - Client stops carrying a hard-coded catalog that must be kept in sync by hand; it becomes a cached, version-stamped view.
@@ -64,7 +64,7 @@ Autopilot needs no migration (verified: no strategy content). Stock first, optio
 
 - False labels: `rsi_reversal` computing no RSI; `breakout` being a dip-buy; backtest text claiming volume/MACD/Bollinger rules the emitted code does not implement; hardcoded "results" (Sharpe 1.42) presented when a backtest returns null.
 - Silent drops: unknown strategy ids silently dropped by `parseStrategiesInput`; channel NLQ silently taking the listings branch instead of the screen engine.
-- Count drift: 73 vs 74 vs 75 unresolved; client/server copies drifting (only documented cross-port: `jelly_roll` backfilled from client).
+- Count drift: 73 vs 74 vs 75 unresolved (options only); client/server copies drifting (only documented cross-port: `jelly_roll` backfilled from client).
 - Duplicate logic: 3 ids sharing one rule; `short_put` ≡ `cash_secured_put`; 3 momentum formulas under one name; 4 scoring systems with no shared scale.
 - Split authority: 4 config stores, 2 backtests (one dead), 2+ ranking systems, weights that live ranking never reads at decision time.
 - DO residency risks: per-instance data invisible to cross-agent queries; tenancy by construction hiding a missing tenant key; abandoned DO tables (`mas_iv_history`) left behind after cutover.
@@ -75,7 +75,7 @@ Browse/search/compare either catalog → open an entry (rule/params, gates, thes
 
 ## 6. Resources optimized
 
-- One catalog service, one evaluator per kind, one ranking path, one screen engine, one backtest — instead of 5 stock vocabularies, 3 options name systems, 4 config stores, 2 backtests.
+- One catalog service, one evaluator per kind, one ranking path, one screen engine, one backtest — instead of 6 stock vocabularies (live ids, backtest enum, screener labels, technicals, weights/policy/bank keys, stock-patterns catalog), 3 options name systems, 4 config stores, 2 backtests.
 - DO estate shrinks by audit (D-0's own rule): ~90 tables + ≥14 inline tables → D1; DO instances stop carrying per-login data they cannot share.
 - Client bundle drops a 62 KB hard-coded library; Discovery's thin-client pattern (server ranks, local engine only models legs being edited) becomes the single client pattern.
 - OODA's already-externalized `researchRules.ts` is reused as the config pattern instead of re-inventing it.
@@ -94,7 +94,7 @@ Single home: `docs/architecture/security/`. Catalog writes go through the same P
 
 ## 9. Operational anomalies discovered / resolved
 
-Discovered in the 2026-11-26 inventories (all verified live on `main`): sandbox code-gen emitting SMA for all 6 types; hardcoded metric fallbacks; `rsi14` a feed passthrough in the screener while real bar RSI₁₄ exists elsewhere; `dayAction`/`sentiment` duplicate fields; weights v2 never read at decision time; deprecated policy-state shim still present; dead sandbox module never invoked; `researchStructure()` throwing for 64/74 ids; discovery signals' consumer unverified; `preferFibLevels` and `isStrategyAllowedUnderRegime` implemented but uncalled; DO catalogue undercounting the estate by ≥14 tables; abandoned `mas_iv_history` data left after cutover. Resolved by: the catalog (single definitions), alias table + reconciliation, replay pin tests per consumer, usage-by-id recording, and the P5 estate audit (catalogue + `src/orm/` inline tables).
+Discovered in the 2026-11-26 inventories (all verified live on `main`): sandbox code-gen emitting SMA for all 6 types; hardcoded metric fallbacks; `rsi14` a feed passthrough in the screener while real bar RSI₁₄ exists elsewhere; `dayAction`/`sentiment` duplicate fields; weights v2 never read at decision time; deprecated policy-state shim still present; dead sandbox module never invoked; `researchStructure()` throwing for 64/74 ids; discovery signals' consumer unverified; `preferFibLevels` and `isStrategyAllowedUnderRegime` implemented but uncalled; DO catalogue undercounting the estate by ≥14 tables; abandoned `mas_iv_history` data left after cutover; the stock-patterns catalog itself was missed by all four inventories (corrected 2026-11-26 — regression guard: the inventory checklist must enumerate every `*Catalog*` / `*Pattern*` source before filing). Resolved by: the catalog (single definitions), alias table + reconciliation, replay pin tests per consumer, usage-by-id recording, and the P5 estate audit (catalogue + `src/orm/` inline tables).
 
 ## 10. Platform improvements (one of everything)
 
@@ -121,6 +121,7 @@ These are recorded, not decided; none blocks approval in spirit or starting P0. 
 - **#3675 triage:** whole epic (paper + human gate) vs S1/S2 only vs leave out.
 - **Human investment authority:** still TBD, not named in the repo — do not invent.
 - **Subset pick for the 7 sweep candidates** (analytics lake four, #5502, #5213, #6271) — user to pick; nothing moves before that.
+- **Setup-catalog scoping (decided during P0):** whether P0 moves the whole `setupCatalog.ts` file or only its stock families — the 2 options families naturally belong to P2.
 - **Approval status:** plan approved in spirit by the owner, 2026-11-26; D1 as system of record decided (§0). Filing authorized by the owner 2026-11-26 ("file it on GitHub now"); design doc, plan, ADR 0040, survey, and six phase sub-issues filed under #6593.
 
 ## 12. Rollback
@@ -139,14 +140,14 @@ Every candidate improvement is scored on four axes before it is scheduled: busin
 
 ## 14. Architectural gap analysis (per phase)
 
-- **P0/P1 — systemic bottleneck:** five stock vocabularies with no mapping table; the copilot evaluates a dip rule under three names while real RSI/MACD sit unwired. **Scalability:** per-login DO stores cannot be queried cross-agent; D1 is the shared projection. **Maintainability:** thresholds in code (`opportunityHuntLevels.ts`, screener weights) change only by deploy. **Maturity:** scoring is draft-only, calibration is report + dashboard, not a loop.
+- **P0/P1 — systemic bottleneck:** six stock vocabularies with no mapping table; the copilot evaluates a dip rule under three names while real RSI/MACD sit unwired. **Scalability:** per-login DO stores cannot be queried cross-agent; D1 is the shared projection. **Maintainability:** thresholds in code (`opportunityHuntLevels.ts`, screener weights) change only by deploy. **Maturity:** scoring is draft-only, calibration is report + dashboard, not a loop.
 - **P2 — bottleneck:** 10/74 OODA vocabulary coverage; `researchStructure()` throws for the other 64. **Maturity:** options evaluation is the most mature path (engine + acceptance rules) and therefore the template for stock.
 - **P4 — bottleneck:** no lifecycle surface at all; strategies can only change by code deploy. **Maturity:** moves strategy management from deploy-time to run-time.
 - **P5 — bottleneck:** ~90 tables + ≥14 inline `src/orm/` tables, 94 direct `ctx.storage.sql` call sites in 16 files; D-D end state is "no call site holds SQL". **Scalability:** per-instance serialization does not scale to cross-agent queries; **maintainability:** schema evolution is scattered.
 
 ## 15. RCA — one per set of related changes
 
-No central RCA rule or directory exists in the repo today (verified). The observed convention is per-incident files named `<topic>-rca-<issue>.md` in the owning domain's folder, filed against the incident issue (e.g. `docs/architecture/security/do-rows-read-rca-2280.md`). This plan establishes the program convention: **one RCA per set of related changes**, filed in `docs/architecture/survey/` as `6593-<set>-rca.md` and linked from the phase sub-issue. Planned RCAs: (a) false strategy labels (rsi_reversal/breakout/sandbox code-gen/hardcoded metrics); (b) silent drops and split engines (parseStrategiesInput, channel NLQ listings branch, dead sandbox); (c) count drift and catalog duplication (73/74/75, client/server copies); (d) DO residency and the promotion unit (ADR 0022 D-G, ADR 0033, TX_CANNOT_HONOUR). Each RCA records cause, impact, fix, and the regression test that prevents recurrence.
+No central RCA rule or directory exists in the repo today (verified). The observed convention is per-incident files named `<topic>-rca-<issue>.md` in the owning domain's folder, filed against the incident issue (e.g. `docs/architecture/security/do-rows-read-rca-2280.md`). This plan establishes the program convention: **one RCA per set of related changes**, filed in `docs/architecture/survey/` as `6593-<set>-rca.md` and linked from the phase sub-issue. Planned RCAs: (a) false strategy labels (rsi_reversal/breakout/sandbox code-gen/hardcoded metrics); (b) silent drops and split engines (parseStrategiesInput, channel NLQ listings branch, dead sandbox); (c) count drift and catalog duplication (73/74/75 options-only, client/server copies, and the missed stock-patterns catalog); (d) DO residency and the promotion unit (ADR 0022 D-G, ADR 0033, TX_CANNOT_HONOUR). Each RCA records cause, impact, fix, and the regression test that prevents recurrence.
 
 ## 16. Measurable success criteria
 
@@ -154,7 +155,7 @@ Per enhancement, with a baseline measured before the phase starts:
 
 | Enhancement | KPI | Adoption metric | Performance target |
 |---|---|---|---|
-| Stock catalog (P0/P1) | Catalog entries live / total stock entries; consumers reading the catalog (target: all stock consumers) | % of copilot cycles, screens, hunts, and evaluations resolved via catalog ids (target: 100%) | Catalog read p95 < 100 ms; zero silent id drops (target: 0) |
+| Stock catalog (P0/P1) | Catalog entries live / total stock entries (7); consumers reading the catalog (target: all 13 stock consumers) | % of copilot cycles, screens, hunts, and evaluations resolved via catalog ids (target: 100%) | Catalog read p95 < 100 ms; zero silent id drops (target: 0) |
 | Options catalog (P2) | OODA vocabulary coverage 10/74 → 74/74 | % of options evaluations via catalog ids (target: 100%) | Same as stock |
 | Lifecycle UX (P4) | Strategies managed via UX vs code deploys (target: 100% of changes via UX) | Monthly active catalog managers; promotion approvals with human sign-off (target: 100%) | Draft → active promotion < 1 business day |
 | DO → D1 (P5) | Durable application tables remaining in DO (target: 0) | % of reads served from D1 (target: 100% for migrated stores) | No regression in screen/evaluation latency vs DO baseline |
