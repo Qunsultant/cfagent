@@ -1130,6 +1130,21 @@ never pass a policy — operator control of retry budgets is filed as
 (`src/services/resilience.ts:37`) without an injected RNG, so it uses
 `Math.random` — a determinism gap filed as #5280.
 
+**Stuck units are detected and reaped (#3954).** A unit that starts and never
+progresses used to be invisible: the per-unit `timeoutMs` race only fires for
+work still awaited, and the stale-running sweep lived on the async-jobs side.
+Every running unit now carries a liveness stamp — `heartbeatAt` on the stage
+checkpoint, written at the running transition and refreshed at every step
+boundary — and `sweepStuckUnits()` reaps the ones whose stamp is older than
+`pipeline.stuckUnitAfterMs` (default 30 minutes, clamped [1s, 24h]): the unit
+is marked failed with `job_unit_stuck`, a `failed` stage action names how long
+it was silent, and the run is settled failed through the SAME settle path as
+an orphaned run (`settleRunningInstance`, #4002) — one settle, two triggers.
+Additive by contract: a terminal unit is never reaped, and a unit whose
+liveness cannot be read (no `heartbeatAt`, `updatedAt` or `startedAt`) is left
+alone rather than reaped on no evidence. A checkpoint written before the field
+existed stays sweepable — the sweep falls back to the recorded activity stamp.
+
 **Poison runs land in the DLQ (#3967).** A unit whose failure is a CODED
 error the retry cannot fix (`job_config_invalid`, `job_shards_not_configured`,
 `stage_port_unavailable` — everything but `job_step_failed`) is not retried:

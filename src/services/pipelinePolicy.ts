@@ -81,6 +81,13 @@ export interface PipelinePolicy {
    * rather than being silently shortened.
    */
   sleepMaxDurationMs: number;
+  /**
+   * Issue #3954 — how long a RUNNING unit may go without a heartbeat before
+   * the stuck sweep reaps it. 30 minutes by default, the same order as the
+   * async-jobs alert threshold this capability makes uniform; a hung unit is
+   * surfaced and settled instead of holding its run open.
+   */
+  stuckUnitAfterMs: number;
 }
 
 export const DEFAULT_PIPELINE_POLICY: PipelinePolicy = {
@@ -107,6 +114,7 @@ export const DEFAULT_PIPELINE_POLICY: PipelinePolicy = {
   fetchTimeoutMs: 15_000,
   waitDefaultTimeoutMs: 3_600_000,
   sleepMaxDurationMs: 86_400_000,
+  stuckUnitAfterMs: 1_800_000,
 };
 
 const ATTEMPTS_MIN = 1;
@@ -152,6 +160,7 @@ export const PIPELINE_POLICY_DEFAULTS: Record<string, string> = {
   "pipeline.fetchTimeoutMs": String(DEFAULT_PIPELINE_POLICY.fetchTimeoutMs),
   "pipeline.waitDefaultTimeoutMs": String(DEFAULT_PIPELINE_POLICY.waitDefaultTimeoutMs),
   "pipeline.sleepMaxDurationMs": String(DEFAULT_PIPELINE_POLICY.sleepMaxDurationMs),
+  "pipeline.stuckUnitAfterMs": String(DEFAULT_PIPELINE_POLICY.stuckUnitAfterMs),
 };
 
 /**
@@ -403,7 +412,24 @@ export function resolvePipelinePolicy(
       "PIPELINE_SLEEP_MAX_DURATION_MS",
     ) ?? DEFAULT_PIPELINE_POLICY.sleepMaxDurationMs;
 
-  return { retry, notifications, fetchTimeoutMs, waitDefaultTimeoutMs, sleepMaxDurationMs };
+  // Issue #3954 — the stuck-unit bound, resolved with the rest of the policy.
+  // Clamped to [1s, 24h]: shorter is meaningless, longer is a hung run.
+  const stuckUnitAfterMs =
+    parseIntClamped(
+      s("pipeline.stuckUnitAfterMs") ?? e("PIPELINE_STUCK_UNIT_MS"),
+      1_000,
+      WAIT_TIMEOUT_MAX_MS,
+      "PIPELINE_STUCK_UNIT_MS",
+    ) ?? DEFAULT_PIPELINE_POLICY.stuckUnitAfterMs;
+
+  return {
+    retry,
+    notifications,
+    fetchTimeoutMs,
+    waitDefaultTimeoutMs,
+    sleepMaxDurationMs,
+    stuckUnitAfterMs,
+  };
 }
 
 /**
