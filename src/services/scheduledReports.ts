@@ -104,11 +104,9 @@ import {
  * existing importers keep their import path.
  */
 export { reportBodyR2Key } from "./documentPublish";
-import { createBlobStore } from "./blobStoreR2Adapter";
 // Issue #6659 — the ONE access point for report bodies (bounded reads,
 // terminal absence, negative cache, per-caller metrics).
 import { createReportBodyStore } from "./reportBodyStore";
-import { blobText } from "./blobStorePorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 import { withProvenanceTuple } from "../observability/provenanceTuple";
@@ -785,11 +783,20 @@ export async function refreshCanonicalReportPdfFields(
     };
     let storedBodyJson: string;
     if (row.bodyR2Key) {
-      const store = createBlobStore(env);
-      if (!store) return { status: "failed", reason: "R2 body unreadable: no blob store bound" };
-      const obj = await store.get(row.bodyR2Key);
-      if (!obj) return { status: "failed", reason: `R2 body object ${row.bodyR2Key} missing` };
-      storedBodyJson = blobText(obj);
+      // Issue #6659 — through the ONE access point, so this read inherits the
+      // bounded retry, the terminal `absent` answer and the negative cache.
+      const read = await createReportBodyStore(env).read(
+        id,
+        "refreshCanonicalReportPdfFields",
+        row.bodyR2Key,
+      );
+      if (read.outcome === "absent") {
+        return { status: "failed", reason: `R2 body object ${row.bodyR2Key} missing` };
+      }
+      if (read.outcome === "unavailable") {
+        return { status: "failed", reason: `R2 body unreadable: ${read.reason}` };
+      }
+      storedBodyJson = read.body;
       if (!storedBodyJson) return { status: "failed", reason: `R2 body object ${row.bodyR2Key} unreadable` };
     } else {
       storedBodyJson = row.body;
@@ -803,11 +810,9 @@ export async function refreshCanonicalReportPdfFields(
       return { status: "not-backfillable", reportId: id, reason: outcome.reason };
     }
     if (row.bodyR2Key) {
-      const store = createBlobStore(env);
-      if (!store) return { status: "failed", reason: "R2 body unwritable: no blob store bound" };
-      await store.put(row.bodyR2Key, outcome.bodyJson, {
-        contentType: "application/json",
-      });
+      // Issue #6659 — the same access point, so the write also clears the
+      // negative-cache entry for this report id.
+      await createReportBodyStore(env).put(id, outcome.bodyJson, row.bodyR2Key);
     } else {
       storePorts(sql).write.updateBody(id, outcome.bodyJson);
     }
