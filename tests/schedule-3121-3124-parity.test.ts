@@ -424,7 +424,10 @@ describe("3124-P05 one ledger read path (census)", () => {
     expect(autopilot).not.toContain("SqlJobRunRecordStore");
     const workflowRuns = source("src/agents/routes/workflowRuns.ts");
     expect(workflowRuns).toContain("readWorkflowRunJobs");
-    expect(workflowRuns).toContain("listJobOutcomes");
+    // Issue #6103 — Workflow Runs reads outcomes from D1 via the
+    // run-ledger seam (listD1JobOutcomes), never the DO list.
+    expect(workflowRuns).toContain("listD1JobOutcomes");
+    expect(workflowRuns).not.toContain("listJobOutcomes");
     expect(workflowRuns).toContain("readWorkflowRunTransitions");
     expect(workflowRuns).not.toContain("SqlJobRunRecordStore");
   });

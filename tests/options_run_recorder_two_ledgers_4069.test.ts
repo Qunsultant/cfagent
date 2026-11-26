@@ -13,9 +13,13 @@
  *  2. Partial coverage rides the gate summary in outputs — status
  *     stays completed, never a second status.
  *  3. Route: /workflow-runs lists scan runs via the injected reader.
- *  4. Dedup: a scan row a canonical row already claims (its body
- *     scanRunId — the same exact join mergeRunSummaries uses) shows
- *     once, as the canonical run.
+ *  4. Dedup (#6103 D1-only): a scan row a D1-projected canonical
+ *     row already claims (its body scanRunId — the same exact join
+ *     mergeRunSummaries uses) shows once, as the canonical run —
+ *     the canonical row is seeded in D1 via the write-time
+ *     projection path, and the scan family itself stays
+ *     unprojected: /api/runs names it in storeErrors.scans, never
+ *     silent.
  *  5. Reader: a failing scan read is named in storeErrors and never
  *     hides the other ledgers; without a userLogin the store is
  *     skipped and named, never read unscoped.
@@ -25,17 +29,72 @@
  *     single home (#783).
  */
 import { describe, it, expect } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 
 import type { ScanRunSummary } from "../src/data/scanRunPorts";
 import { runFromScanRun } from "../src/services/workflowRuns";
 import { handleWorkflowRunsRoutes } from "../src/agents/routes/workflowRuns";
+import { handleReportsRoutes } from "../src/agents/routes/reports";
+import { createRunLedgerAdapter, ensureRunLedgerTables } from "../src/data/createRunLedgerPorts";
+import {
+  createD1JobRunRecordDb,
+  ensureJobRunRecordsSchema,
+} from "../src/data/d1JobRunRecordAdapter";
+import { postRunLedgerBestEffort } from "../src/services/runLedgerProjectionPosting";
 import { createOptionsScreenPorts, optionsArtifactKey } from "../src/workflows/optionsScreenPorts";
 import { memoryStageStorage } from "../src/workflows/optionsScreenWorkflow";
 import { MockSqlStorage } from "./mock-sql";
 import {
   ensureScheduledReportsTable,
+  listScheduledReports,
   persistScheduledReportSql,
 } from "../src/services/scheduledReports";
+
+/** Minimal D1Database stand-in over node:sqlite (the #4116 parity fixture's double). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: { changes: info.changes, last_row_id: info.lastInsertRowid },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+  async batch(statements: any[]) {
+    const results: any[] = [];
+    this.sqlite.exec("BEGIN");
+    try {
+      for (const stmt of statements) results.push(await stmt.run());
+      this.sqlite.exec("COMMIT");
+    } catch (err) {
+      this.sqlite.exec("ROLLBACK");
+      throw err;
+    }
+    return results;
+  }
+}
 
 function scanSummary(overrides: Partial<ScanRunSummary> = {}): ScanRunSummary {
   return {
@@ -154,8 +213,19 @@ describe("GET /workflow-runs merges scan runs (#4069)", () => {
     expect(run.title).toContain("best_trade");
   });
 
-  it("drops a scan row a canonical row already claims (same run, once)", async () => {
+  it("drops a scan row a D1-projected canonical row already claims (same run, once) — scans unprojected (#6103)", async () => {
+    // Issue #6103 — the canonical row is seeded in D1 through the
+    // write-time projection path (DO row + postRunLedgerBestEffort,
+    // the sweep's own reports-leg mapping — the sweep itself is
+    // never run, it copies existing DO rows). Scans are NOT
+    // projected under #6103: the scan row is still offered through
+    // the route's reader seam, the D1 canonical claims it, and
+    // /api/runs names the unprojected scan family in
+    // storeErrors.scans.
+    const mock = new MockD1Database();
     const sql = new MockSqlStorage();
+    const jobDb = createD1JobRunRecordDb(mock as never);
+    await ensureJobRunRecordsSchema(jobDb);
     ensureScheduledReportsTable(sql as any);
     persistScheduledReportSql(sql as any, {
       runId: "options_scanner:unified:2026-11-11T10:00:00.000Z:mixed",
@@ -167,6 +237,46 @@ describe("GET /workflow-runs merges scan runs (#4069)", () => {
       body: { report: { result: { scanRunId: "scan-1" } }, trigger: "manual" },
       createdAt: "2026-11-11T10:00:00.000Z",
     });
+    const adapter = createRunLedgerAdapter({ AGENT_DB: mock as never })!;
+    await ensureRunLedgerTables(adapter);
+    await adapter.setTenantProjectionCarriers(
+      "primary",
+      { queues: true, orm: true, sweep: true },
+      "merged",
+      Date.now(),
+    );
+    const env = { AGENT_DB: mock as never, IAAA_TENANT_ID: "primary" };
+    const nowMs = Date.now();
+    let projectedCount = 0;
+    for (const hit of listScheduledReports(sql as never, { limit: 100 })) {
+      const createdAtMs = Date.parse(hit.createdAt);
+      const posted = await postRunLedgerBestEffort(
+        env,
+        "primary",
+        {
+          ledger: "reports",
+          row: {
+            reportId: hit.id,
+            tenantId: "primary",
+            workspaceId: "primary",
+            runId: hit.runId,
+            generationId: hit.generationId,
+            title: hit.title,
+            source: hit.source,
+            summary: hit.summary,
+            body: hit.body,
+            createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : nowMs,
+            updatedAtMs: Number.isFinite(createdAtMs) ? createdAtMs : nowMs,
+            userLogin: hit.userLogin,
+            bodyR2Key: hit.bodyR2Key,
+          },
+        },
+        nowMs,
+      );
+      expect(posted.projected).toBe(true);
+      projectedCount += 1;
+    }
+    expect(projectedCount).toBe(1);
     const res = await handleWorkflowRunsRoutes(
       new Request("https://agent.internal/workflow-runs", { method: "GET" }),
       new URL("https://agent.internal/workflow-runs"),
@@ -175,7 +285,9 @@ describe("GET /workflow-runs merges scan runs (#4069)", () => {
       {
         ensureTables: () => sql as any,
         userLogin: "analyst",
-        env: {},
+        env: env as never,
+        jobRunRecordReader: async () => [],
+        scheduleReader: async () => [],
         scanRunReader: async () => [scanSummary()],
       } as any,
     );
@@ -183,11 +295,36 @@ describe("GET /workflow-runs merges scan runs (#4069)", () => {
     const data = (await res!.json()) as any;
     const scanRuns = data.runs.filter((r: any) => r.runId === "scan-1");
     expect(scanRuns).toHaveLength(0);
-    // The canonical run itself still shows — once.
+    // The canonical run itself still shows — once, from the D1 side.
     const canonical = data.runs.filter(
       (r: any) => r.runId === "options_scanner:unified:2026-11-11T10:00:00.000Z:mixed",
     );
     expect(canonical).toHaveLength(1);
+    // The same fixture on /api/runs: the canonical run shows once
+    // and the unprojected scan family is named, never silent.
+    const runsRes = await handleReportsRoutes(
+      new Request("http://x/api/runs?kind=all", {
+        method: "GET",
+        headers: { "x-user-login": "analyst" },
+      }),
+      new URL("http://x/api/runs?kind=all"),
+      "/api/runs",
+      "session-1",
+      {
+        ensureTables: () => sql as never,
+        env: env as never,
+        jobRunRecordReader: async () => [],
+      } as never,
+    );
+    expect(runsRes?.status).toBe(200);
+    const runsData = (await runsRes!.json()) as any;
+    expect(runsData.storeErrors?.scans).toMatch("not projected");
+    expect(
+      runsData.runs.filter(
+        (r: any) => r.runId === "options_scanner:unified:2026-11-11T10:00:00.000Z:mixed",
+      ),
+    ).toHaveLength(1);
+    expect(runsData.runs.filter((r: any) => r.runId === "scan-1")).toHaveLength(0);
   });
 
   it("names a failing scan read in storeErrors and still renders the other ledgers", async () => {

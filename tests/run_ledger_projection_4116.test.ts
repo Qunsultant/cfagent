@@ -26,10 +26,13 @@
  *     projector; a handler throw retries to DLQ.
  *  7. Sweep: bounded (100), single-shot, per-record failures
  *     collected, unbound AGENT_DB is a named 503, no cron.
- *  8. D1-only reads: /api/runs + Workflow Runs + detail read D1
- *     alone (no DO read in the path); the parity suite proves the
- *     D1-only lists equal the merged lists modulo linked-twin
- *     absorption (no silent loss, no duplicates).
+ *  8. D1-only reads (#6103): /api/runs + Workflow Runs + detail read
+ *     D1 alone (no DO read in the path, no mode switch); the
+ *     fixture projects each DO row at write time (the ORM-carrier
+ *     path), never via the sweep — the sweep copies existing DO
+ *     rows into D1, which the replacement ruling forbids. Outcomes
+ *     are served from the facts folded onto D1 job_run_records;
+ *     stage transitions stay empty + named, permanently.
  *
  * mas_stage_claims is NOT projected in this slice: explicit owner
  * deferral (see the design doc) — no read surface consumes stage
@@ -98,9 +101,13 @@ import { buildJobRunRecord } from "../src/services/jobRunRecords";
 import { handleReportsRoutes } from "../src/agents/routes/reports";
 import { handleWorkflowRunsRoutes } from "../src/agents/routes/workflowRuns";
 import {
-  resolveLedgerReadMode,
   listProjectedReportSummaries,
+  listD1JobOutcomes,
+  carriesOutcomeFacts,
+  d1JobRunRecordToOutcomeRow,
 } from "../src/services/runLedgerReads";
+import { listScheduledReports } from "../src/services/scheduledReports";
+import type { JobOutcomeRow } from "../src/services/jobOutcomes";
 
 /** Minimal D1Database stand-in over node:sqlite (the J1 suite's double). */
 class MockD1Database {
@@ -1465,15 +1472,19 @@ describe("owner scope + backfill (migration 0060, #4116)", () => {
   });
 });
 
-describe("D1-only reads + parity vs the merged view (#4116)", () => {
+describe("D1-only reads (#6103)", () => {
   /**
-   * The parity fixture: DO rows (MockSqlStorage) + the engine's D1
-   * job-run-record twin row, then the sweep backfills DO → D1, so
-   * the fixture is honest about the projection path. The same
-   * fixture is then read through both modes (the carrier config
-   * row's readMode flips between calls) and the two views must
-   * agree modulo linked-twin absorption: every merged run present
-   * exactly once in D1-only, no extra rows, no silent loss.
+   * The fixture: DO rows (MockSqlStorage) + the engine's D1
+   * job-run-record twin row, then each DO row is projected at
+   * write time via postRunLedgerBestEffort — the ORM-carrier path,
+   * the honest equivalent of "the projector copied them when the
+   * DO write landed". Issue #6103: the sweep
+   * (reconcileRunLedgerProjection) is NOT run here — it copies
+   * existing DO rows into D1, which the replacement ruling
+   * forbids for this slice. There is one read path (D1-only) and
+   * no merged view to compare against anymore; the tests pin what
+   * the single path serves, what it names as not projected, and
+   * that no merged-only row leaks in.
    */
   const SESSION = "parity-session";
 
@@ -1558,9 +1569,79 @@ describe("D1-only reads + parity vs the merged view (#4116)", () => {
       }),
     );
     const env = { AGENT_DB: mock as never, IAAA_TENANT_ID: "primary" };
-    const swept = await reconcileRunLedgerProjection({ env, sql: sql as never, sessionId: "sess-1" });
-    expect(swept.errors).toEqual([]);
-    expect(swept.reconciled).toBe(4);
+    // Issue #6103 — write-time projection, per row, using the
+    // sweep's own input mapping (runLedgerReconcile.ts): each DO
+    // row is projected when its DO write lands. The sweep itself
+    // is never run — it would copy existing DO rows into D1.
+    const nowMs = Date.now();
+    let projectedCount = 0;
+    for (const hit of listScheduledReports(sql as never, { limit: 100 })) {
+      const createdAtMs = Date.parse(hit.createdAt);
+      const posted = await postRunLedgerBestEffort(env, "primary", {
+        ledger: "reports",
+        row: {
+          reportId: hit.id,
+          tenantId: "primary",
+          workspaceId: "primary",
+          runId: hit.runId,
+          generationId: hit.generationId,
+          title: hit.title,
+          source: hit.source,
+          summary: hit.summary,
+          body: hit.body,
+          createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : nowMs,
+          updatedAtMs: Number.isFinite(createdAtMs) ? createdAtMs : nowMs,
+          userLogin: hit.userLogin,
+          bodyR2Key: hit.bodyR2Key,
+        },
+      }, nowMs);
+      expect(posted.projected).toBe(true);
+      projectedCount += 1;
+    }
+    for (const row of createAsyncJobPorts(sql as never).read.workflowRunRows("sess-1", 100)) {
+      const posted = await postRunLedgerBestEffort(env, "primary", {
+        ledger: "async_jobs",
+        row: {
+          jobId: row.job_id,
+          sessionId: "sess-1",
+          tenantId: "primary",
+          status: row.status,
+          capability: row.capability,
+          displayName: row.display_name,
+          payloadJson: row.payload_json ?? "{}",
+          resultJson: row.result_json,
+          responseStatus: null,
+          error: row.error,
+          errorCode: row.error_code,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          startedAt: row.started_at,
+          completedAt: row.completed_at,
+          parentJobId: row.parent_job_id,
+          jobKind: row.job_kind,
+          channel: row.channel,
+          notBefore: row.not_before,
+          stage: row.stage,
+          chainId: row.chain_id,
+          stuckAlertedAt: row.stuck_alerted_at,
+          trigger: row.trigger,
+          triggeredBy: row.triggered_by,
+          scheduleId: row.schedule_id,
+          lastActivityAt: row.last_activity_at,
+        },
+      }, nowMs);
+      expect(posted.projected).toBe(true);
+      projectedCount += 1;
+    }
+    for (const row of new SqlJobRunRecordStore(sql as never).listRecent(100)) {
+      const posted = await postRunLedgerBestEffort(env, "primary", {
+        ledger: "job_run_records",
+        row: { record: row, tenantId: "primary" },
+      }, nowMs);
+      expect(posted.projected).toBe(true);
+      projectedCount += 1;
+    }
+    expect(projectedCount).toBe(4);
     const audit = createAuditReportAdapter({ AGENT_DB: mock as never })!;
     const projected = await audit.listReports("primary", { limit: 10 });
     expect(projected).toHaveLength(2);
@@ -1571,22 +1652,11 @@ describe("D1-only reads + parity vs the merged view (#4116)", () => {
     return { mock, sql, env, adapter, stored1: stored1!, stored2: stored2!, twinId: twinned!.linkedJobRunId!, copilotId };
   }
 
-  async function setReadMode(adapter: D1RunLedgerAdapter, mode: "merged" | "d1-only") {
-    await adapter.setTenantProjectionCarriers(
-      "primary",
-      { queues: true, orm: true, sweep: true },
-      mode,
-      Date.now(),
-    );
-  }
-
   function reportsCtx(fx: Awaited<ReturnType<typeof parityFixture>>) {
     return {
       ensureTables: () => fx.sql as never,
       env: fx.env as never,
       jobRunRecordReader: async () => [jobRecord()],
-      getScreenerAgent: () => ({ getHistory: async () => [] }) as never,
-      getScreenerExecutionContext: async () => null as never,
     } as never;
   }
 
@@ -1597,34 +1667,14 @@ describe("D1-only reads + parity vs the merged view (#4116)", () => {
     });
   }
 
-  it("resolveLedgerReadMode: unconfigured reads merged; configured d1-only reads d1-only", async () => {
-    const bare = new MockD1Database();
-    expect(await resolveLedgerReadMode({ AGENT_DB: bare as never })).toBe("merged");
-    const fx = await parityFixture();
-    expect(await resolveLedgerReadMode(fx.env)).toBe("merged");
-    await setReadMode(fx.adapter, "d1-only");
-    expect(await resolveLedgerReadMode(fx.env)).toBe("d1-only");
-  });
-
   it("listProjectedReportSummaries throws when AGENT_DB is unbound (named, never silent-empty)", async () => {
     await expect(
       listProjectedReportSummaries({ AGENT_DB: undefined }, { tenantId: "primary", limit: 10 }),
     ).rejects.toThrow("AgentDB is not bound");
   });
 
-  it("/api/runs: D1-only == merged modulo the absorbed twin (same runs, same fields, no extras)", async () => {
+  it("/api/runs: D1-only serves the projected runs, absorbs the twin, names the unprojected families", async () => {
     const fx = await parityFixture();
-    const mergedRes = await handleReportsRoutes(
-      runsRequest(),
-      new URL("http://x/api/runs?kind=all"),
-      "/api/runs",
-      SESSION,
-      reportsCtx(fx),
-    );
-    expect(mergedRes?.status).toBe(200);
-    const merged = (await mergedRes!.json()) as { runs: any[]; ledgerReadMode: string };
-    expect(merged.ledgerReadMode).toBe("merged");
-    await setReadMode(fx.adapter, "d1-only");
     const d1Res = await handleReportsRoutes(
       runsRequest(),
       new URL("http://x/api/runs?kind=all"),
@@ -1635,50 +1685,34 @@ describe("D1-only reads + parity vs the merged view (#4116)", () => {
     expect(d1Res?.status).toBe(200);
     const d1 = (await d1Res!.json()) as {
       runs: any[];
-      ledgerReadMode: string;
       storeErrors?: Record<string, string>;
     };
-    expect(d1.ledgerReadMode).toBe("d1-only");
-    // The twin is named as not-projected only for the stores that
-    // have no projection; reports + jobRunRecords both land.
+    // Issue #6103 (Q5) — no mode rides the response anymore.
+    expect("ledgerReadMode" in d1).toBe(false);
+    // The projected stores land; the twin is absorbed into the
+    // canonical row, never a second row.
     expect(d1.storeErrors?.reports).toBeUndefined();
     expect(d1.storeErrors?.jobRunRecords).toBeUndefined();
-    const mergedIds = merged.runs.map((r) => r.id);
     const d1Ids = d1.runs.map((r) => r.id);
-    // The merged view carries the twin as its own row; D1-only
-    // absorbs it into the canonical row — exactly one row fewer,
-    // and every other run present exactly once.
-    expect(mergedIds).toContain(fx.twinId);
     expect(d1Ids).not.toContain(fx.twinId);
-    expect(d1Ids.sort()).toEqual(mergedIds.filter((id) => id !== fx.twinId).sort());
-    // Field parity on the shared runs (same row, same shape).
-    for (const run of d1.runs) {
-      const twin = merged.runs.find((r) => r.id === run.id);
-      expect(twin).toBeDefined();
-      expect(run.runId).toBe(twin.runId);
-      expect(run.title).toBe(twin.title);
-      expect(run.status).toBe(twin.status);
-      expect(run.reportUrl).toBe(twin.reportUrl);
-    }
+    expect(d1Ids).toContain(fx.stored1.reportId);
+    expect(d1Ids).toContain(fx.stored2.reportId);
+    // The unprojected families are empty + named, never silent.
+    expect(d1.storeErrors?.scans).toMatch("not projected");
+    expect(d1.storeErrors?.discovery).toMatch("not projected");
+    expect(d1.storeErrors?.screener).toMatch("not projected");
+    // Field parity on the served runs (same row, same shape).
+    const first = d1.runs.find((r) => r.id === fx.stored1.reportId);
+    expect(first).toBeDefined();
+    expect(first.runId).toBe("screener:chat:ALL:2026-11-12T00:00:00.000Z:abcd1234");
+    expect(first.title).toBe("Market screen — ALL (manual)");
+    expect(first.status).toBe("completed");
+    expect(first.reportUrl).toBe("/api/screener/report.pdf?key=reports%2Frep-1.pdf");
   });
 
-  it("/api/runs/details: the twin id resolves to the canonical detail in D1-only mode", async () => {
+  it("/api/runs/details: the twin id resolves to the canonical detail (D1-only)", async () => {
     const fx = await parityFixture();
     const ctx = reportsCtx(fx);
-    const mergedTwin = await handleReportsRoutes(
-      new Request(`http://x/api/runs/details?id=${encodeURIComponent(fx.twinId)}`, { headers: { "x-user-login": "alice" } }),
-      new URL(`http://x/api/runs/details?id=${encodeURIComponent(fx.twinId)}`),
-      "/api/runs/details",
-      SESSION,
-      ctx,
-    );
-    expect(mergedTwin?.status).toBe(200);
-    const mergedBody = (await mergedTwin!.json()) as { detail: { runId: string }; ledgerReadMode: string };
-    expect(mergedBody.ledgerReadMode).toBe("merged");
-    // In merged mode the twin id finds the job-run-record's own
-    // detail (its runId IS the derived d1:... id).
-    expect(mergedBody.detail.runId).toBe(fx.twinId);
-    await setReadMode(fx.adapter, "d1-only");
     const d1Twin = await handleReportsRoutes(
       new Request(`http://x/api/runs/details?id=${encodeURIComponent(fx.twinId)}`, { headers: { "x-user-login": "alice" } }),
       new URL(`http://x/api/runs/details?id=${encodeURIComponent(fx.twinId)}`),
@@ -1687,15 +1721,16 @@ describe("D1-only reads + parity vs the merged view (#4116)", () => {
       ctx,
     );
     expect(d1Twin?.status).toBe(200);
-    const d1Body = (await d1Twin!.json()) as { detail: { runId: string; reportId?: string }; ledgerReadMode: string };
-    expect(d1Body.ledgerReadMode).toBe("d1-only");
+    const d1Body = (await d1Twin!.json()) as { detail: { runId: string; reportId?: string } };
+    // Issue #6103 (Q5) — no mode rides the response anymore.
+    expect("ledgerReadMode" in d1Body).toBe(false);
     // The twin id redirects to the canonical report's detail — the
     // run is still found by its old id, never a 404.
     expect(d1Body.detail.runId).toBe("screener:chat:ALL:2026-11-12T00:00:00.000Z:abcd1234");
     expect((d1Body.detail as { id: string }).id).toBe(fx.stored1.reportId);
   });
 
-  it("Workflow Runs: D1-only jobs + report runs == merged modulo the absorbed twin", async () => {
+  it("Workflow Runs: D1-only jobs + report runs, twin absorbed, outcomes served, stages named", async () => {
     const fx = await parityFixture();
     const ctx = {
       ensureTables: () => fx.sql as never,
@@ -1704,17 +1739,6 @@ describe("D1-only reads + parity vs the merged view (#4116)", () => {
       jobRunRecordReader: async () => [jobRecord()],
       scheduleReader: async () => [],
     } as never;
-    const mergedRes = await handleWorkflowRunsRoutes(
-      new Request("http://x/api/workflow-runs", { method: "GET" }),
-      new URL("http://x/api/workflow-runs"),
-      "/api/workflow-runs",
-      "sess-1",
-      ctx,
-    );
-    expect(mergedRes?.status).toBe(200);
-    const merged = (await mergedRes!.json()) as { runs: any[]; ledgerReadMode: string };
-    expect(merged.ledgerReadMode).toBe("merged");
-    await setReadMode(fx.adapter, "d1-only");
     const d1Res = await handleWorkflowRunsRoutes(
       new Request("http://x/api/workflow-runs", { method: "GET" }),
       new URL("http://x/api/workflow-runs"),
@@ -1725,49 +1749,41 @@ describe("D1-only reads + parity vs the merged view (#4116)", () => {
     expect(d1Res?.status).toBe(200);
     const d1 = (await d1Res!.json()) as {
       runs: any[];
-      ledgerReadMode: string;
       storeErrors?: Record<string, string>;
     };
-    expect(d1.ledgerReadMode).toBe("d1-only");
+    // Issue #6103 (Q5) — no mode rides the response anymore.
+    expect("ledgerReadMode" in d1).toBe(false);
     expect(d1.storeErrors?.jobs).toBeUndefined();
     expect(d1.storeErrors?.canonicalDocs).toBeUndefined();
-    // Outcomes + transitions are not projected: empty + named.
-    expect(d1.storeErrors?.outcomes).toMatch("not projected");
+    // Outcomes are SERVED now (from the folded D1 facts) — the
+    // fixture's D1 rows carry no outcome facts, so the list is
+    // empty but the read succeeds: no outcomes error is named.
+    expect(d1.storeErrors?.outcomes).toBeUndefined();
+    // Stage transitions are not projected, permanently (user ruling
+    // 2026-11-25, "no more projections"): empty + named.
     expect(d1.storeErrors?.stages).toMatch("not projected");
-    const mergedIds = merged.runs.map((r) => String(r.id));
     const d1Ids = d1.runs.map((r) => String(r.id));
+    const d1RunIds = d1.runs.map((r) => String(r.runId));
     // The job-backed run and both report runs survive; the twin
     // job-run-record run is absorbed into the canonical report run.
-    expect(mergedIds).toContain(fx.twinId);
+    // (Report-only runs are keyed by their runId, not the report
+    // id — the report id rides documents.reportId.)
     expect(d1Ids).not.toContain(fx.twinId);
-    expect(d1Ids.sort()).toEqual(mergedIds.filter((id) => id !== fx.twinId).sort());
+    expect(d1RunIds).toContain("screener:chat:ALL:2026-11-12T00:00:00.000Z:abcd1234");
+    expect(d1RunIds).toContain("screener:other:2026-11-12T00:10:00.000Z:efgh5678");
     // The projected async job reads as the same job-backed run.
     const d1Job = d1.runs.find((r) => String(r.id).includes("job-async-1") || (r.jobs ?? []).some((j: any) => j.job_id === "job-async-1"));
     expect(d1Job).toBeDefined();
   });
 
-  it("/api/runs: a swept DO job run record (copilot cycle) appears exactly once in both modes", async () => {
+  it("/api/runs: a projected DO job run record (copilot cycle) appears exactly once", async () => {
     const fx = await parityFixture();
     // No jobRunRecordReader injection: the route reads D1 for real,
-    // so the swept DO row must be visible through the D1 read.
+    // so the projected DO row must be visible through the D1 read.
     const ctx = {
       ensureTables: () => fx.sql as never,
       env: fx.env as never,
-      getScreenerAgent: () => ({ getHistory: async () => [] }) as never,
-      getScreenerExecutionContext: async () => null as never,
     } as never;
-    const mergedRes = await handleReportsRoutes(
-      runsRequest(),
-      new URL("http://x/api/runs?kind=all"),
-      "/api/runs",
-      SESSION,
-      ctx,
-    );
-    expect(mergedRes?.status).toBe(200);
-    const merged = (await mergedRes!.json()) as { runs: any[]; ledgerReadMode: string };
-    expect(merged.ledgerReadMode).toBe("merged");
-    expect(merged.runs.filter((r) => r.id === fx.copilotId)).toHaveLength(1);
-    await setReadMode(fx.adapter, "d1-only");
     const d1Res = await handleReportsRoutes(
       runsRequest(),
       new URL("http://x/api/runs?kind=all"),
@@ -1776,12 +1792,12 @@ describe("D1-only reads + parity vs the merged view (#4116)", () => {
       ctx,
     );
     expect(d1Res?.status).toBe(200);
-    const d1 = (await d1Res!.json()) as { runs: any[]; ledgerReadMode: string };
-    expect(d1.ledgerReadMode).toBe("d1-only");
+    const d1 = (await d1Res!.json()) as { runs: any[] };
+    expect("ledgerReadMode" in d1).toBe(false);
     expect(d1.runs.filter((r) => r.id === fx.copilotId)).toHaveLength(1);
   });
 
-  it("Workflow Runs: a swept DO job run record (copilot cycle) appears exactly once in both modes", async () => {
+  it("Workflow Runs: a projected DO job run record (copilot cycle) appears exactly once", async () => {
     const fx = await parityFixture();
     // No jobRunRecordReader injection: the route reads D1 for real.
     const ctx = {
@@ -1790,18 +1806,6 @@ describe("D1-only reads + parity vs the merged view (#4116)", () => {
       env: fx.env as never,
       scheduleReader: async () => [],
     } as never;
-    const mergedRes = await handleWorkflowRunsRoutes(
-      new Request("http://x/api/workflow-runs", { method: "GET" }),
-      new URL("http://x/api/workflow-runs"),
-      "/api/workflow-runs",
-      "sess-1",
-      ctx,
-    );
-    expect(mergedRes?.status).toBe(200);
-    const merged = (await mergedRes!.json()) as { runs: any[]; ledgerReadMode: string };
-    expect(merged.ledgerReadMode).toBe("merged");
-    expect(merged.runs.filter((r) => String(r.id) === fx.copilotId)).toHaveLength(1);
-    await setReadMode(fx.adapter, "d1-only");
     const d1Res = await handleWorkflowRunsRoutes(
       new Request("http://x/api/workflow-runs", { method: "GET" }),
       new URL("http://x/api/workflow-runs"),
@@ -1810,8 +1814,291 @@ describe("D1-only reads + parity vs the merged view (#4116)", () => {
       ctx,
     );
     expect(d1Res?.status).toBe(200);
-    const d1 = (await d1Res!.json()) as { runs: any[]; ledgerReadMode: string };
-    expect(d1.ledgerReadMode).toBe("d1-only");
+    const d1 = (await d1Res!.json()) as { runs: any[] };
+    expect("ledgerReadMode" in d1).toBe(false);
     expect(d1.runs.filter((r) => String(r.id) === fx.copilotId)).toHaveLength(1);
+  });
+});
+
+describe("D1 outcomes list read (#6103 Q1)", () => {
+  /**
+   * The outcomes list derives from the facts already folded onto
+   * D1 job_run_records (#6006, attachOutcomeFacts) — no new table,
+   * no new projection. These tests seed D1 through the REAL fold
+   * (attachOutcomeFacts, the same entry point production uses) and
+   * pin the field-for-field mapping to WorkflowRunOutcomeRow,
+   * including the fold's documented losses on attached rows.
+   * Seeding via buildJobRunRecord cannot work here: the builder
+   * neither accepts the "job-outcome" system nor carries the
+   * outcome-fact fields — facts reach a D1 row only through the
+   * fold (or the projector upsert), never through the builder.
+   */
+  function outcomeRow(overrides: Partial<JobOutcomeRow> = {}): JobOutcomeRow {
+    return {
+      id: "outcome-1",
+      kind: "stock",
+      trigger: "manual",
+      status: "completed",
+      scanned: null,
+      matched: null,
+      codedError: null,
+      reportUrl: null,
+      pdfKey: null,
+      xlsxKey: null,
+      csvKey: null,
+      deliveryStates: {},
+      origin: "job-tree",
+      createdAt: "2026-11-12T00:00:00.000Z",
+      ...overrides,
+    };
+  }
+
+  async function seedOutcomes() {
+    const mock = new MockD1Database();
+    const jobDb = createD1JobRunRecordDb(mock as never);
+    await ensureJobRunRecordsSchema(jobDb);
+    const store = new D1JobRunRecordStore(jobDb);
+    const env = { AGENT_DB: mock as never, IAAA_TENANT_ID: "primary" };
+    return { mock, env, store };
+  }
+
+  it("fold-created rows map field-for-field (id/kind/trigger/status/facts/createdAt)", async () => {
+    const { env, store } = await seedOutcomes();
+    const folded = await store.attachOutcomeFacts(
+      {
+        outcome: outcomeRow({
+          status: "partial",
+          scanned: 100,
+          matched: 5,
+          reportUrl: "https://example.invalid/reports/outcome-1",
+          pdfKey: "reports/outcome-1.pdf",
+          xlsxKey: "reports/outcome-1.xlsx",
+          csvKey: "reports/outcome-1.csv",
+          deliveryStates: { email: "sent" },
+        }),
+        tenantId: "primary",
+      },
+      Date.now(),
+    );
+    expect(folded.landed).toBe(true);
+    expect(folded.created).toBe(true);
+    const rows = await listD1JobOutcomes(env, { limit: 10 });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toEqual({
+      id: "outcome-1",
+      kind: "stock",
+      trigger: "manual",
+      status: "partial",
+      scanned: 100,
+      matched: 5,
+      codedError: null,
+      reportUrl: "https://example.invalid/reports/outcome-1",
+      pdfKey: "reports/outcome-1.pdf",
+      xlsxKey: "reports/outcome-1.xlsx",
+      csvKey: "reports/outcome-1.csv",
+      deliveryStates: { email: "sent" },
+      origin: "job-tree",
+      createdAt: "2026-11-12T00:00:00.000Z",
+    });
+  });
+
+  it("fold-created failed rows read failed; completed rows read completed", async () => {
+    const { env, store } = await seedOutcomes();
+    await store.attachOutcomeFacts(
+      {
+        outcome: outcomeRow({
+          id: "outcome-failed",
+          kind: "options",
+          trigger: "scheduled",
+          status: "failed",
+          codedError: "E_TIMEOUT",
+        }),
+        tenantId: "primary",
+      },
+      Date.now(),
+    );
+    await store.attachOutcomeFacts(
+      {
+        outcome: outcomeRow({
+          id: "outcome-done",
+          kind: "goal",
+          trigger: "manual",
+          status: "completed",
+          scanned: 20,
+          matched: 2,
+          createdAt: "2026-11-12T01:00:00.000Z",
+        }),
+        tenantId: "primary",
+      },
+      Date.now(),
+    );
+    const rows = await listD1JobOutcomes(env, { limit: 10 });
+    expect(rows.map((r) => [r.id, r.status, r.codedError])).toEqual([
+      ["outcome-done", "completed", null],
+      ["outcome-failed", "failed", "E_TIMEOUT"],
+    ]);
+  });
+
+  it("attached rows recover the outcome id via linkage; kind does not survive the fold", async () => {
+    const { env, store } = await seedOutcomes();
+    // Facts folded onto an engine row (workflowId linkage, failed
+    // outcome with a coded error): id is the linkage value, kind
+    // reads "unknown", status reads the folded failure.
+    await store.record(
+      jobRecord({
+        system: "scheduled-agent-goal",
+        jobId: "goal-weekly-brief",
+        operation: "run",
+        workflowId: "wf-123",
+        started: "2026-11-12T01:00:00.000Z",
+        finished: "2026-11-12T01:05:00.000Z",
+        outcome: "success",
+        triggeredBy: "scheduled",
+        trigger: "scheduled",
+      }),
+    );
+    const attached = await store.attachOutcomeFacts(
+      {
+        outcome: outcomeRow({
+          id: "wf-123",
+          kind: "goal",
+          trigger: "scheduled",
+          status: "failed",
+          scanned: 50,
+          matched: 3,
+          codedError: "E_X",
+          reportUrl: "https://example.invalid/reports/goal-1",
+          createdAt: "2026-11-12T01:00:00.000Z",
+        }),
+        tenantId: "primary",
+      },
+      Date.now(),
+    );
+    expect(attached.landed).toBe(true);
+    expect(attached.created).toBe(false);
+    // Facts folded onto an engine row (asyncJobId linkage, no coded
+    // error): id is the async job id, status reads completed.
+    await store.record(
+      jobRecord({
+        system: "job-pipeline",
+        jobId: "job-async-9",
+        operation: "run",
+        asyncJobId: "job-async-9",
+        started: "2026-11-12T02:00:00.000Z",
+        finished: "2026-11-12T02:05:00.000Z",
+        outcome: "success",
+        triggeredBy: "manual",
+        trigger: "manual",
+      }),
+    );
+    const attached2 = await store.attachOutcomeFacts(
+      {
+        outcome: outcomeRow({
+          id: "job-async-9",
+          kind: "stock",
+          trigger: "manual",
+          status: "completed",
+          scanned: 10,
+          matched: 1,
+          createdAt: "2026-11-12T02:00:00.000Z",
+        }),
+        tenantId: "primary",
+      },
+      Date.now(),
+    );
+    expect(attached2.landed).toBe(true);
+    expect(attached2.created).toBe(false);
+    const rows = await listD1JobOutcomes(env, { limit: 10 });
+    expect(rows.map((r) => [r.id, r.kind, r.status])).toEqual([
+      ["job-async-9", "unknown", "completed"],
+      ["wf-123", "unknown", "failed"],
+    ]);
+    expect(rows[1].trigger).toBe("scheduled");
+    expect(rows[1].scanned).toBe(50);
+    expect(rows[1].codedError).toBe("E_X");
+  });
+
+  it("engine rows without outcome facts are excluded; the list is newest-first and capped", async () => {
+    const { env, store } = await seedOutcomes();
+    await store.record(jobRecord());
+    for (const [id, createdAt] of [
+      ["outcome-old", "2026-11-12T00:00:00.000Z"],
+      ["outcome-mid", "2026-11-12T01:00:00.000Z"],
+      ["outcome-new", "2026-11-12T02:00:00.000Z"],
+    ] as const) {
+      await store.attachOutcomeFacts(
+        { outcome: outcomeRow({ id, createdAt }), tenantId: "primary" },
+        Date.now(),
+      );
+    }
+    const rows = await listD1JobOutcomes(env, { limit: 2 });
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.id)).toEqual(["outcome-new", "outcome-mid"]);
+    const all = await listD1JobOutcomes(env, { limit: 10 });
+    expect(all.map((r) => r.id)).toEqual(["outcome-new", "outcome-mid", "outcome-old"]);
+  });
+
+  it("carriesOutcomeFacts: fold rows and fact-carrying engine rows only", () => {
+    // A fold-created row, as the fold writes it (the builder cannot
+    // build one — see the describe comment — so the shape is spelled
+    // out literally here).
+    const folded = { ...jobRecord(), system: "job-outcome" as const, jobId: "o-1", operation: "stock" };
+    expect(carriesOutcomeFacts(folded)).toBe(true);
+    // Fact-carrying engine rows, spelled out literally: the builder
+    // drops the fact fields (see the describe comment), so the
+    // record is built by spreading a valid engine row and adding
+    // the folded fact — the same shape the fold's attach leg reads
+    // back from D1.
+    expect(carriesOutcomeFacts({ ...jobRecord(), origin: "job-tree" })).toBe(true);
+    expect(carriesOutcomeFacts({ ...jobRecord(), scanned: 1 })).toBe(true);
+    expect(carriesOutcomeFacts(jobRecord())).toBe(false);
+    // The mapping itself is the same function the list uses.
+    expect(d1JobRunRecordToOutcomeRow(folded).id).toBe("o-1");
+  });
+});
+
+describe("unconfigured tenant is named in storeErrors (#6103 Q4)", () => {
+  async function unconfiguredEnv() {
+    const mock = new MockD1Database();
+    const jobDb = createD1JobRunRecordDb(mock as never);
+    await ensureJobRunRecordsSchema(jobDb);
+    const adapter = createRunLedgerAdapter({ AGENT_DB: mock as never })!;
+    await ensureRunLedgerTables(adapter);
+    // No setTenantProjectionCarriers call: the tenant has no
+    // carrier row, so the carrier read reports "unconfigured".
+    return { mock, env: { AGENT_DB: mock as never, IAAA_TENANT_ID: "primary" } };
+  }
+
+  it("/api/runs names the unconfigured tenant instead of showing a silently short list", async () => {
+    const { env } = await unconfiguredEnv();
+    const res = await handleReportsRoutes(
+      new Request("http://x/api/runs?kind=all", { method: "GET", headers: { "x-user-login": "alice" } }),
+      new URL("http://x/api/runs?kind=all"),
+      "/api/runs",
+      "q4-session",
+      { ensureTables: () => new MockSqlStorage() as never, env: env as never } as never,
+    );
+    expect(res?.status).toBe(200);
+    const body = (await res!.json()) as { storeErrors?: Record<string, string> };
+    expect(body.storeErrors?.runs).toMatch("no projection carrier configured for this tenant");
+  });
+
+  it("Workflow Runs names the unconfigured tenant instead of showing a silently short list", async () => {
+    const { env } = await unconfiguredEnv();
+    const res = await handleWorkflowRunsRoutes(
+      new Request("http://x/api/workflow-runs", { method: "GET" }),
+      new URL("http://x/api/workflow-runs"),
+      "/api/workflow-runs",
+      "sess-1",
+      {
+        ensureTables: () => new MockSqlStorage() as never,
+        userLogin: "alice",
+        env: env as never,
+        scheduleReader: async () => [],
+      } as never,
+    );
+    expect(res?.status).toBe(200);
+    const body = (await res!.json()) as { storeErrors?: Record<string, string> };
+    expect(body.storeErrors?.runs).toMatch("no projection carrier configured for this tenant");
   });
 });
