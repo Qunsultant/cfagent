@@ -1507,7 +1507,10 @@ export function goalToRecord(goal: ScheduledGoal): UnifiedScheduleRecord {
     kind: "goal",
     state: goal.enabled ? "active" : "paused",
     operation: goal.operation,
-    definition: { ...(goal as unknown as Record<string, unknown>) },
+    definition: {
+      ...(goal as unknown as Record<string, unknown>),
+      executionMode: goal.executionMode ?? "deterministic",
+    },
     ...(goal.provenance !== undefined ? { provenance: goal.provenance } : {}),
     createdAt: nowIso,
     updatedAt: nowIso,
@@ -1546,6 +1549,7 @@ export function recordToGoal(record: UnifiedScheduleRecord): ScheduledGoal | und
   return {
     ...def,
     enabled: record.state === "active",
+    executionMode: def.executionMode ?? "deterministic",
   };
 }
 

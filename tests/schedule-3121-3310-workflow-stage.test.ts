@@ -747,6 +747,7 @@ describe("3310-M the one management service serves the workflow-stage kind", () 
       // Issue #6482 — yearly (the old daily cron is below the
       // monthly floor at resume); creation lands PAUSED.
       timing: { type: "cron", cron: "0 0 1 1 *" },
+      executionMode: "deterministic",
       ownerLogin: "OpenAIMP",
     });
     expect(created.kind).toBe("workflow-stage");
@@ -758,6 +759,9 @@ describe("3310-M the one management service serves the workflow-stage kind", () 
     expect(row?.kind).toBe("workflow-stage");
     expect(row?.jobId).toBe("two-child");
     expect(row?.stageId).toBe("job:0");
+    expect(
+      ((created.definition as Record<string, unknown>).payload as Record<string, unknown>)?.executionMode,
+    ).toBe("deterministic");
     const paused = await h.adapter.pause!(created.id);
     expect(paused.state).toBe("paused");
     expect(h.alarms.size).toBe(0);

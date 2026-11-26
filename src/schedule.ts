@@ -19,6 +19,8 @@ export interface ScheduledGoal {
   budgetCents: number;
   /** Whether this goal is currently active */
   enabled: boolean;
+  /** Execution strategy selected at creation; legacy records default to deterministic. */
+  executionMode?: "deterministic" | "agentic-loop";
   /** Last time this goal was evaluated (ISO timestamp) */
   lastRun?: string;
   /**
@@ -45,6 +47,9 @@ export interface ScheduledGoal {
    */
   provenance?: ScheduleProvenance;
 }
+
+export const AGENTIC_LOOP_UNAVAILABLE_REASON =
+  "Agentic-loop scheduling is unavailable until owner-configured iteration and cost bounds, a kill switch, and no-self-rearm enforcement are wired.";
 
 /**
  * Issue #3121 S1 — schedule creation provenance (#2366 items 3–4).

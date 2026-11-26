@@ -105,6 +105,7 @@ describe("3122-P18..P21 SDK adapter adopts into the unified store", () => {
       kind: "sdk",
       principal: { login: "OpenAIMP", agentId: "agent-1" },
       tenantId: "primary",
+      executionMode: "deterministic",
       callback: "autonomousMarketScreen",
       timing: { type: "cron", cron: "0 9 * * 1-5" },
       payload: {},
@@ -125,6 +126,9 @@ describe("3122-P18..P21 SDK adapter adopts into the unified store", () => {
     // ownerLogin comes from the executor-stamped provenance, never invented.
     expect(record?.ownerLogin).toBe("OpenAIMP");
     expect((record?.definition as Record<string, unknown>)?.callback).toBe("autonomousMarketScreen");
+    expect(
+      ((record?.definition as Record<string, unknown>)?.payload as Record<string, unknown>)?.executionMode,
+    ).toBe("deterministic");
   });
 
   it("P19 adoption never clobbers an existing record (insert-if-absent)", async () => {
@@ -247,5 +251,21 @@ describe("3122-P22 goals adapter operates on the unified store", () => {
     expect(goals[0]?.cron).toBe("0 9 * * *");
     expect(goals[0]?.budgetCents).toBe(500);
     expect(goals[0]?.enabled).toBe(true);
+    expect(goals[0]?.executionMode).toBe("deterministic");
+  });
+
+  it("persists an explicit execution mode in the unified goal definition", async () => {
+    const goal = {
+      id: "goal-2",
+      name: "Monthly rollup",
+      cron: "0 9 1 * *",
+      operation: "resource.rollup_daily",
+      budgetCents: 500,
+      enabled: true,
+      executionMode: "deterministic" as const,
+    };
+    const record = goalToRecord(goal);
+    expect(record.definition).toMatchObject({ executionMode: "deterministic" });
+    expect(recordToGoal(record)?.executionMode).toBe("deterministic");
   });
 });

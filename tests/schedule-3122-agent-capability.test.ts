@@ -1,9 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { OPERATION_CATALOG } from "../src/orchestrate";
 import {
   CREATABLE_SCHEDULE_CALLBACKS,
   INTERNAL_RECORDED_SCHEDULE_CALLBACKS,
 } from "../src/agents/orchestrator/scheduleCallbacks";
+import { makeRunScheduleCallback } from "../src/agents/routes/schedules";
 import {
   AGENT_APPROVAL_BOUND_GOAL_OPERATIONS,
   AGENT_EXCLUDED_CALLBACKS,
@@ -88,6 +89,21 @@ describe("3122-P01 registry accounting: every catalog operation declared exactly
 });
 
 describe("3122-P02..P09 classifier", () => {
+  it("fails closed instead of dispatching a stored agentic-loop SDK callback", async () => {
+    const callback = vi.fn();
+    const runScheduleCallback = makeRunScheduleCallback({
+      autonomousMarketScreen: callback,
+    });
+
+    await expect(
+      runScheduleCallback("autonomousMarketScreen", { executionMode: "agentic-loop" }),
+    ).rejects.toThrow("owner-configured iteration and cost bounds");
+    await expect(
+      runScheduleCallback("autonomousMarketScreen", { executionMode: "unexpected" }),
+    ).rejects.toThrow("Unsupported schedule executionMode: unexpected.");
+    expect(callback).not.toHaveBeenCalled();
+  });
+
   it("P02 plain screen callback is schedulable with no approval", () => {
     const out = classifyAgentScheduleRequest(
       { kind: "sdk-callback", callback: "autonomousMarketScreen" },
@@ -402,6 +418,7 @@ describe("3122-P13..P15 executor", () => {
       timing: { type: "cron", cron: "0 9 * * 1-5" },
       payload: {},
     });
+
     expect(out.ok).toBe(true);
     expect(sdkItems).toHaveLength(1);
     const payload = sdkItems[0].payload as Record<string, unknown>;
@@ -416,6 +433,29 @@ describe("3122-P13..P15 executor", () => {
     expect(row.triggeredBy).toBe("manual");
     expect(String(row.detail ?? "")).toContain("agent-1");
     expect(audits.some((a) => a.type === "schedule.created")).toBe(true);
+  });
+
+  it("fails closed for agentic-loop requests before approval or store mutation", async () => {
+    const { deps, getPending, ledger, goalsAdded } = harness();
+    const out = await executeAgentScheduleAction(deps as never, {
+      action: "create",
+      kind: "goal",
+      principal,
+      tenantId: "primary",
+      operation: "resource.rollup_daily",
+      goal: {
+        id: "loop-goal",
+        name: "Loop goal",
+        cron: "0 9 * * *",
+        operation: "resource.rollup_daily",
+        budgetCents: 10_001,
+        executionMode: "agentic-loop",
+      },
+    });
+    expect(out).toMatchObject({ ok: false, code: "unsupported" });
+    expect(getPending()).toHaveLength(0);
+    expect(goalsAdded).toHaveLength(0);
+    expect((ledger[0] as Record<string, unknown>).outcome).toBe("skipped");
   });
 
   it("P13b PDP denial blocks the action and audits the denial", async () => {
@@ -620,5 +660,122 @@ describe("3122-P17 agent provenance", () => {
     expect(p.agentId).toBe("agent-1");
     expect(p.createdBy).toBe("OpenAIMP");
     expect(p.createdAt).toBe("2026-11-11T12:00:00.000Z");
+  });
+});
+
+describe("3122 direct Think scheduling tool", () => {
+  it("exposes schedule creation through the chat-turn tool factory", async () => {
+    const { createTurnTools } = await import("../src/agents/orchestrator/chatTurnHelpers");
+    const execute = vi.fn(async () => ({ ok: true as const }));
+    const tools = createTurnTools({
+      env: { IAAA_TENANT_ID: "tenant-from-env" },
+      getOrm: () => ({} as never),
+      sessionKey: () => "schedule-chat-test",
+      turnUserLogin: () => "trusted-login",
+      agentScheduleExecute: execute,
+      ensureTables: vi.fn(),
+      audit: vi.fn(),
+      submitAsyncJob: vi.fn(),
+      getAsyncJob: vi.fn(),
+      listAsyncJobs: vi.fn(() => []),
+      getMessages: vi.fn(async () => []),
+      activeTurnMetadata: {},
+    } as never, "schedule-chat-test");
+    const tool = tools["manage_agent_schedule"];
+
+    expect(tool).toBeDefined();
+    await tool.execute({
+      action: "create",
+      kind: "sdk",
+      executionMode: "deterministic",
+      callback: "autonomousMarketScreen",
+      timing: { type: "cron", cron: "0 9 * * 1-5" },
+    });
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "create",
+        kind: "sdk",
+        executionMode: "deterministic",
+        callback: "autonomousMarketScreen",
+      }),
+    );
+  });
+
+  it("uses the trusted turn login and tenant, never model-supplied identity", async () => {
+    const { createAgentMcpTools } = await import("../src/agents/mcpAdapter");
+    const execute = vi.fn(async () => ({ ok: true as const }));
+    const tools = createAgentMcpTools({
+      env: { IAAA_TENANT_ID: "tenant-from-env" },
+      actingLogin: () => "trusted-login",
+      agentScheduleExecute: execute,
+    } as never);
+    const tool = tools["manage_agent_schedule"];
+    expect(tool).toBeDefined();
+    const parsed = tool.inputSchema.safeParse({
+      action: "list",
+      kind: "goal",
+      principal: { login: "spoofed-login", agentId: "spoofed-agent" },
+      tenantId: "spoofed-tenant",
+    });
+    expect(parsed.success).toBe(false);
+
+    await tool.execute({ action: "list", kind: "goal" });
+    expect(execute).toHaveBeenCalledWith({
+      action: "list",
+      kind: "goal",
+      principal: { login: "trusted-login", agentId: "orchestrator" },
+      tenantId: "tenant-from-env",
+    });
+  });
+
+  it("fails closed when no trusted turn login is available", async () => {
+    const { createAgentMcpTools } = await import("../src/agents/mcpAdapter");
+    const execute = vi.fn();
+    const tools = createAgentMcpTools({
+      env: {},
+      actingLogin: () => undefined,
+      agentScheduleExecute: execute,
+    } as never);
+
+    await expect(
+      tools["manage_agent_schedule"].execute({ action: "list", kind: "goal" }),
+    ).resolves.toMatchObject({ ok: false, code: "denied" });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("requires and forwards an explicit execution mode when creating schedules", async () => {
+    const { createAgentMcpTools } = await import("../src/agents/mcpAdapter");
+    const execute = vi.fn(async () => ({ ok: true as const }));
+    const tools = createAgentMcpTools({
+      env: { IAAA_TENANT_ID: "tenant-from-env" },
+      actingLogin: () => "trusted-login",
+      agentScheduleExecute: execute,
+    } as never);
+    const tool = tools["manage_agent_schedule"];
+
+    await expect(
+      tool.execute({
+        action: "create",
+        kind: "sdk",
+        callback: "autonomousMarketScreen",
+        timing: { type: "cron", cron: "0 9 * * 1-5" },
+      }),
+    ).rejects.toThrow(/explicit executionMode/i);
+    expect(execute).not.toHaveBeenCalled();
+
+    await tool.execute({
+      action: "create",
+      kind: "sdk",
+      executionMode: "deterministic",
+      callback: "autonomousMarketScreen",
+      timing: { type: "cron", cron: "0 9 * * 1-5" },
+    });
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "create",
+        kind: "sdk",
+        executionMode: "deterministic",
+      }),
+    );
   });
 });
