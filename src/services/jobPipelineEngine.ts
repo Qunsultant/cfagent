@@ -318,6 +318,42 @@ export const WAIT_EVENT_STEP = "wait.event";
  */
 export const WAIT_SLEEP_STEP = "wait.sleep";
 
+/**
+ * Issue #6394 — the child-run stage: a step that starts an INDEPENDENT run of
+ * another job and (by default) waits for it. The child has its own run id, its
+ * own instance row and its own lifecycle, so its failure is its own — the
+ * parent only sees an outcome it can branch on.
+ *
+ * Two deliberate differences from the wait stages above:
+ *  - this step IS journaled: a replay must return the recorded child run id
+ *    rather than dispatch a second child, so the exactly-once rule is the
+ *    journal's, not a hand-rolled check;
+ *  - "proceed without it" is never silent — `onFailure` is REQUIRED and must
+ *    name `fail` or `continue`, so the parent's reaction to a failed child is
+ *    a recorded decision rather than an accident.
+ *
+ * The child links back to its parent through the run record's `originRunId`
+ * (a child is a fresh ORIGINAL run of its own job, not a re-run of anything).
+ */
+export const CHILD_RUN_STEP = "child.run";
+
+/** One child-run request, validated at the step. */
+export interface JobChildRunRequest {
+  parentJobId: string;
+  parentRunId: string;
+  childJobId: string;
+  onFailure: "fail" | "continue";
+  awaitSettlement: boolean;
+  timeoutMs: number;
+}
+
+/** What a child-run step hands the next step. */
+export interface JobChildRunOutcome {
+  outcome: "completed" | "failed" | "timed_out";
+  childJobId: string;
+  childRunId: string;
+}
+
 /** One park request: where, how long, and under the engine's stable name. */
 export interface JobDurableSleepRequest {
   jobId: string;
@@ -4820,6 +4856,128 @@ export class JobPipelineControl {
     return { outcome: "slept", durationMs: raw };
   }
 
+  /**
+   * Issue #6394 — validate and run one child dispatch.
+   *
+   * The child is started through the SAME `runJob` the doors use, so it is a
+   * first-class run: its own id, its own record, its own lifecycle. The parent
+   * records the child's id in this step's output and waits for it unless the
+   * job asked not to.
+   */
+  private async runChildRun(
+    ctx: RunContext,
+    path: string,
+    params: Record<string, unknown>,
+  ): Promise<JobChildRunOutcome> {
+    const childJobId = typeof params.jobId === "string" ? params.jobId.trim() : "";
+    if (!childJobId) {
+      throw new JobPipelineError(
+        "job_config_invalid",
+        `Step "${CHILD_RUN_STEP}" of node "${path || "root"}" requires a non-empty "jobId" (the job the child run executes).`,
+      );
+    }
+    if (childJobId === ctx.jobId) {
+      throw new JobPipelineError(
+        "job_config_invalid",
+        `Step "${CHILD_RUN_STEP}" of node "${path || "root"}" names this run's own job ("${childJobId}"); a child must be a different job, because a job's instance carries one live run. Dispatch a distinct job, or the run-per-row shape.`,
+      );
+    }
+    const onFailure = params.onFailure;
+    if (onFailure !== "fail" && onFailure !== "continue") {
+      throw new JobPipelineError(
+        "job_config_invalid",
+        `Step "${CHILD_RUN_STEP}" of node "${path || "root"}" must name what the parent does when the child fails: "onFailure" is required and must be "fail" or "continue" (got ${JSON.stringify(onFailure)}) — a parent never silently proceeds past a failed child.`,
+      );
+    }
+    const awaitSettlement = params.awaitSettlement !== false;
+    const rawTimeout = params.timeoutMs;
+    if (
+      rawTimeout !== undefined &&
+      (typeof rawTimeout !== "number" || !Number.isFinite(rawTimeout) || rawTimeout <= 0)
+    ) {
+      throw new JobPipelineError(
+        "job_config_invalid",
+        `Step "${CHILD_RUN_STEP}" of node "${path || "root"}" has an invalid "timeoutMs" (${String(rawTimeout)}); it must be a positive number of milliseconds.`,
+      );
+    }
+    const timeoutMs =
+      typeof rawTimeout === "number" ? rawTimeout : this.policy.waitDefaultTimeoutMs;
+
+    // The child is a fresh ORIGINAL run of its own job, linked to this run by
+    // origin — never a re-run of the parent's work.
+    let dispatch: JobDispatchResult;
+    try {
+      dispatch = await this.runJob(childJobId, {
+        trigger: ctx.trigger,
+        kind: "original",
+        originRunId: ctx.runId,
+      });
+    } catch (error) {
+      if (error instanceof JobPipelineError) throw error;
+      throw new JobPipelineError(
+        "job_child_failed",
+        `Child run of job "${childJobId}" (node "${path || "root"}") could not be started: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    const outcome = await this.childOutcome(childJobId, dispatch, awaitSettlement, timeoutMs);
+    if (outcome.outcome !== "completed" && onFailure === "fail") {
+      throw new JobPipelineError(
+        "job_child_failed",
+        `Child run "${outcome.childRunId}" of job "${childJobId}" ${outcome.outcome} (node "${path || "root"}"), and this step's "onFailure" is "fail".`,
+      );
+    }
+    return outcome;
+  }
+
+  /**
+   * The child's settlement, bounded: a child that is still live is awaited
+   * (or polled through the run recorder when its dispatch returned no
+   * completion), and a child that outlives the step's bound reads as
+   * `timed_out` — a named outcome the parent branches on, never a hang.
+   */
+  private async childOutcome(
+    childJobId: string,
+    dispatch: JobDispatchResult,
+    awaitSettlement: boolean,
+    timeoutMs: number,
+  ): Promise<JobChildRunOutcome> {
+    const settled = (state: string): JobChildRunOutcome => ({
+      outcome: state === "completed" ? "completed" : "failed",
+      childJobId,
+      childRunId: dispatch.runId,
+    });
+    const terminal = new Set(["completed", "failed", "cancelled", "paused"]);
+    if (terminal.has(dispatch.state)) return settled(dispatch.state);
+    if (!awaitSettlement) return settled(dispatch.state);
+    if (dispatch.completion) {
+      const raced = await Promise.race([
+        dispatch.completion.then((outcome) => outcome.state),
+        this.sleep(timeoutMs).then(() => "timed_out" as const),
+      ]);
+      if (raced === "timed_out") {
+        return { outcome: "timed_out", childJobId, childRunId: dispatch.runId };
+      }
+      return settled(raced);
+    }
+    // No completion handle (a cross-process dispatch): read the child's own
+    // instance until it settles or the bound expires. The instance is the
+    // authoritative liveness view — the run record is written at settle, so
+    // polling it would miss a child that is still working.
+    const deadline = this.now().getTime() + timeoutMs;
+    for (;;) {
+      const view = await this.getJob(childJobId);
+      const state = view.instance?.state ?? "idle";
+      if (state === "completed") return settled("completed");
+      if (state === "failed" || state === "cancelled") return settled("failed");
+      if (this.now().getTime() >= deadline) {
+        return { outcome: "timed_out", childJobId, childRunId: dispatch.runId };
+      }
+      await this.sleep(250);
+    }
+  }
+
   private async awaitEvent(
     ctx: RunContext,
     path: string,
@@ -4923,6 +5081,17 @@ export class JobPipelineControl {
         );
         ctx.stepExecutions += 1;
         return waited;
+      }
+      // Issue #6394 — the child dispatch IS journaled (unlike the waits): a
+      // replay must read the recorded child run id, not start a second child.
+      if (stepConfig.step === CHILD_RUN_STEP) {
+        const child = await journal.do(
+          stepExecutionId(ctx.runId, path, stepIndex, eff.shardKey, itemIndex),
+          () => this.runChildRun(ctx, path, stepConfig.params ?? {}),
+          { runId: ctx.runId, jobId: ctx.jobId },
+        );
+        ctx.stepExecutions += 1;
+        return child;
       }
       // Issue #6393 — the park runs on the host's durable timer, never in
       // the journal, exactly as the event wait does (and for the same

@@ -993,6 +993,25 @@ The workflow residency wires both halves
 (`src/workflows/jobPipelineWorkflow.ts`, `workflowEventWait.ts`); a host
 that wires neither keeps the coded refusal.
 
+**A step can start a child run (#6394).** `child.run` is a reserved step that
+dispatches an INDEPENDENT run of another job through the same `runJob` the
+doors use, so the child has its own run id, its own instance row, its own
+lifecycle and its own failure: the parent records the child's id in this step's
+output and reacts to its outcome by a NAMED rule. Unlike the wait stages it IS
+journaled — a replay must read the recorded child run id rather than start a
+second child, so exactly-once is the journal's job, not a hand-rolled check.
+`onFailure` (`fail` | `continue`) is REQUIRED: a parent never silently proceeds
+past a failed child. The child links back through the run record's
+`originRunId` (a child is a fresh ORIGINAL run of its own job, not a re-run of
+anything), so it is a first-class run in the recorder and the Workflow Runs
+view rather than a hidden unit. Two refusal rules: a child naming the parent's
+own job refuses by name (a job's instance carries one live run, so it would
+collide — the run-per-row shape is the exception), and an unnamed `onFailure`
+refuses by name. `awaitSettlement: false` starts the child and returns
+`started`; the bound for an awaited child is the step's `timeoutMs`, defaulting
+to the policy's wait bound, and a child that outlives it reads as `timed_out`
+— a declared outcome, never a hang.
+
 **The other half of the primitive: `wait.sleep` (#6393).** The event wait
 parks a run until something arrives; `wait.sleep` parks it for a declared
 duration (`params.durationMs`). It is the same reserved-step shape and the
