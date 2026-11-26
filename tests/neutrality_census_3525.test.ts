@@ -2817,6 +2817,29 @@ const BASELINE: Array<[string, string, number]> = [
   // naming each broker's own tool is its job (INTEGRATION).
   ["src/shared/brokerToolNames.ts", "etrade", 5],
   ["src/shared/brokerToolNames.ts", "alpaca", 10],
+  // #6610 (2026-11-26): INTEGRATION — the design and survey record verified
+  // provider ids, feeds, and the Nasdaq listings source. Thinkorswim is
+  // explicitly the proposed #6404 P3 scope, not an existing integration.
+  // These are the documents' technical subject, not platform framing; removing
+  // the names would make the mapping and survey inaccurate.
+  ["docs/architecture/design/strategy-catalog.md", "etrade", 4],
+  ["docs/architecture/design/strategy-catalog.md", "alpaca", 11],
+  ["docs/architecture/design/strategy-catalog.md", "thinkorswim", 2],
+  ["docs/architecture/design/strategy-catalog.md", "yahoo", 11],
+  ["docs/architecture/design/strategy-catalog.md", "nasdaq", 2],
+  ["docs/architecture/survey/6593-strategy-catalog-survey.md", "etrade", 11],
+  ["docs/architecture/survey/6593-strategy-catalog-survey.md", "alpaca", 8],
+  ["docs/architecture/survey/6593-strategy-catalog-survey.md", "thinkorswim", 2],
+  ["docs/architecture/survey/6593-strategy-catalog-survey.md", "yahoo", 10],
+  ["docs/architecture/survey/6593-strategy-catalog-survey.md", "nasdaq", 2],
+  // HISTORICAL — the dated plan records the verified provider mapping and
+  // phase scope, including the proposed Thinkorswim work. Its names preserve
+  // what was planned and known on 2026-11-26; they are not new brand copy.
+  ["docs/plans/strategy-catalog-2026-11-26.md", "etrade", 1],
+  ["docs/plans/strategy-catalog-2026-11-26.md", "alpaca", 2],
+  ["docs/plans/strategy-catalog-2026-11-26.md", "thinkorswim", 3],
+  ["docs/plans/strategy-catalog-2026-11-26.md", "yahoo", 3],
+  ["docs/plans/strategy-catalog-2026-11-26.md", "nasdaq", 1],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
