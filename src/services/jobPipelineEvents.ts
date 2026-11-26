@@ -116,6 +116,8 @@ export async function publishJobStatus(
 export type JobStageAction =
   | "run"
   | "rerun"
+  /** Issue #6395 — a live run rewound to a named journal entry. */
+  | "restart"
   | "stop"
   | "resume"
   /** Issue #4360 — published the moment a unit starts (the in-flight visible event). */

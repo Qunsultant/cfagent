@@ -1183,6 +1183,26 @@ refuses `job_shards_not_configured`; a platform that rejects the target refuses
 `stage_restart_rejected`; a host with no channel refuses
 `stage_port_unavailable`.
 
+**Restart from a named entry (#6395)** generalizes the same platform restart
+from "a stage's first step" to any entry in the run's journal:
+`restartFromJournalEntry(jobId, runId, entryId)` hands the named entry straight
+to `restart({ from: { name } })`. A journal entry and a step execution id are
+the same name by construction — the platform journals every step under
+`stepExecutionId(runId, path, stepIndex, shardKey, itemIndex)` — so the
+operation takes that id and nothing invented. Addressability is proved against
+the run's OWN record, never guessed: the id's run segment must be this run, and
+its stage segment must match a stage the run actually recorded in its stage
+checkpoint; either failure refuses `journal_entry_not_addressed`. The
+definition executed is the run's pinned version (#5278, through
+`pinnedRunDefinition`), so a rewind never runs today's configuration against a
+half-executed run — a missing stamp refuses `resume_pre_retention_run` and a
+vanished version `resume_definition_version_unresolved`. A platform that
+rejects the entry refuses `restart_rejected`. The `restart` stage event is
+published only after the platform accepts the rewind, naming the entry, so an
+event never claims a rewind that did not happen. The picker that *chooses* an
+entry belongs with the checkpoint viewer (#6377): the operation lands first,
+as #6552's did.
+
 Stage retirement is persisted on the definition (`retired`, #3944,
 `src/data/jobPipelinePorts.ts:159-167`): a retired stage never
 executes again in any run of the job; a new dispatch of a job carrying
