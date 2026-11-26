@@ -103,7 +103,12 @@ describe("options product flags (issue #2596)", () => {
     // Configured environment with only screener ON: options_research
     // resolves OFF, so absent products resolve OFF too — nothing is
     // silently enabled by inheritance from an unrelated flag.
-    const screenerOnly = new EnvFeatureFlagAdapter({ FEATURE_SCREENER: "1" });
+    // Phase 3 (#6550): FEATURE_OPTIONS_SCREENER lives in
+    // environment.config.json (ON in production), so the file
+    // would resolve options_screener ON here. This case pins that
+    // FEATURE_SCREENER alone does not enable options products, so
+    // the options flag is set off explicitly.
+    const screenerOnly = new EnvFeatureFlagAdapter({ FEATURE_SCREENER: "1", FEATURE_OPTIONS_SCREENER: "0" });
     expect(await screenerOnly.isEnabled("options_best_trade")).toBe(false);
 
     // Configured environment with FEATURE_OPTIONS_SCREENER ON:

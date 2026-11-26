@@ -494,7 +494,10 @@ describe("stock copilot cycle — pause + activity (#3422)", () => {
     expect(again.status).toBe("outside_enabled_sessions");
     const disabled = await runStockCopilotCycle(
       surfaceDeps({
-        env: {} as any,
+        // Phase 3 (#6550): STOCK_COPILOT_PAPER_ENABLED lives in
+        // environment.config.json (ON in production), so a bare env
+        // no longer means the flag is off.
+        env: { STOCK_COPILOT_PAPER_ENABLED: "0" } as any,
         positions: family.positions,
         activity: family.activity,
         control: family.control,

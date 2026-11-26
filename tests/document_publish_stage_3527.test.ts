@@ -502,8 +502,13 @@ describe("3527 S1 stage: payload equivalence through the real executors", () => 
     });
   });
 
-  it("empty env: vectorize not_attempted, ai-search not_configured, zero executor side effects", async () => {
-    const outcome = await publishDocument({} as never, DOC).settled;
+  it("flag explicitly off: vectorize not_attempted, ai-search not_configured, zero executor side effects", async () => {
+    // Phase 3 (#6550): AI_SEARCH_REPORT_INDEXING_ENABLED lives in
+    // environment.config.json (ON in production), so an empty env no
+    // longer means the flag is off — the hook would take the
+    // namespace path and fail with not_configured instead of
+    // reporting disabled. The flag is set off explicitly.
+    const outcome = await publishDocument({ AI_SEARCH_REPORT_INDEXING_ENABLED: "false" } as never, DOC).settled;
     expect(targetOf(outcome.targets, "vectorize").status).toBe("not_attempted");
     expect(targetOf(outcome.targets, "ai-search")).toEqual({
       target: "ai-search",

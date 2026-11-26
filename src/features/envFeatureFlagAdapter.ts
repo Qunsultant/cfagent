@@ -75,6 +75,35 @@ function parseOnOffFlagValue(value: unknown): boolean | undefined {
 export class EnvFeatureFlagAdapter implements FeatureFlagPort {
   constructor(private readonly env?: Record<string, unknown> | null) {}
 
+  /**
+   * Phase 3 (#6550): the first EXPLICIT (bulk JSON / direct env var)
+   * value on any ancestor of `flag`, nearest ancestor first — or
+   * undefined when no ancestor is set explicitly. Used so an
+   * ancestor's explicit OFF/ON beats the flag's own FILE value
+   * (explicit beats default); a parent with only a file value is
+   * not explicit and does not stop the flag's own file value.
+   */
+  private explicitAncestorValue(flag: string): boolean | undefined {
+    let parent = getFeatureFlagParent(flag);
+    while (parent) {
+      const bulkVar = this.env?.FEATURE_FLAGS;
+      if (bulkVar) {
+        try {
+          const parsed = typeof bulkVar === "string" ? JSON.parse(bulkVar) : bulkVar;
+          if (parsed && typeof parsed === "object" && typeof (parsed as Record<string, unknown>)[parent] === "boolean") {
+            return (parsed as Record<string, boolean>)[parent];
+          }
+        } catch {
+          // Malformed JSON continues to the direct var.
+        }
+      }
+      const parsedDirect = parseOnOffFlagValue(this.env?.[`FEATURE_${parent.toUpperCase()}`]);
+      if (parsedDirect !== undefined) return parsedDirect;
+      parent = getFeatureFlagParent(parent);
+    }
+    return undefined;
+  }
+
   async isEnabled(flag: string, _context?: FeatureEvaluationContext): Promise<boolean> {
     if (isProductionFlagRuntime(this.env)) {
       return false;
@@ -137,6 +166,18 @@ export class EnvFeatureFlagAdapter implements FeatureFlagPort {
       const parsedLegacyMonetization = parseOnOffFlagValue(this.env.MONETIZATION_ENABLED);
       if (parsedLegacyMonetization !== undefined) return parsedLegacyMonetization;
     }
+
+    // Phase 3 (#6550): an EXPLICIT value on any ancestor beats a
+    // FILE value on the flag itself (explicit beats default, at any
+    // level). Without this, the file's optionsScreener=true would
+    // short-circuit a parent's explicit bulk OFF (options_research:
+    // false) and resolve an absent sub-product ON — breaking the
+    // #2596 contract "explicit OFF always wins". The walk below
+    // checks bulk + direct vars only (no file, no defaults); a
+    // parent with only a file value does not stop the flag's own
+    // file value below.
+    const ancestorExplicit = this.explicitAncestorValue(flag);
+    if (ancestorExplicit !== undefined) return ancestorExplicit;
 
     // 2b. File value for the direct var (the moved FEATURE_* vars).
     // fileBackedEnvValue is env-wins; env was already consulted

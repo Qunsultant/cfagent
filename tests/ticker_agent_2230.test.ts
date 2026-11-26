@@ -47,7 +47,12 @@ function mkTick(symbol: string, price: number): any {
  */
 function bareAgent(): any {
   const agent = Object.create(TickerAgent.prototype);
-  agent.env = {};
+  // Phase 3 (#6550): TICKER_PUSH_INTERVAL_S lives in
+  // environment.config.json (3000 in production — the moved
+  // wrangler value, verbatim), so a bare env no longer resolves
+  // the 5s code default. These tests pin the arming behaviour,
+  // not the interval value, so the 5s interval is set explicitly.
+  agent.env = { TICKER_PUSH_INTERVAL_S: "5" };
   // onConnect arms the tick schedule (issue #2443); the scheduler is
   // stubbed here so connection tests do not need a real one. The
   // onStart tests below override this stub with a recording one.

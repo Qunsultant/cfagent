@@ -169,6 +169,12 @@ describe("Scheduled job failure semantics (#112)", () => {
     const d1Mock = new MockD1Database();
     auditStore = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
     env = {
+      // Phase 3 (#6550): monetization is ON via
+      // environment.config.json; the autonomous screen is a paid
+      // family and would fail closed with no stored price before
+      // reaching the universe failure these tests pin. The paid gate
+      // stays off here.
+      MONETIZATION_ENABLED: "false",
       APP_ENV: "TEST",
       APP_BASE_URL: "https://agent.openaimp.com",
       AI_SEARCH_ENDPOINT: "https://ai-search.internal",

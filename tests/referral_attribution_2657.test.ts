@@ -232,7 +232,12 @@ describe("referral attribution routes + auto-earn trigger (#2657)", () => {
       PAYMENT_WORKFLOW: binding,
       SCREENER_WORKFLOW: screenerBinding,
     };
-    if (opts?.monetization) env.MONETIZATION_ENABLED = "true";
+    // Phase 3 (#6550): monetization is ON via
+    // environment.config.json, so a setup without the flag would
+    // run the PAID path (and auto-earn). The flag-OFF free submit
+    // is pinned explicitly here; the paid tests opt in with
+    // monetization: true.
+    env.MONETIZATION_ENABLED = opts?.monetization ? "true" : "false";
     const audit = vi.fn();
     const ctx = {
       env,

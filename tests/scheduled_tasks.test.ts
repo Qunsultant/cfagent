@@ -129,6 +129,12 @@ describe("Cloudflare Agents: Task Scheduling & Durable Timers", () => {
     auditStore = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
 
     env = {
+      // Phase 3 (#6550): monetization is ON via
+      // environment.config.json; the scheduled screen is a paid
+      // family and would fail closed with no stored price. These
+      // tests pin the autonomous screen's identity/environment
+      // passthrough, not payment, so the paid gate stays off.
+      MONETIZATION_ENABLED: "false",
       APP_ENV: "TEST",
       APP_BASE_URL: "https://agent.openaimp.com",
       AI_SEARCH_ENDPOINT: "https://ai-search.internal",

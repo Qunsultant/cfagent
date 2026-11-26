@@ -150,11 +150,14 @@ describe("apple provider registration", () => {
   });
 
   it("is disabled when wiring is off, even if listed", () => {
+    // Phase 3 (#6550): IAAA_WIRING_ENABLED lives in
+    // environment.config.json (ON in production), so a bare env no
+    // longer means wiring is off.
     expect(
-      isProviderEnabled({ IAAA_ENABLED_PROVIDERS: "github,apple" } as never, "apple")
+      isProviderEnabled({ IAAA_WIRING_ENABLED: "0", IAAA_ENABLED_PROVIDERS: "github,apple" } as never, "apple")
     ).toBe(false);
     expect(
-      resolveLoginProvider({ IAAA_ENABLED_PROVIDERS: "github,apple" } as never, "apple")
+      resolveLoginProvider({ IAAA_WIRING_ENABLED: "0", IAAA_ENABLED_PROVIDERS: "github,apple" } as never, "apple")
         .disabledReason
     ).toBe("wiring-disabled");
   });
@@ -185,7 +188,9 @@ describe("apple provider registration", () => {
       .filter((p): p is NonNullable<typeof p> => p !== null)
       .map((p) => ({ id: p.providerId, displayName: p.displayName ?? p.providerId }));
     expect(buttons).toContainEqual({ id: "apple", displayName: "Apple" });
-    const dark = enabledProviders({ IAAA_ENABLED_PROVIDERS: "github,apple" } as never);
+    // Phase 3 (#6550): wiring is ON via environment.config.json,
+    // so the dark case needs the flag off explicitly.
+    const dark = enabledProviders({ IAAA_WIRING_ENABLED: "0", IAAA_ENABLED_PROVIDERS: "github,apple" } as never);
     expect(dark).toEqual([]);
   });
 });

@@ -673,6 +673,12 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
   const nlqSessionNs = makeMemoryDoNamespace();
   const env = {
     APP_ENV: "TEST",
+    // Phase 3 (#6550): monetization is ON via
+    // environment.config.json; the interactive screen is a paid
+    // family and would fail closed with no stored price. These
+    // tests pin the shared schemas, not payment, so the paid gate
+    // stays off.
+    MONETIZATION_ENABLED: "false",
     // Issue #4249: these tests drive the NLQ scheduling entry
     // point, so the NLQ channel is explicitly on here (its default
     // is OFF — unconfigured NLQ scheduling refuses FEATURE_DISABLED).
@@ -986,7 +992,12 @@ describe("#959 REST interactive screen routes share the schemas", () => {
 
   function brokerCtx() {
     return {
-      env: {} as any,
+      // Phase 3 (#6550): monetization is ON via
+      // environment.config.json; the interactive screen is a paid
+      // family and would fail closed with no stored price. These
+      // tests pin the shared schemas, not payment, so the paid gate
+      // stays off.
+      env: { MONETIZATION_ENABLED: "false" } as any,
       getOrm: () => ({}) as any,
       audit: () => {},
       getScreenerAgent: () => fakeScreenerAgent,
