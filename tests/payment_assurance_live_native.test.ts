@@ -153,7 +153,12 @@ describe("payment assurance live routes, native rework (issue #2197)", () => {
     const b = makeBinding();
     const res = await call(
       request("/api/assurance/payment-workflow/start", "POST", { mode: "checkout" }),
-      envWith({}, b.binding),
+      // Phase 3 (#6550): monetization is ON via
+      // environment.config.json, so a bare env no longer means the
+      // monetization flag is off — checkout starts instead of
+      // refusing. This test pins the flag-OFF refusal, so the flag
+      // is off explicitly here.
+      envWith({ MONETIZATION_ENABLED: "false" }, b.binding),
       cardPorts({}),
     );
     expect(res?.status).toBe(409);

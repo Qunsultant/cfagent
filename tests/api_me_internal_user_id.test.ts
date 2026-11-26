@@ -55,7 +55,12 @@ function makeEnv() {
     githubLogin: "octocat-legacy",
     githubName: "Legacy Cat",
   });
-  const env: any = { SESSION_STORE: sessionStoreNs };
+  // Phase 3 (#6550): IAAA_WIRING_ENABLED lives in
+  // environment.config.json (ON in production), so a bare env no
+  // longer means wiring is off. This test pins /api/me's
+  // internalUserId echo, not wired-session validation, so wiring
+  // stays off explicitly.
+  const env: any = { SESSION_STORE: sessionStoreNs, IAAA_WIRING_ENABLED: "0" };
   return env as Env;
 }
 

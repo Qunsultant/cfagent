@@ -39,6 +39,7 @@ import {
 } from "../services/feedJobs";
 
 import {
+  AGENTIC_LOOP_UNAVAILABLE_REASON,
   type ScheduledGoal,
   type ScheduleTick,
 } from "../schedule";
@@ -173,6 +174,7 @@ import type { ThinkScheduledTasks } from "../actors/thinkAdapter";
 import type {
   JobInstanceRecord,
   JobDefinition,
+  JobRunProvenance,
 } from "../data/jobPipelinePorts";
 import type { JobStagesRead, JobStatusView } from "../services/jobPipelineEngine";
 import { resolveRunNowTrigger } from "../services/jobPipelineEngine";
@@ -1197,7 +1199,12 @@ export class ScheduledAgent extends PortThink {
   /** Run one pipeline job now and settle it; returns the outcome view. */
   async runPipelineJob(
     jobId: string,
-    opts?: { userLogin?: string; trigger?: JobRunTrigger },
+    opts?: {
+      userLogin?: string;
+      trigger?: JobRunTrigger;
+      /** Issue #6557 — the firing schedule payload's provenance. */
+      provenance?: JobRunProvenance | null;
+    },
   ): Promise<{ jobId: string; runId: string; state: string; error?: string }> {
     const ctx = this.pipelineContext();
     const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
@@ -1212,7 +1219,12 @@ export class ScheduledAgent extends PortThink {
       opts?.trigger !== undefined
         ? normalizeJobRunTrigger(opts.trigger)
         : resolveRunNowTrigger(definition);
-    const dispatch = await control.runJob(jobId, { trigger });
+    // Issue #6557 — a scheduled firing passes the payload's provenance;
+    // every other caller passes none and the run records nulls.
+    const dispatch = await control.runJob(jobId, {
+      trigger,
+      ...(opts?.provenance ? { provenance: opts.provenance } : {}),
+    });
     if (!dispatch.completion) {
       return { jobId, runId: dispatch.runId, state: dispatch.state };
     }
@@ -2153,6 +2165,13 @@ export class ScheduledAgent extends PortThink {
           return undefined;
         });
       };
+
+      if (goal.executionMode === "agentic-loop") {
+        tick.errors.push(`${goal.id}: ${AGENTIC_LOOP_UNAVAILABLE_REASON}`);
+        tick.jobsSkipped++;
+        await recordGoalRun("skipped", { detail: AGENTIC_LOOP_UNAVAILABLE_REASON });
+        continue;
+      }
 
       // #2840: in-flight firing guard (the screen-lock pattern,
       // extended to goals). A second submission — manual trigger
@@ -3239,6 +3258,7 @@ export class ScheduledAgent extends PortThink {
     operation: string;
     budgetCents: number;
     enabled?: boolean;
+    executionMode?: "deterministic" | "agentic-loop";
     timeZone?: string;
     provenance?: unknown;
     /**
@@ -3257,6 +3277,9 @@ export class ScheduledAgent extends PortThink {
      */
     actor?: unknown;
   }): Promise<ScheduledGoal> {
+    if (goal.executionMode === "agentic-loop") {
+      throw new Error(AGENTIC_LOOP_UNAVAILABLE_REASON);
+    }
     const id = goal.id.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
     if (!id) throw new Error("Goal id is required.");
     if (!goal.name.trim()) throw new Error("Goal name is required.");
@@ -3308,6 +3331,7 @@ export class ScheduledAgent extends PortThink {
       operation: goal.operation,
       budgetCents: Math.floor(goal.budgetCents),
       enabled: goal.enabled !== false,
+      executionMode: goal.executionMode ?? "deterministic",
       ...(timeZone ? { timeZone } : {}),
       ...(provenance ? { provenance } : {}),
       // Issue #4235 — the opt-in is recorded only when it was

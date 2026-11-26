@@ -31,6 +31,10 @@ async function gatedService(opts: {
   const { DatabaseORM } = await import("../src/orm");
   const mockEnv = {
     ETRADE_ENVIRONMENT: "sandbox",
+    // Phase 3 (#6550): monetization is ON via
+    // environment.config.json; these tests pin the probe outcomes,
+    // not the paid gate, so it stays off.
+    MONETIZATION_ENABLED: "false",
     ETRADE_SANDBOX_BASE_URL: "https://apisb.etrade.com",
   } as any;
   const platformDeps =

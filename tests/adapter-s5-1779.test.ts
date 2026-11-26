@@ -142,7 +142,11 @@ describe("getScreenerAgent dedup (S5): one shared naming rule", () => {
   });
 
   it("fails closed when neither a login nor a service identity exists", () => {
-    const env = {} as unknown as Env;
+    // Phase 3 (#6550): SERVICE_USER_LOGIN now resolves
+    // "svc-background" from environment.config.json, so a bare env
+    // no longer means no service identity — the malformed login
+    // fails the shape check, which is what this assertion pins.
+    const env = { SERVICE_USER_LOGIN: "not a login!" } as unknown as Env;
     expect(() => resolveScreenerAgentName(env, undefined)).toThrow(/1185/);
   });
 });

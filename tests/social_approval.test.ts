@@ -200,7 +200,12 @@ describe("publishDueDrafts gating", () => {
       },
     };
     const res = await publishDueDrafts({
-      env: { SOCIAL_POSTING_ENABLED: "1", SOCIAL_LIVE_PUBLISHING: "1" },
+      // Phase 3 (#6550): SOCIAL_AUTONOMOUS_CHANNELS lives in
+      // environment.config.json ("threads" in production), so a bare
+      // env no longer resolves the code default ["threads", "x"] and
+      // the x draft is skipped instead of attempted. This test pins
+      // the x failure isolated from the threads success.
+      env: { SOCIAL_POSTING_ENABLED: "1", SOCIAL_LIVE_PUBLISHING: "1", SOCIAL_AUTONOMOUS_CHANNELS: "threads,x" },
       tokens: { X_ACCESS_TOKEN: "test-token", THREADS_ACCESS_TOKEN: "test-token" },
       store,
       approvals,
@@ -232,7 +237,12 @@ describe("publishDueDrafts gating", () => {
       },
     };
     const res = await publishDueDrafts({
-      env: { SOCIAL_POSTING_ENABLED: "1", SOCIAL_LIVE_PUBLISHING: "1" },
+      // Phase 3 (#6550): SOCIAL_AUTONOMOUS_CHANNELS lives in
+      // environment.config.json ("threads" in production), so a bare
+      // env no longer resolves the code default ["threads", "x"] and
+      // the x draft is skipped instead of live-published. This test
+      // pins the x live success isolated from the threads dry-run.
+      env: { SOCIAL_POSTING_ENABLED: "1", SOCIAL_LIVE_PUBLISHING: "1", SOCIAL_AUTONOMOUS_CHANNELS: "threads,x" },
       tokens: { X_ACCESS_TOKEN: "test-token" },
       store,
       approvals,

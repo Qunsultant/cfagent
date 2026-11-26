@@ -167,7 +167,12 @@ function makeHarness(opts: {
       } as never;
     },
     getSocialBriefStore: () => null,
-    env: {} as NlqPortsContext["env"],
+    // Phase 3 (#6550): monetization is ON via
+    // environment.config.json, so the chat screen would fail closed
+    // on the paid gate's missing stored price. These tests pin the
+    // FREE chat-screen workflow path, not payment, so the paid gate
+    // stays off.
+    env: { MONETIZATION_ENABLED: "false" } as NlqPortsContext["env"],
     ensureTables: () => sql as never,
     ...(opts.workflowPort !== undefined
       ? { workflowPort: opts.workflowPort }

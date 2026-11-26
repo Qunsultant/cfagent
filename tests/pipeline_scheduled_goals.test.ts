@@ -124,6 +124,12 @@ function makeEnv(sessionStore: unknown, budgetSpy: { calls: number }, extra: Rec
     },
     SESSION_STORE: sessionStore,
     SOCIAL_POSTING_ENABLED: "1",
+    // Phase 3 (#6550): SOCIAL_AUTONOMOUS_CHANNELS lives in
+    // environment.config.json ("threads" in production), so a bare env
+    // no longer resolves the code default ["threads", "x"]. This
+    // pipeline pins the two-autonomous-channel shape (x + threads),
+    // so the list is set explicitly here.
+    SOCIAL_AUTONOMOUS_CHANNELS: "threads,x",
     ...extra,
   } as any;
 }

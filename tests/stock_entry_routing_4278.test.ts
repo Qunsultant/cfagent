@@ -674,7 +674,10 @@ describe("site: market-data research screen (#4278)", () => {
       persisted,
       audits,
       ctx: {
-        env: {},
+        // Phase 3 (#6550): monetization is ON via
+        // environment.config.json; these market-data route tests pin
+        // the seam behaviour, not the paid gate, so it stays off.
+        env: { MONETIZATION_ENABLED: "false" },
         audit: (type: string) => {
           audits.push(type);
         },

@@ -90,7 +90,16 @@ function productionEnv(): Record<string, unknown> {
   const wrangler = JSON.parse(
     stripJsonc(readFileSync("wrangler.jsonc", "utf8")),
   ) as { vars?: Record<string, unknown> };
-  return { ...(wrangler.vars ?? {}) };
+  // Phase 3 (#6550): AGENT_CAPABILITIES_DISABLED moved from wrangler
+  // vars to environment.config.json (defaults.agent.capabilitiesDisabled,
+  // "" in production); the production-shaped env carries the moved value.
+  const config = JSON.parse(readFileSync("environment.config.json", "utf8")) as {
+    defaults?: { agent?: { capabilitiesDisabled?: unknown } };
+  };
+  return {
+    ...(wrangler.vars ?? {}),
+    AGENT_CAPABILITIES_DISABLED: config.defaults?.agent?.capabilitiesDisabled ?? "",
+  };
 }
 
 describe("copilot capability enablement (#3727) and the chat/NLQ choice (#3740)", () => {

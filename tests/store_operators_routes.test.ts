@@ -251,7 +251,12 @@ describe("store operator management routes (#2680)", () => {
       nowMs: 1000,
     });
     expect(seeded.ok).toBe(true);
-    const ctx3 = attachSeams(ctxWith({ AGENT_DB: mock, COMMERCIAL_STORE_OPERATORS: "" }), world);
+    // Phase 3 (#6550): COMMERCIAL_STORE_OPERATORS "" is treated as
+    // absent by pickText and falls back to the file's "OpenAIMP", so
+    // the sole-operator guard would not fire. "," parses to an empty
+    // operator set while surviving pickText, restoring "no env
+    // operators" here.
+    const ctx3 = attachSeams(ctxWith({ AGENT_DB: mock, COMMERCIAL_STORE_OPERATORS: "," }), world);
     const selfRemove = await call(ctx3, "POST", "/payments/agentic/commercial/operators/remove", "op2", { login: "op2" });
     expect(selfRemove?.status).toBe(409);
     const list = await call(ctx3, "GET", "/payments/agentic/commercial/operators", "op2");

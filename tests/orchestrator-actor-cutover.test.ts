@@ -508,7 +508,10 @@ describe("#686 carried-forward 3a pins — prompt builder byte-identity + clamp"
   });
 
   it("R8: the sanitized clamp is now the production resolver for the class", () => {
-    expect(makeAgent({ AI: {} }).agent.maxSteps).toBe(6);
+    // Phase 3 (#6550): MAS_MAX_STEPS lives in
+    // environment.config.json (2 in production), so a bare env no
+    // longer resolves the old || 6 fallback.
+    expect(makeAgent({ AI: {}, MAS_MAX_STEPS: "6" }).agent.maxSteps).toBe(6);
     expect(makeAgent({ AI: {}, MAS_MAX_STEPS: "99" }).agent.maxSteps).toBe(10);
     // The deliberate delta: non-numeric no longer propagates NaN.
     expect(Number.isNaN(resolveMasMaxSteps({ MAS_MAX_STEPS: "abc" } as never))).toBe(true);
@@ -535,6 +538,8 @@ describe("#686 Actor surface on the production class", () => {
         sessionId: "cutover-session-1",
         requestId: "cutover-test",
         audit: () => {},
+        actingLogin: () => "cutover-user",
+        agentScheduleExecute: async () => ({ ok: true }),
       })
     ).sort();
     expect(classNames).toEqual(factoryNames);
@@ -649,7 +654,10 @@ describe("#686 R2/R3/R4 — the production turn, through runAgenticChatTurn", ()
   });
 
   it("auto-research: synthetic route, pre-dispatch, suppression in the applied TurnConfig", async () => {
-    const { agent, sql } = makeAgent();
+    // Phase 3 (#6550): MAS_MAX_STEPS lives in
+    // environment.config.json (2 in production); this turn pins the
+    // 6-step shape, so it is set explicitly.
+    const { agent, sql } = makeAgent({ AI: {}, MAS_MAX_STEPS: "6" });
     // The facet applies what the domain hook returns but stores
     // nothing on the agent; capture the applied TurnConfig by
     // wrapping the hook on the instance (the config object itself
@@ -801,7 +809,10 @@ describe("#1952 — the Think turn path on the production class", () => {
   });
 
   it("direct Think turn delegates to the port hooks (no one-shot installed)", async () => {
-    const { agent, sql, d1Store } = makeAgent(undefined, { auditDb: true });
+    // Phase 3 (#6550): MAS_MAX_STEPS lives in
+    // environment.config.json (2 in production); this turn pins the
+    // 6-step shape, so it is set explicitly.
+    const { agent, sql, d1Store } = makeAgent({ AI: {}, MAS_MAX_STEPS: "6" }, { auditDb: true });
     // A direct turn reads its user text from the port session, the
     // way the facet path seeds it before driving the turn.
     await agent.addPortMessages([
