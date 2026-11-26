@@ -144,11 +144,15 @@ export async function handleJobStatusRoutes(
       return Response.json(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const status = /not found|unknown|not part of|ambiguous|already|not_runnable|not_stoppable|not_resumable/i.test(
-        message,
-      )
-        ? 409
-        : 503;
+      // Issue #5278 — the resume refusals are state conflicts (the run
+      // cannot continue under its own definition version), not an
+      // unavailable surface: 409, alongside the existing not_* guards.
+      const status =
+        /not found|unknown|not part of|ambiguous|already|not_runnable|not_stoppable|not_resumable|pre_retention|version_unresolved/i.test(
+          message,
+        )
+          ? 409
+          : 503;
       return Response.json({ error: message, jobId }, { status });
     }
   }

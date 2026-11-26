@@ -1093,9 +1093,10 @@ The checkpoint is written before the stage action is published
 `src/services/jobPipelineEngine.ts:3019-3023`). A retry keeps the
 unit's original start stamp so the window stays wall-clock time
 (#4359, `:3011-3014`). `checkpointEverySteps` (default 1) controls
-how often checkpoints persist (§3.6). Resuming re-reads the current
-definition (§2) — the checkpoint pins the *progress*, not the
-definition version (#5278).
+how often checkpoints persist (§3.6). Resuming executes the
+definition version the run started under (#5278, §2): the checkpoint
+pins the *progress*, the instance's `runDefinitionVersion` pins the
+*semantics*.
 
 ### 3.9 Retry aspect and replay
 
@@ -1127,7 +1128,7 @@ The control plane, all on `JobPipelineControl`:
 | Operation | Method | Behavior |
 |---|---|---|
 | Pause | `pauseJob` (`:839`) | Honored at the next step boundary; the run checkpoints and settles as paused, its in-flight unit recorded stopped, never failed. |
-| Resume | `resumeJob` (`:857`) | Re-reads the current definition (§2); refuses a run with no checkpoint ("paused without a checkpoint; retry it instead", `:869`). |
+| Resume | `resumeJob` (`:1399`) | Executes the definition version the run started under (#5278, `pinnedRunDefinition` `:1373`); refuses a run with no checkpoint ("paused without a checkpoint; retry it instead"), and refuses by name — `resume_pre_retention_run` / `resume_definition_version_unresolved` — when that version was never retained or is no longer resolvable, rather than continuing under today's definition. |
 | Cancel | `cancelJob` (`:961`) | Settles the run cancelled via `recordTerminal`. |
 | Retry | `retryJob` (`:1011`) | Restarts the run's failed units within budget. |
 | Rerun stage | `rerunStage` (`:1318`), `rerunStageByVocabulary` (`:1814`) | Re-executes one stage (by node path or by vocabulary stage). |
@@ -1275,7 +1276,7 @@ anywhere in this doc.
 
 | -ility | State | Gap issue |
 |---|---|---|
-| Durability | Partial | #5278 (no version pin on resume), #5586 (exactly-once edge) |
+| Durability | Partial | #5586 (exactly-once edge) |
 | Reliability | Partial | #5586; no engine alone gives exactly-once |
 | Resilience | Partial | #4775 (stage vs run deadline), #3533 (fan-out cap, retry buckets) |
 | Determinism | Filed | #5280 |
@@ -1294,9 +1295,10 @@ Built: the journal (three substrates, §3.7), per-(stage, unit)
 checkpoints (§3.8), the versioned definition store (§2), the run
 record (§3.14), and replay on the same instance identity (§3.9). A
 run that never dispatches still settles through `recordTerminal`
-(`src/services/jobPipelineEngine.ts:295`). Gaps: resume re-reads the
-current definition instead of pinning the version the run started
-under (#5278); the exactly-once edge in §4.2 (#5586); the async-alarm
+(`src/services/jobPipelineEngine.ts:295`). Resume and the
+running-instance replay execute the definition version the run started
+under (#5278), refusing by name when it was not retained or is gone.
+Gaps: the exactly-once edge in §4.2 (#5586); the async-alarm
 journal substrate has no production caller, so only two of the three
 substrates are live. Since #3955 the engine also waits durably: a `wait.event` stage
 waits for one named event on the host's channel and resumes on it, with a

@@ -1353,9 +1353,50 @@ export class JobPipelineControl {
     return updated;
   }
 
-  /** Resume a stopped (paused) run from its persisted stage checkpoint, under the current configuration. */
+  /**
+   * Issue #5278 — the definition a resume or a running-instance replay must
+   * execute: the exact version the run started under (#5887's stamp on the
+   * instance), never today's pointer. A reconfigure applies to new runs
+   * only; a run that is half-executed under v1 must not silently finish
+   * under v2's semantics. This is the execution half of #5887's stamp —
+   * `replayRun` (#4467) already resolves it for a past run.
+   *
+   * The refusals are named, never a silent substitution:
+   *  - no live/last run → today's definition, so the caller's own
+   *    no-run / no-checkpoint refusal is the one that surfaces;
+   *  - the run predates the stamp → `resume_pre_retention_run` (its exact
+   *    configuration was never retained, so "today's" would be a false
+   *    continuation; a retry starts a new run);
+   *  - the stamped version is no longer resolvable →
+   *    `resume_definition_version_unresolved`.
+   */
+  private async pinnedRunDefinition(
+    jobId: string,
+    instance: JobInstanceRecord,
+  ): Promise<JobDefinition> {
+    if (!instance.currentRunId) return this.requireDefinition(jobId);
+    const stamped = instance.runDefinitionVersion;
+    if (stamped == null) {
+      throw new JobPipelineError(
+        "resume_pre_retention_run",
+        `resume_pre_retention_run: run "${instance.currentRunId}" of job "${jobId}" predates the definition-version stamp; its exact configuration was not retained, so it cannot be resumed under it. Retry the job to start a new run on the current definition.`,
+      );
+    }
+    const pinned = await this.deps.stores.definitions.getDefinitionVersion(
+      jobId,
+      stamped,
+    );
+    if (!pinned) {
+      throw new JobPipelineError(
+        "resume_definition_version_unresolved",
+        `resume_definition_version_unresolved: run "${instance.currentRunId}" of job "${jobId}" recorded definition version ${stamped}, which is no longer resolvable; refusing rather than resuming under a different configuration. Retry the job to start a new run on the current definition.`,
+      );
+    }
+    return pinned;
+  }
+
+  /** Resume a stopped (paused) run from its persisted stage checkpoint, under the definition version it started with (#5278). */
   async resumeJob(jobId: string): Promise<JobDispatchResult> {
-    const definition = await this.requireDefinition(jobId);
     const instance = await this.requireInstance(jobId);
     if (instance.state !== "paused") {
       throw new JobPipelineError(
@@ -1369,6 +1410,7 @@ export class JobPipelineControl {
         `Job "${jobId}" is paused without a checkpoint; retry it instead.`,
       );
     }
+    const definition = await this.pinnedRunDefinition(jobId, instance);
     assertExecutionModeSupported(definition.config.executionMode);
     const runId = instance.currentRunId;
     const completion = this.executeRun(definition, {
@@ -1419,7 +1461,6 @@ export class JobPipelineControl {
     jobId: string,
     opts: { workflowInstanceId: string; scopePath?: string },
   ): Promise<JobDispatchResult> {
-    const definition = await this.requireDefinition(jobId);
     const instance = await this.requireInstance(jobId);
     if (instance.state !== "running") {
       throw new JobPipelineError(
@@ -1440,6 +1481,9 @@ export class JobPipelineControl {
           `this replay cannot prove it dispatched the run, so it cannot resume it.`,
       );
     }
+    // Issue #5278 — a replay re-enters the SAME run, so it executes the
+    // version that run started under, exactly as a paused resume does.
+    const definition = await this.pinnedRunDefinition(jobId, instance);
     assertExecutionModeSupported(definition.config.executionMode);
     const runId = instance.currentRunId;
     const completion = this.executeRun(definition, {
@@ -2145,6 +2189,11 @@ export class JobPipelineControl {
    * guarantee no completed effect re-executes.
    */
   async resumeStage(jobId: string, nodePath: string): Promise<JobDispatchResult> {
+    // The retire check reads TODAY's definition on purpose (#3944): a
+    // retirement is the operator's current veto over that stage, not a
+    // property of the run's pinned version — a retired stage never
+    // re-runs, whatever version the run started on. The execution that
+    // follows still pins the run's own version (#5278).
     const definition = await this.requireDefinition(jobId);
     const instance = await this.requireInstance(jobId);
     this.assertRunAddressed(instance);
