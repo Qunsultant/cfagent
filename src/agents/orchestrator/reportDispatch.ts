@@ -31,7 +31,6 @@ import {
 } from "../../services/scheduledReports";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
-import { projectCanonicalReportBestEffort } from "../../services/runLedgerProjectionHooks";
 import { recordOptionsServeReport } from "../../services/optionsServeRecord";
 import type { ScreenerRunOutcome } from "../../services/screenerFollowups";
 
@@ -186,7 +185,7 @@ export async function storeResearchReportCanonicalAsync(ctx: ReportDispatchConte
   // Issue #338 S2: the canonical body goes to R2 (pointer in the row)
   // when REPORTS_BUCKET is bound; the store falls back to the legacy
   // inline shape when it is not, so the seam's contract is unchanged.
-  const stored = await storeReportAtGenerationWithR2(ctx.ensureTables(), ctx.env, {
+  const stored = await storeReportAtGenerationWithR2(ctx.env, {
     runId: generationId,
     generationId,
     title: meta.title,
@@ -228,18 +227,18 @@ export async function deliverStoredReportEmail(ctx: ReportDispatchContext,
   recipient: string,
   userLogin: string
 ): Promise<"sent" | "missing" | "failed"> {
-  const stored = getCanonicalReport(ctx.ensureTables(), reportId);
+  const stored = await getCanonicalReport(ctx.env, reportId);
   if (!stored) return "missing";
   // Issue #2664: the stored row's owner must equal the calling login;
   // a mismatch returns "missing" (never the row, never a leak signal —
   // the route layer refuses cross-user delivery attempts with a typed
   // 403 before this seam). Resolved through the read port, never a
   // raw storage query.
-  if (!isCanonicalReportOwnedBy(ctx.ensureTables(), reportId, userLogin)) return "missing";
+  if (!(await isCanonicalReportOwnedBy(ctx.env, reportId, userLogin))) return "missing";
   // Issue #338 S2+S4: resolve the body through the pointer (inline rows
   // resolve to themselves and backfill to R2 on this read; a lost R2
   // object resolves to null = missing).
-  const body = await resolveCanonicalReportBodyWithBackfill(ctx.ensureTables(), ctx.env, stored);
+  const body = await resolveCanonicalReportBodyWithBackfill(ctx.env, stored);
   if (body === null) return "missing";
   const delivery = parseResearchReportBody(body);
   if (!delivery || !delivery.attachmentBase64) return "missing";
@@ -261,12 +260,12 @@ export async function deliverStoredReportWebhook(ctx: ReportDispatchContext,
   reportId: string,
   userLogin: string
 ): Promise<{ outcome: "sent" | "missing" | "failed"; result?: { success: boolean; status?: number; error?: string; notConfigured?: boolean } }> {
-  const stored = getCanonicalReport(ctx.ensureTables(), reportId);
+  const stored = await getCanonicalReport(ctx.env, reportId);
   if (!stored) return { outcome: "missing" };
   // Issue #2664: same owner rule as the email leg (see above).
-  if (!isCanonicalReportOwnedBy(ctx.ensureTables(), reportId, userLogin)) return { outcome: "missing" };
+  if (!(await isCanonicalReportOwnedBy(ctx.env, reportId, userLogin))) return { outcome: "missing" };
   // Issue #338 S2+S4: resolve the body through the pointer (see email leg).
-  const body = await resolveCanonicalReportBodyWithBackfill(ctx.ensureTables(), ctx.env, stored);
+  const body = await resolveCanonicalReportBodyWithBackfill(ctx.env, stored);
   if (body === null) return { outcome: "missing" };
   const delivery = parseResearchReportBody(body);
   if (!delivery || !Array.isArray(delivery.sheets) || delivery.sheets.length === 0) {
@@ -348,7 +347,7 @@ export async function persistScreenerReportCanonical(ctx: ReportDispatchContext,
     // Issue #338 S2b: store through the R2 seam (pointer row when
     // REPORTS_BUCKET is bound, inline fallback otherwise) — the same
     // flip the research path took in S2.
-    const stored = await storeReportAtGenerationWithR2(ctx.ensureTables(), ctx.env, {
+    const stored = await storeReportAtGenerationWithR2(ctx.env, {
       runId: generationId,
       generationId,
       title: `Market screen — ${String(result.universe ?? result.sector ?? "ALL")} (${String(result.trigger ?? "scheduled")})`,
@@ -404,20 +403,6 @@ export async function persistScreenerReportCanonical(ctx: ReportDispatchContext,
       },
       createdAt: result.timestamp,
     });
-    // Issue #4116 — project the landed row into D1 (ORM + queue
-    // carriers, per the tenant's config). Inside the same
-    // never-fail try: the hook re-reads the stored row (the store
-    // may have deduped to a pre-existing row) and never throws,
-    // so a projection failure cannot fail the screen.
-    if (stored) {
-      await projectCanonicalReportBestEffort({
-        env: ctx.env,
-        sql: ctx.ensureTables(),
-        reportId: stored.reportId,
-        generationId,
-        userLogin: result.userLogin,
-      });
-    }
     // Issue #2869 slice 1 — publish AFTER the canonical row
     // lands, never before: persist-then-publish ordering from
     // the stageMessage contract. Only successful runs with a
@@ -471,20 +456,7 @@ export async function persistPipelineGenerateReportCanonical(
     });
     return null;
   }
-  const stored = await storeReportAtGenerationWithR2(ctx.ensureTables(), ctx.env, input);
-  // Issue #4116 — project the landed row into D1 (ORM + queue
-  // carriers, per the tenant's config). The hook re-reads the
-  // stored row and never throws; a missing generationId skips
-  // it (the sweep backstops the row by id).
-  if (stored && input.generationId) {
-    await projectCanonicalReportBestEffort({
-      env: ctx.env,
-      sql: ctx.ensureTables(),
-      reportId: stored.reportId,
-      generationId: input.generationId,
-      userLogin: input.userLogin,
-    });
-  }
+  const stored = await storeReportAtGenerationWithR2(ctx.env, input);
   return stored;
 }
 
@@ -504,7 +476,7 @@ export async function persistOptionsServeReport(
     return false;
   }
   return recordOptionsServeReport(
-    { orm: ctx.getOrm() as never, storage: ctx.storage },
+    { orm: ctx.getOrm() as never, storage: ctx.storage, env: ctx.env },
     outcome,
   );
 }
@@ -544,7 +516,7 @@ export async function persistOptionsServeReport(
  */
 /**
  * Issue #2869 slice 1 follow-up — refresh a canonical
- * mas_reports row's PDF fields after a queued consume
+ * D1 agent_reports row's PDF fields after a queued consume
  * generated them. Thin wrapper over
  * scheduledReports.refreshCanonicalReportPdfFields, so
  * the one recorder owns the update: update-only (never
@@ -565,11 +537,7 @@ export async function refreshCanonicalPdfFields(
     pdfError?: string;
   },
 ): Promise<RefreshCanonicalPdfFieldsResult> {
-  return refreshCanonicalReportPdfFields(
-    ctx.ensureTables() as never,
-    ctx.env as never,
-    input,
-  );
+  return refreshCanonicalReportPdfFields(ctx.env, input);
 }
 
 export async function persistParentScreenReportCanonical(
@@ -609,7 +577,7 @@ export async function persistParentScreenReportCanonical(
       key: keys && keys.length > 0 ? keys[0] : null,
       runFailed: !success,
     });
-  const stored = await storeReportAtGenerationWithR2(ctx.ensureTables(), ctx.env, {
+  const stored = await storeReportAtGenerationWithR2(ctx.env, {
     runId: input.jobId,
     generationId: input.jobId,
     title: input.goalScreen
@@ -648,20 +616,6 @@ export async function persistParentScreenReportCanonical(
     },
     createdAt: input.createdAt,
   });
-  // Issue #4116 — project the landed parent row into D1 (ORM +
-  // queue carriers, per the tenant's config). generationId =
-  // runId = the parent jobId by construction, so the twin link
-  // resolves to the parent job's jobRunRecord. The hook never
-  // throws; a projection failure cannot fail the parent run.
-  if (stored) {
-    await projectCanonicalReportBestEffort({
-      env: ctx.env,
-      sql: ctx.ensureTables(),
-      reportId: stored.reportId,
-      generationId: input.jobId,
-      userLogin: input.userLogin,
-    });
-  }
   return stored ? { reportId: stored.reportId } : null;
 }
 

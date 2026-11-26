@@ -11,15 +11,19 @@
  * - stage addressing refuses BY NAME for unknown chains and
  *   unknown stage names (the chain surface's coded refusals);
  * - a scheduled chain firing dispatches runJob on the host
- *   plane — here the run refuses FEED_JOB_NOT_CONFIGURED BY
- *   NAME (this host context has no AGENT_DB, so the feed
- *   stage's dataset store is unbound) and the roll-up shows
- *   the halt at the feed frontier;
+ *   plane — here the run fails FEED_FETCH_FAILED BY NAME
+ *   (this host context's AGENT_DB is the mock D1, so the feed
+ *   stage's dataset store is bound and the feed fetch fails)
+ *   and the roll-up shows the halt at the feed frontier;
  * - a chain job's own completion dispatches NOTHING through
  *   the completion intake (the chain already ran its stages;
  *   it is nobody's upstream stage job).
  */
 import { describe, expect, it } from "vitest";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
 import { DatabaseSync } from "node:sqlite";
 import {
   buildScheduledAgentChainSurfaceView,
@@ -33,8 +37,6 @@ import {
   type PipelineCompletionNote,
   type ScheduledTasksPipelineContext,
 } from "../src/agents/scheduledTasksPipeline";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
-import type { SqlStorage } from "../src/orm";
 import type { Env } from "../src/types";
 
 /** The node:sqlite DO-storage double (tests/feed_pipeline_host_3543 idiom). */
@@ -50,8 +52,53 @@ class SqliteTestStorage {
   }
 }
 
+/** Minimal D1Database stand-in over node:sqlite (the #6101 suite's double). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: { changes: info.changes, last_row_id: info.lastInsertRowid },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+  async batch(stmts: { run: () => Promise<unknown> }[]) {
+    return Promise.all(stmts.map((stmt) => stmt.run()));
+  }
+}
+
+/** A fresh D1 ledger store over an in-memory mock binding (#6101). */
+function ledgerD1() {
+  const d1 = new MockD1Database();
+  const store = new D1JobRunRecordStore(createD1JobRunRecordDb(d1 as unknown as D1Database));
+  return { d1, store };
+}
+
 function makeHostContext(env: Partial<Env> = {}) {
   const sql = new SqliteTestStorage();
+  const { d1, store } = ledgerD1();
   const kv = new Map<string, unknown>();
   const agentCtx = {
     storage: {
@@ -63,23 +110,23 @@ function makeHostContext(env: Partial<Env> = {}) {
     },
   };
   const ctx = {
-    env: env as Env,
+    // Issue #6101 — the host's run recorder is the D1 recorder.
+    env: { AGENT_DB: d1, ...env } as Env,
     agentCtx: agentCtx as unknown as ScheduledTasksPipelineContext["agentCtx"],
   } satisfies ScheduledTasksPipelineContext;
-  return { ctx, sql };
+  return { ctx, sql, d1, store };
 }
 
 const CHAIN_ID = "pipe:yahoo-nasdaq100-quotes";
 
 async function pollRecords(
-  sql: SqliteTestStorage,
+  store: D1JobRunRecordStore,
   jobId: string,
-): Promise<ReturnType<SqlJobRunRecordStore["listByJob"]>> {
-  const store = new SqlJobRunRecordStore(sql as unknown as SqlStorage);
-  let records = store.listByJob(jobId, 5);
+): Promise<Awaited<ReturnType<D1JobRunRecordStore["listByJob"]>>> {
+  let records = await store.listByJob(jobId, 5);
   for (let i = 0; i < 40 && records.length === 0; i++) {
     await new Promise((r) => setTimeout(r, 50));
-    records = store.listByJob(jobId, 5);
+    records = await store.listByJob(jobId, 5);
   }
   return records;
 }
@@ -148,17 +195,19 @@ describe("the composed chains on the host (#3540)", () => {
   });
 
   it("a scheduled chain firing lands a run record and the roll-up shows the halt at feed", async () => {
-    const { ctx, sql } = makeHostContext();
+    const { ctx, store } = makeHostContext();
     const dispatch = await dispatchScheduledPipelineJob(ctx, CHAIN_ID, "");
     expect(dispatch?.jobId).toBe(CHAIN_ID);
-    const records = await pollRecords(sql, CHAIN_ID);
+    const records = await pollRecords(store, CHAIN_ID);
     expect(records).toHaveLength(1);
     expect(records[0].system).toBe("job-pipeline");
-    // No AGENT_DB ⇒ the feed stage's stores are unbound and the
-    // chain's first stage refuses BY NAME — the chain halts at
-    // its first frontier, it does not silently succeed.
+    // Issue #6101 — the feed stage's stores are D1-bound now
+    // (AGENT_DB is the mock D1), so the chain's first stage runs
+    // the feed and fails BY NAME on the fetch (0 rows received)
+    // — the chain halts at its first frontier, it does not
+    // silently succeed.
     expect(records[0].outcome).toBe("failure");
-    expect(records[0].error ?? "").toContain("FEED_JOB_NOT_CONFIGURED");
+    expect(records[0].error ?? "").toContain("FEED_FETCH_FAILED");
     const control = createScheduledAgentPipelineControl(ctx);
     await ensureScheduledAgentPipelineJobs(ctx, control);
     const view = await buildScheduledAgentChainSurfaceView(ctx, control, CHAIN_ID);
@@ -168,7 +217,7 @@ describe("the composed chains on the host (#3540)", () => {
   });
 
   it("a chain completion records through the intake and dispatches nothing", async () => {
-    const { ctx, sql } = makeHostContext();
+    const { ctx, store } = makeHostContext();
     const note: PipelineCompletionNote = {
       jobId: CHAIN_ID,
       runId: "chain-run-1",
@@ -181,9 +230,8 @@ describe("the composed chains on the host (#3540)", () => {
     expect(recorded).toHaveLength(1);
     // No stage job was dispatched by the chain's completion:
     // no run records for any stage job on this host.
-    const store = new SqlJobRunRecordStore(sql as unknown as SqlStorage);
     await new Promise((r) => setTimeout(r, 250));
-    expect(store.listByJob("yahoo-nasdaq100-quotes-enrich", 5)).toHaveLength(0);
-    expect(store.listByJob("yahoo-nasdaq100-quotes", 5)).toHaveLength(0);
+    expect(await store.listByJob("yahoo-nasdaq100-quotes-enrich", 5)).toHaveLength(0);
+    expect(await store.listByJob("yahoo-nasdaq100-quotes", 5)).toHaveLength(0);
   });
 });

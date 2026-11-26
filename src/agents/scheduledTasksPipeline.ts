@@ -48,7 +48,6 @@ import {
   SHARED_ORCHESTRATOR_INSTANCE,
 } from "../security/serviceIdentity";
 import { createJobPipelineStoresFromSql } from "../data/createJobPipelinePorts";
-import { createDoSqliteJobStageEventStore } from "../data/doSqliteJobStageEventAdapter";
 import { createD1JobStageEventStore } from "../data/d1JobStageEventAdapter";
 import type { JobStageEventStore } from "../data/jobStageEventPorts";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
@@ -58,7 +57,7 @@ import {
   startManagedWorkflowInstance,
   type ManagedWorkflowBinding,
 } from "../workflows/workflowInstanceSeam";
-import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
+import { jobRunRecorderFromEnv } from "../data/createJobRunRecordPorts";
 import {
   createD1JobRunRecordDb,
   D1JobRunRecordStore,
@@ -80,7 +79,6 @@ import { createDeadLetterStoreAdapter } from "../data/createDeadLetterStorePorts
 import { deadLetterRunSink } from "../services/jobPipelineDeadLetter";
 import {
   JobPipelineControl,
-  jobRunRecorderFromStore,
   type JobDispatchResult,
   type JobScheduleHost,
   type JobStatusView,
@@ -506,14 +504,18 @@ function feedRunSettledObserverFor(ctx: ScheduledTasksPipelineContext) {
 }
 
 /**
- * Issue #4360 — the host's durable stage-event store. The ScheduledAgent
- * DO owns the pipeline, so its SQLite is the store's home; the queue
- * consumer's persist call lands here through the agent's RPC surface.
+ * Issue #4360 — the host's durable stage-event store. Issue #6101
+ * (step 7): D1 `job_stage_events` is the store's home now; the DO
+ * leg is deleted. Null when AGENT_DB is unbound — unbound means no
+ * stage rows exist anywhere, so callers treat null as "nothing
+ * recorded" (record → false, list → []) rather than failing.
  */
 export function createScheduledAgentStageEventStore(
   ctx: ScheduledTasksPipelineContext,
-): JobStageEventStore {
-  return createDoSqliteJobStageEventStore(pipelineSql(ctx));
+): JobStageEventStore | null {
+  return ctx.env.AGENT_DB
+    ? createD1JobStageEventStore(ctx.env.AGENT_DB)
+    : null;
 }
 
 export function createScheduledAgentPipelineControl(
@@ -531,6 +533,9 @@ export function createScheduledAgentPipelineControl(
   // steps run through them, and the screener steps bind their
   // quote/history deps over the same #3941 provider construction.
   const feedDeps = feedStepDepsForScheduledAgent(ctx, userLogin);
+  // Issue #6028 — the D1 stage-event store, shared with the
+  // stage-event consumer below (null when AGENT_DB is unbound).
+  const stageEvents = createScheduledAgentStageEventStore(ctx);
   // Issue #6250 — the OTel J1–J7 logging + metrics + traces stacks
   // are wired by the ONE factory (src/services/jobPipelineControlFactory),
   // not inline here: the feed-run observer stays as the deps'
@@ -540,17 +545,13 @@ export function createScheduledAgentPipelineControl(
   // per-domain j1j7 switch first and no-op when it is OFF.
   return createJobPipelineControl({
     stores,
-      runRecorder: jobRunRecorderFromStore(new SqlJobRunRecordStore(sql)),
+      runRecorder: jobRunRecorderFromEnv(ctx.env),
       runSettledObserver: feedRunSettledObserverFor(ctx),
       publisher: messaging.ports?.publisher ?? null,
-    // Issue #6028 — the stage-level terminal rows land in this host's
-    // own DO SQLite (the same store the stage-event consumer writes).
-    stageEvents: createScheduledAgentStageEventStore(ctx),
-    // Issue #6202 — the D1 mirror of the stage rows, when this deployment
-    // has a D1 binding. Best-effort; the DO row is authoritative.
-    ...(ctx.env.AGENT_DB
-      ? { stageEventsMirror: createD1JobStageEventStore(ctx.env.AGENT_DB) }
-      : {}),
+    // Issue #6028 — the stage-level terminal rows land in D1
+    // `job_stage_events` (the #6101 step-7 writer); absent when
+    // AGENT_DB is unbound, and the engine writes nothing then.
+    ...(stageEvents ? { stageEvents } : {}),
     // Issue #3967 — a poison run lands in the platform's DLQ, the surface
     // an operator already inspects. Best-effort: an unbound AGENT_DB (or a
     // failing store) leaves the run's own failure exactly as it was.

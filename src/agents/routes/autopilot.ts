@@ -39,7 +39,7 @@ import { resolveValidatedExecutionAccountContext } from "../../services/accountB
 import { ACCOUNT_BINDING_CONFIG } from "../../config/accountBindings";
 import { codedMessage, getOutcome } from "../../outcomes/outcomeAspects";
 import { tradingTypeFor } from "../../trading";
-import { listJobOutcomes } from "../../services/jobOutcomes";
+import { listD1JobOutcomes } from "../../services/runLedgerReads";
 import {
   resolveAutopilotVerdictTrendPolicy,
   summarizeAutopilotVerdictTrend,
@@ -138,11 +138,13 @@ export async function handleAutopilotRoutes(
   // Issue #1333: the job-outcome sink as Autopilot Control's job
   // feed — every bridged/bus/manual/discovery outcome, newest first,
   // labeled by origin (kind + trigger + status + coded error).
+  // Issue #6101 — the DO sink is gone; the feed reads the folded
+  // outcome facts on the D1 run records directly.
   if (path.endsWith("/autopilot/jobs") && request.method === "GET") {
     try {
       const limitRaw = Number(url.searchParams.get("limit") ?? 50);
       const limit = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, Math.floor(limitRaw))) : 50;
-      const jobs = listJobOutcomes(ctx.ensureTables(), limit);
+      const jobs = await listD1JobOutcomes(ctx.env ?? {}, { limit });
       return Response.json({ jobs, count: jobs.length });
     } catch (err) {
       return Response.json({ error: err instanceof Error ? err.message : "Failed to read job outcomes" }, { status: 500 });

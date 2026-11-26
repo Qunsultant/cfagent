@@ -40,11 +40,15 @@
  * path itself is dead. A grace of 0 disables the watchdog entirely:
  * no findings, no heartbeat.
  */
-import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
+import {
+  createJobRunRecordAdapter,
+  recordLedgerRunD1,
+  resolveLedgerAttribution,
+} from "../../data/createJobRunRecordPorts";
 import { createD1UnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
 import type { SqlStorage } from "../../orm";
 import { resolveEffectiveMissedScheduleGrace } from "../../services/scheduleControls";
-import { recordLedgerRun } from "../../services/unifiedLedger";
+
 import {
   findMissedDurableSchedule,
   missedFiringDetail,
@@ -160,7 +164,17 @@ export async function watchdogMissedSchedules(
     firstSeen = {};
   }
 
-  const store = new SqlJobRunRecordStore(ctx.sql);
+  // Issue #6101 — the ledger is D1 (the store resolves from the
+  // sweep env; the DO `ctx.sql` below stays for the grace managed-
+  // setting read only). The attribution carries the instance owner
+  // as the run's user when the context names one.
+  const ledgerStore = createJobRunRecordAdapter(
+    ctx.env as { AGENT_DB?: unknown; IAAA_TENANT_ID?: unknown; PLATFORM_ID?: unknown },
+  );
+  const ledgerAttribution = resolveLedgerAttribution(
+    ctx.env as { AGENT_DB?: unknown; IAAA_TENANT_ID?: unknown; PLATFORM_ID?: unknown },
+    ctx.userLogin ? { userId: ctx.userLogin } : {},
+  );
   // Issue #6503 (G3) — the stored state behind the alarm list,
   // read once before the loop: a paused (or deleted) row has no
   // expected tick, so the sweep never flags it as missed. The alarm
@@ -198,7 +212,9 @@ export async function watchdogMissedSchedules(
     try {
       let latestRun: { started: string } | undefined;
       try {
-        latestRun = store.latestByJob(schedule.id);
+        latestRun = ledgerStore
+          ? await ledgerStore.latestByJob(schedule.id)
+          : undefined;
       } catch {
         latestRun = undefined;
       }
@@ -216,20 +232,33 @@ export async function watchdogMissedSchedules(
       // Claim-first: the ledger record is the exactly-once claim.
       // A failed write alerts nothing for this row this tick.
       try {
-        recordLedgerRun(store, {
-          system: "orchestrator-schedule",
-          jobId: schedule.id,
-          operation: schedule.callback,
-          started: nowIso,
-          finished: nowIso,
-          outcome: "skipped",
-          triggeredBy: "scheduled",
-          trigger: "scheduled",
-          scheduleId: schedule.id,
-          asyncJobId: null,
-          workflowId: null,
-          detail: missedFiringDetail(schedule.id, finding, schedule.cron),
-        });
+        // Issue #6101 — the claim-first write lands in D1; the
+        // derived identity makes a retry a no-op, so the exactly-
+        // once claim holds. An unbound D1 throws the named error
+        // and the row alerts nothing this tick, as before.
+        if (!ledgerStore) {
+          throw new Error(
+            "[run-ledger] D1 run-ledger binding unbound (AGENT_DB) (#6101).",
+          );
+        }
+        await recordLedgerRunD1(
+          ledgerStore,
+          {
+            system: "orchestrator-schedule",
+            jobId: schedule.id,
+            operation: schedule.callback,
+            started: nowIso,
+            finished: nowIso,
+            outcome: "skipped",
+            triggeredBy: "scheduled",
+            trigger: "scheduled",
+            scheduleId: schedule.id,
+            asyncJobId: null,
+            workflowId: null,
+            detail: missedFiringDetail(schedule.id, finding, schedule.cron),
+          },
+          ledgerAttribution,
+        );
       } catch {
         continue;
       }
@@ -270,22 +299,32 @@ export async function watchdogMissedSchedules(
   // Heartbeat: the sweep ran, with examined counts. Best-effort — a
   // failed heartbeat never fails the sweep.
   try {
-    recordLedgerRun(store, {
-      system: "orchestrator-schedule",
-      jobId: SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID,
-      operation: "schedule.watchdog_sweep",
-      started: nowIso,
-      finished: nowIso,
-      outcome: "success",
-      triggeredBy: "scheduled",
-      trigger: "scheduled",
-      scheduleId: null,
-      asyncJobId: null,
-      workflowId: null,
-      detail:
-        `examined=${result.examined} missed=${result.missed} ` +
-        `skippedUnrecorded=${result.skippedUnrecorded}`,
-    });
+    // Issue #6101 — the heartbeat lands in D1 like the claim.
+    if (!ledgerStore) {
+      throw new Error(
+        "[run-ledger] D1 run-ledger binding unbound (AGENT_DB) (#6101).",
+      );
+    }
+    await recordLedgerRunD1(
+      ledgerStore,
+      {
+        system: "orchestrator-schedule",
+        jobId: SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID,
+        operation: "schedule.watchdog_sweep",
+        started: nowIso,
+        finished: nowIso,
+        outcome: "success",
+        triggeredBy: "scheduled",
+        trigger: "scheduled",
+        scheduleId: null,
+        asyncJobId: null,
+        workflowId: null,
+        detail:
+          `examined=${result.examined} missed=${result.missed} ` +
+          `skippedUnrecorded=${result.skippedUnrecorded}`,
+      },
+      ledgerAttribution,
+    );
   } catch {
     // Best-effort heartbeat.
   }

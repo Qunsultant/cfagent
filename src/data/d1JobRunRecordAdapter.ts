@@ -18,7 +18,6 @@ import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, desc, eq, isNull, notInArray } from "drizzle-orm";
 import { jobRunRecords } from "./drizzleSchema";
-import type { JobRunRecordProjectionInput } from "./runLedgerPorts";
 import {
   applyMigrations,
   MIGRATION_0047_JOB_RUN_RECORDS,
@@ -29,6 +28,7 @@ import {
   MIGRATION_0084_JOB_RUN_RECORDS_BINDING,
   MIGRATION_0086_JOB_RUN_RECORDS_OUTCOME_FACTS,
   MIGRATION_0091_JOB_RUN_RECORD_PROVENANCE,
+  MIGRATION_0093_JOB_RUN_RECORD_IDENTITIES,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -36,7 +36,7 @@ import {
   type JobRunRecord,
 } from "./jobRunRecordPorts";
 import { normalizeJobRunRecord } from "../services/jobRunRecords";
-import type { JobOutcomeRow } from "./jobOutcomePorts";
+import type { JobOutcomeInput, JobOutcomeRow } from "./jobOutcomePorts";
 
 /** Drizzle D1 database object carrying the run-record schema. */
 export type JobRunRecordDb = DrizzleD1Database<{
@@ -49,7 +49,7 @@ export function createD1JobRunRecordDb(d1: D1Database): JobRunRecordDb {
 }
 
 /** Idempotent schema-ensure: applies migrations 0047 + 0072 + 0073 + 0076 + 0081 + 0084 if unapplied. */
-/** Idempotent schema-ensure: applies migrations 0047 + 0072 + 0073 + 0076 + 0081 + 0086 if unapplied. */
+/** Idempotent schema-ensure: applies migrations 0047 + 0072 + 0073 + 0076 + 0081 + 0086 + 0091 + 0093 if unapplied. */
 export async function ensureJobRunRecordsSchema(db: JobRunRecordDb): Promise<number[]> {
   return applyMigrations(db as unknown as MigrationDb, [
     MIGRATION_0047_JOB_RUN_RECORDS,
@@ -60,6 +60,7 @@ export async function ensureJobRunRecordsSchema(db: JobRunRecordDb): Promise<num
     MIGRATION_0084_JOB_RUN_RECORDS_BINDING,
     MIGRATION_0086_JOB_RUN_RECORDS_OUTCOME_FACTS,
     MIGRATION_0091_JOB_RUN_RECORD_PROVENANCE,
+    MIGRATION_0093_JOB_RUN_RECORD_IDENTITIES,
   ]);
 }
 
@@ -130,6 +131,18 @@ function rowToRecord(row: JobRunRecordRow): JobRunRecord {
     ...(row.accountId != null ? { accountId: row.accountId } : {}),
     ...(row.bindingScope != null ? { bindingScope: row.bindingScope } : {}),
     ...(row.bindingSource != null ? { bindingSource: row.bindingSource } : {}),
+    // Issue #6101 — the owning tenant plus the identity columns
+    // (migration 0093). Absent is omitted, like every nullable
+    // column above; a consumer treats absent via `?? null`, never
+    // an invented value. (tenantId was never read back before —
+    // the projector stamped it and no reader needed it; the D1
+    // writer stamps it now, so the read-back carries it.)
+    ...(row.tenantId != null ? { tenantId: row.tenantId } : {}),
+    ...(row.platformId != null ? { platformId: row.platformId } : {}),
+    ...(row.userId != null ? { userId: row.userId } : {}),
+    ...(row.sessionId != null ? { sessionId: row.sessionId } : {}),
+    ...(row.correlationId != null ? { correlationId: row.correlationId } : {}),
+    ...(row.traceId != null ? { traceId: row.traceId } : {}),
     ...(row.errorText != null ? { error: row.errorText } : {}),
     ...(row.detail != null ? { detail: row.detail } : {}),
     ...(row.descriptor != null ? { descriptor: row.descriptor } : {}),
@@ -278,6 +291,19 @@ export class D1JobRunRecordStore {
       dataProviderId: record.dataProviderId ?? null,
       mode: record.mode ?? null,
       modeSource: record.modeSource ?? null,
+      // Issue #6101 — the owning tenant (Q7): the D1 writer stamps
+      // it now that the projector no longer does. Null when the call
+      // site carried none (an unstamped run), never an invented value.
+      tenantId: record.tenantId ?? null,
+      // Issue #6101 — the identity columns (migration 0093): the
+      // FK-spine columns for platform/user/session plus the plain
+      // correlation/trace columns. Absent identities write NULL,
+      // never an invented value.
+      platformId: record.platformId ?? null,
+      userId: record.userId ?? null,
+      sessionId: record.sessionId ?? null,
+      correlationId: record.correlationId ?? null,
+      traceId: record.traceId ?? null,
       // Issue #5102 (F5 of #5094) — the binding tuple, stamped
       // on new rows; null on rows whose call site carried none.
       accountType: record.accountType ?? null,
@@ -290,6 +316,20 @@ export class D1JobRunRecordStore {
       artifactRefsJson: record.artifactRefs !== undefined ? JSON.stringify(record.artifactRefs) : null,
       // Issue #6006 — the outcome facts ride the record verbatim.
       ...outcomeFactColumns(record),
+    })
+    // Issue #6101 (Q2) — retry-safe by key: the unique index on
+    // (job_id, started, finished) is the derived identity, and a
+    // retry of the same identity is a no-op. The first write wins;
+    // a second attempt never duplicates and never throws. The
+    // projector's null-upgrade path (recordProjectedJobRunRecord)
+    // dies with the projector — there is no DO twin left to
+    // upgrade, and no writer upgrades an existing row.
+    .onConflictDoNothing({
+      target: [
+        jobRunRecords.jobId,
+        jobRunRecords.started,
+        jobRunRecords.finished,
+      ],
     });
     // Prune to the per-job cap: keep the newest rows by the
     // history ordering, delete the rest (the DO adapter's
@@ -297,92 +337,7 @@ export class D1JobRunRecordStore {
     await this.pruneToCap(record.jobId);
   }
 
-  /**
-   * Issue #6099 — the projector's conditional upsert for one DO job
-   * run record. The conflict target is the derived identity
-   * (job_id, started, finished) — migration 0081's unique index.
-   * Job run records are immutable once written, so there is no
-   * updated_at ordering to compare: the upsert is insert-if-absent,
-   * plus the null upgrade (a present row whose tenant_id is NULL —
-   * an engine-written row — gets its tenant + projected_at_ms
-   * filled, and nothing else; the engine row's own fields are
-   * authoritative and never overwritten by the DO twin). Returns
-   * true when the write landed (insert or null-upgrade) and false
-   * when it was a no-op (exact replay). Same meta.changes detection
-   * as the async-job adapter; same per-job cap prune as record().
-   *
-   * Issue #6557 — broker provenance (brokerId / dataProviderId /
-   * mode / modeSource) IS carried now: migration 0091 added the four
-   * columns, so the projected row keeps the twin's facts instead of
-   * dropping them. The null upgrade still fills only tenant +
-   * projected_at_ms — an engine row's own fields stay authoritative.
-   *
-   * Issue #5102 (F5 of #5094) — the binding tuple IS carried: the
-   * D1 table gained the four columns in migration 0084, so a
-   * projected row keeps its DO twin's tuple. The null upgrade does
-   * NOT fill a binding onto an existing engine row: the engine
-   * row's own fields are authoritative, and a null binding on it
-   * reads as unbound (the legacy rule), never as a cross-ledger
-   * backfill.
-   */
-  async recordProjectedJobRunRecord(
-    row: JobRunRecordProjectionInput,
-    nowMs: number,
-  ): Promise<boolean> {
-    await this.ensure();
-    const record = row.record;
-    const values = {
-      system: record.system,
-      jobId: record.jobId,
-      operation: record.operation,
-      started: record.started,
-      finished: record.finished,
-      outcome: record.outcome,
-      triggeredBy: record.triggeredBy,
-      triggerText: record.trigger ?? null,
-      scheduleId: record.scheduleId ?? null,
-      asyncJobId: record.asyncJobId ?? null,
-      workflowId: record.workflowId ?? null,
-      kind: record.kind ?? null,
-      originRunId: record.originRunId ?? null,
-      definitionVersion: record.definitionVersion ?? null,
-      // Issue #6557 — the projection carries the DO twin's provenance too
-      // (migration 0091), so the two surfaces agree on the run.
-      brokerId: record.brokerId ?? null,
-      dataProviderId: record.dataProviderId ?? null,
-      mode: record.mode ?? null,
-      modeSource: record.modeSource ?? null,
-      // Issue #5102 (F5 of #5094) — the DO twin's binding tuple
-      // rides the projection, so the D1 row is not unbound forever.
-      accountType: record.accountType ?? null,
-      accountId: record.accountId ?? null,
-      bindingScope: record.bindingScope ?? null,
-      bindingSource: record.bindingSource ?? null,
-      errorText: record.error ?? null,
-      detail: record.detail ?? null,
-      descriptor: record.descriptor ?? null,
-      artifactRefsJson: record.artifactRefs !== undefined ? JSON.stringify(record.artifactRefs) : null,
-      // Issue #6006 — the outcome facts ride the projection verbatim.
-      ...outcomeFactColumns(record),
-      tenantId: row.tenantId,
-      projectedAtMs: nowMs,
-    };
-    const result = (await this.db
-      .insert(jobRunRecords)
-      .values(values)
-      .onConflictDoUpdate({
-        target: [jobRunRecords.jobId, jobRunRecords.started, jobRunRecords.finished],
-        set: { tenantId: row.tenantId, projectedAtMs: nowMs },
-        where: isNull(jobRunRecords.tenantId),
-      })) as unknown as { meta?: { changes?: number } };
-    const changes = result?.meta?.changes;
-    const written = typeof changes === "number" ? changes > 0 : true;
-    if (written) {
-      await this.pruneToCap(record.jobId);
-    }
-    return written;
-  }
-
+  
   /** Shared per-job cap prune (record + the projection upsert). */
   private async pruneToCap(jobId: string): Promise<void> {
     const keep = await this.db
@@ -574,6 +529,49 @@ export class D1JobRunRecordStore {
       created: true,
       record: created ? created.record : record,
     };
+  }
+
+  /**
+   * Issue #6101 — fold one job-outcome INPUT directly onto D1: the
+   * direct replacement for the DO `recordJobOutcome` + projector
+   * hook pair (no DO row, no projection). The DO upsert-merge rules
+   * (the JobOutcomeStore contract) are preserved against the D1
+   * facts: defined input fields win, undefined never wipes an
+   * existing value, delivery states merge key-wise, and a
+   * completed/partial re-record without a coded error clears a
+   * stale one. The merged row then folds through
+   * attachOutcomeFacts (attach-or-create, idempotent on re-fold).
+   */
+  async foldJobOutcome(
+    input: JobOutcomeInput,
+    tenantId: string,
+    nowMs: number,
+  ): Promise<{ landed: boolean; created: boolean; record: JobRunRecord }> {
+    await this.ensure();
+    const now = new Date().toISOString();
+    const prev = (await this.findByLinkage(input.id)) ?? (await this.findFoldRow(input.id));
+    const prevFacts = prev?.record;
+    const outcome: JobOutcomeRow = {
+      id: input.id,
+      kind: input.kind,
+      trigger: input.trigger,
+      status: input.status,
+      scanned: input.scanned ?? prevFacts?.scanned ?? null,
+      matched: input.matched ?? prevFacts?.matched ?? null,
+      codedError:
+        input.codedError ??
+        (input.status === "completed" || input.status === "partial"
+          ? null
+          : prevFacts?.codedError ?? null),
+      reportUrl: input.reportUrl ?? prevFacts?.reportUrl ?? null,
+      pdfKey: input.pdfKey ?? prevFacts?.pdfKey ?? null,
+      xlsxKey: input.xlsxKey ?? prevFacts?.xlsxKey ?? null,
+      csvKey: input.csvKey ?? prevFacts?.csvKey ?? null,
+      deliveryStates: { ...(prevFacts?.deliveryStates ?? {}), ...(input.deliveryStates ?? {}) },
+      origin: input.origin,
+      createdAt: input.createdAt ?? now,
+    };
+    return this.attachOutcomeFacts({ outcome, tenantId }, nowMs);
   }
 }
 

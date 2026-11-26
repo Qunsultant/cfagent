@@ -4,13 +4,12 @@
  * without re-fetching, re-analysing from live data, or overwriting source
  * snapshots.
  *
- * Persists snapshots immutably in the existing canonical `mas_reports` store
- * (`source = "recommendation_snapshot"`, `generationId = "rec-snap:<id>"`)
- * via `scheduledReports.ts` so zero new DDL or raw SQL DML is introduced.
+ * Persists snapshots immutably in the canonical D1 `agent_reports`
+ * store (`source = "recommendation_snapshot"`,
+ * `generationId = "rec-snap:<id>"`) via `scheduledReports.ts`
+ * (#6101 step 8) so zero new DDL or raw SQL DML is introduced.
  */
-import type { SqlStorage } from "../orm";
 import {
-  ensureScheduledReportsTable,
   listScheduledReports,
   storeReportAtGeneration,
 } from "./scheduledReports";
@@ -85,46 +84,48 @@ function parseSnapshot(body: string): RecommendationSnapshot | null {
 /**
  * Persist an immutable timestamped recommendation snapshot. Idempotent on
  * `snapshotId`: an existing snapshot is never overwritten.
+ * Issue #6101 (step 8): writes D1 agent_reports directly; async.
  */
-export function createRecommendationSnapshot(
-  sql: SqlStorage,
+export async function createRecommendationSnapshot(
+  env: { AGENT_DB?: D1Database },
   snapshot: RecommendationSnapshot,
-): { snapshotId: string; created: boolean } {
-  ensureScheduledReportsTable(sql);
-  const stored = storeReportAtGeneration(sql, {
-    runId: snapshot.runId,
-    generationId: `rec-snap:${snapshot.snapshotId}`,
-    title: `Recommendation Snapshot (${snapshot.symbols.join(", ")})`,
-    source: SNAPSHOT_SOURCE,
-    summary: snapshot.thesis ?? `${snapshot.kind} (${snapshot.legs.length} legs)`,
-    body: snapshot as unknown as Record<string, unknown>,
-    createdAt: snapshot.capturedAtUtc,
-    userLogin: snapshot.userLogin,
-  });
+): Promise<{ snapshotId: string; created: boolean }> {
+  const stored = await storeReportAtGeneration(
+    {
+      runId: snapshot.runId,
+      generationId: `rec-snap:${snapshot.snapshotId}`,
+      title: `Recommendation Snapshot (${snapshot.symbols.join(", ")})`,
+      source: SNAPSHOT_SOURCE,
+      summary: snapshot.thesis ?? `${snapshot.kind} (${snapshot.legs.length} legs)`,
+      body: snapshot as unknown as Record<string, unknown>,
+      createdAt: snapshot.capturedAtUtc,
+      userLogin: snapshot.userLogin,
+    },
+    env,
+  );
   return { snapshotId: snapshot.snapshotId, created: Boolean(stored?.created) };
 }
 
-export function getRecommendationSnapshot(
-  sql: SqlStorage,
+export async function getRecommendationSnapshot(
+  env: { AGENT_DB?: D1Database },
   tenantId: string,
   userLogin: string,
   snapshotId: string,
-): RecommendationSnapshot | null {
+): Promise<RecommendationSnapshot | null> {
   return (
-    listRecommendationSnapshots(sql, tenantId, userLogin, 200).find(
+    (await listRecommendationSnapshots(env, tenantId, userLogin, 200)).find(
       (s) => s.snapshotId === snapshotId,
     ) ?? null
   );
 }
 
-export function listRecommendationSnapshots(
-  sql: SqlStorage,
+export async function listRecommendationSnapshots(
+  env: { AGENT_DB?: D1Database },
   tenantId: string,
   userLogin: string,
   limit = 50,
-): RecommendationSnapshot[] {
-  ensureScheduledReportsTable(sql);
-  const hits = listScheduledReports(sql, {
+): Promise<RecommendationSnapshot[]> {
+  const hits = await listScheduledReports(env, {
     sourceFilter: SNAPSHOT_SOURCE,
     userLogin,
     limit,
@@ -146,8 +147,8 @@ function sumNullable(values: Array<number | null>): number | null {
  * Construct a new immutable portfolio-combination snapshot from ANY stored
  * snapshots at any time, without live fetches or mutating source snapshots.
  */
-export function constructPortfolioFromSnapshots(
-  sql: SqlStorage,
+export async function constructPortfolioFromSnapshots(
+  env: { AGENT_DB?: D1Database },
   input: {
     snapshotId?: string;
     runId: string;
@@ -156,13 +157,13 @@ export function constructPortfolioFromSnapshots(
     sourceSnapshotIds: string[];
     thesis?: string | null;
   },
-): { ok: true; snapshot: RecommendationSnapshot } | { ok: false; error: string } {
+): Promise<{ ok: true; snapshot: RecommendationSnapshot } | { ok: false; error: string }> {
   if (input.sourceSnapshotIds.length === 0) {
     return { ok: false, error: "At least one sourceSnapshotId is required to construct a portfolio." };
   }
   const sources: RecommendationSnapshot[] = [];
   for (const id of input.sourceSnapshotIds) {
-    const found = getRecommendationSnapshot(sql, input.tenantId, input.userLogin, id);
+    const found = await getRecommendationSnapshot(env, input.tenantId, input.userLogin, id);
     if (!found) {
       return {
         ok: false,
@@ -210,6 +211,6 @@ export function constructPortfolioFromSnapshots(
     },
   };
 
-  createRecommendationSnapshot(sql, composite);
+  await createRecommendationSnapshot(env, composite);
   return { ok: true, snapshot: composite };
 }

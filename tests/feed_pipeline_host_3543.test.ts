@@ -9,9 +9,10 @@
  *   the whole plane: 7 feed + 5 enrich) with an enabled schedule
  *   becomes a task named
  *   `pipeline-job:<jobId>` whose firing dispatches runJob on the
- *   host's own control plane (a run record lands even when the
- *   run itself refuses — here the dataset store is unbound, so
- *   the firing's run fails FEED_JOB_NOT_CONFIGURED BY NAME);
+ *   host's own control plane (a run record lands in the D1
+ *   ledger even when the run itself refuses — here the dataset
+ *   store is D1-bound, so the firing's run fetches and fails
+ *   FEED_FETCH_FAILED BY NAME);
  * - a host without DO SQLite declares nothing (never crashes);
  * - the workflow start path: the injected seam wins; otherwise
  *   the JOB_PIPELINE_WORKFLOW binding + AGENT_DB are required by
@@ -27,6 +28,10 @@
  *   node-path claim addressing ("job:0") is unchanged.
  */
 import { describe, it, expect } from "vitest";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import {
@@ -43,7 +48,6 @@ import {
   PIPELINE_TASK_ID_PREFIX,
   type ScheduledTasksPipelineContext,
 } from "../src/agents/scheduledTasksPipeline";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
 import {
   createJobPipelineEventsHandler,
   extractJobPipelineCompletion,
@@ -70,8 +74,53 @@ class SqliteTestStorage {
   }
 }
 
+/** Minimal D1Database stand-in over node:sqlite (the #6101 suite's double). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: { changes: info.changes, last_row_id: info.lastInsertRowid },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+  async batch(stmts: { run: () => Promise<unknown> }[]) {
+    return Promise.all(stmts.map((stmt) => stmt.run()));
+  }
+}
+
+/** A fresh D1 ledger store over an in-memory mock binding (#6101). */
+function ledgerD1() {
+  const d1 = new MockD1Database();
+  const store = new D1JobRunRecordStore(createD1JobRunRecordDb(d1 as unknown as D1Database));
+  return { d1, store };
+}
+
 function makeHostContext(env: Partial<Env> = {}) {
   const sql = new SqliteTestStorage();
+  const { d1, store } = ledgerD1();
   const kv = new Map<string, unknown>();
   const agentCtx = {
     storage: {
@@ -83,10 +132,11 @@ function makeHostContext(env: Partial<Env> = {}) {
     },
   };
   const ctx = {
-    env: env as Env,
+    // Issue #6101 — the host's run recorder is the D1 recorder.
+    env: { AGENT_DB: d1, ...env } as Env,
     agentCtx: agentCtx as unknown as ScheduledTasksPipelineContext["agentCtx"],
   } satisfies ScheduledTasksPipelineContext;
-  return { ctx, sql, kv };
+  return { ctx, sql, kv, d1, store };
 }
 
 function jobEvent(type: string, data: Record<string, unknown>): MessageEnvelope {
@@ -194,21 +244,21 @@ describe("pipeline host wiring (#3543)", () => {
   });
 
   it("a firing dispatches runJob on the host plane — a run record lands", async () => {
-    const { ctx, sql } = makeHostContext();
+    const { ctx, store } = makeHostContext();
     const tasks = await declarePipelineTasks(ctx);
     await tasks[`${PIPELINE_TASK_ID_PREFIX}yahoo-nasdaq100-quotes`].handler({} as never);
-    const store = new SqlJobRunRecordStore(sql as unknown as SqlStorage);
-    let records = store.listByJob("yahoo-nasdaq100-quotes", 5);
+    let records = await store.listByJob("yahoo-nasdaq100-quotes", 5);
     for (let i = 0; i < 40 && records.length === 0; i++) {
       await new Promise((r) => setTimeout(r, 50));
-      records = store.listByJob("yahoo-nasdaq100-quotes", 5);
+      records = await store.listByJob("yahoo-nasdaq100-quotes", 5);
     }
     expect(records).toHaveLength(1);
     expect(records[0].system).toBe("job-pipeline");
-    // No AGENT_DB in this host context ⇒ the dataset store is
-    // unbound and the run refuses BY NAME (never a silent fetch).
+    // Issue #6101 — the dataset store is D1-bound now (AGENT_DB
+    // is the mock D1), so the run fetches and fails BY NAME when
+    // the provider returns no rows (never a silent fetch).
     expect(records[0].outcome).toBe("failure");
-    expect(records[0].error ?? "").toContain("FEED_JOB_NOT_CONFIGURED");
+    expect(records[0].error ?? "").toContain("FEED_FETCH_FAILED");
   });
 
   it("a host without DO SQLite declares nothing and does not throw", async () => {
@@ -240,13 +290,23 @@ describe("pipeline host wiring (#3543)", () => {
     await expect(
       startPipelineJobWorkflow(ctx, "yahoo-nasdaq100-quotes", { trigger: "manual" }),
     ).rejects.toThrow(/job_pipeline_workflow_not_configured/);
+    // Issue #6101 — makeHostContext binds the mock D1 as
+    // AGENT_DB, so the no-AGENT_DB case is built by stripping
+    // it from the env: binding present, AGENT_DB absent.
     const withBinding = makeHostContext({
       JOB_PIPELINE_WORKFLOW: {
         create: async () => ({ id: "wf-1" }),
       } as unknown as Env["JOB_PIPELINE_WORKFLOW"],
     });
+    const { AGENT_DB: _stripped, ...envWithoutDb } = withBinding.ctx.env as Env & {
+      AGENT_DB?: unknown;
+    };
     await expect(
-      startPipelineJobWorkflow(withBinding.ctx, "yahoo-nasdaq100-quotes", { trigger: "manual" }),
+      startPipelineJobWorkflow(
+        { ...withBinding.ctx, env: envWithoutDb } as ScheduledTasksPipelineContext,
+        "yahoo-nasdaq100-quotes",
+        { trigger: "manual" },
+      ),
     ).rejects.toThrow(/job_pipeline_workflow_not_configured/);
   });
 

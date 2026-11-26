@@ -10,7 +10,7 @@
  *   and a skip without a reason are rejected — a silent skip or a
  *   silent failure must be unrepresentable, not just discouraged);
  * - the per-job cap prune (newest-first, deterministic on ties);
- * - the in-memory store and the DO-SQLite store round-trips
+ * - the in-memory store and the D1 store round-trips
  *   (node:sqlite double, same shape as the #2337 conformance file);
  * - ScheduledAgent: a fired goal, a skipped goal, and a failed goal
  *   each leave exactly one stored per-run record with the right
@@ -64,6 +64,7 @@ vi.mock("../src/security/etradeOAuth", () => ({
 import { createJob } from "../src/orchestrate";
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
 import { MockD1Database } from "./mock-d1";
+import { makeLedgerStub } from "./ledger-stub";
 import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 import { createMemoryAuditStore } from "../src/security/iaaaAudit";
@@ -76,7 +77,10 @@ import {
   type JobRunRecord,
 } from "../src/services/jobRunRecords";
 import { InMemoryJobRunRecordStore } from "../src/data/inMemoryJobRunRecordAdapter";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
 import {
   handleSchedulesRoutes,
   type SchedulesRouteContext,
@@ -149,6 +153,11 @@ function makeEnv(mockD1?: MockD1Database) {
       get: () => ({ budgetCheck: async () => ({ allowed: true }) }),
     },
     SESSION_STORE: null,
+    // Issue #6101 step 9 — the KV "jobRunRecords" key is retired:
+    // fired goals post their runs to the shared ledger through
+    // ORCHESTRATOR_AGENT, so bind a fresh in-memory ledger stub —
+    // listJobRuns/getLatestJobRun read the posted runs back.
+    ORCHESTRATOR_AGENT: makeLedgerStub().namespace,
     ...(mockD1 ? { AGENT_DB: mockD1 } : {}),
   };
 }
@@ -344,12 +353,12 @@ describe("job run record stores (#2964)", () => {
     expect(store.latestByJob("missing")).toBeUndefined();
   });
 
-  it("SQL store: round-trip, ordering, per-job cap, failure text", () => {
-    const storage = new SqliteTestStorage();
-    const store = new SqlJobRunRecordStore(storage.sql as never);
-    store.record(sampleRecord("s1", "2026-11-03T00:00:01.000Z"));
-    store.record(sampleRecord("s1", "2026-11-03T00:00:02.000Z"));
-    store.record(
+  it("D1 store: round-trip, ordering, per-job cap, failure text", async () => {
+    const mockD1 = new MockD1Database();
+    const store = new D1JobRunRecordStore(createD1JobRunRecordDb(mockD1 as never));
+    await store.record(sampleRecord("s1", "2026-11-03T00:00:01.000Z"));
+    await store.record(sampleRecord("s1", "2026-11-03T00:00:02.000Z"));
+    await store.record(
       buildJobRunRecord({
         system: "orchestrator-schedule",
         jobId: "s1",
@@ -361,7 +370,7 @@ describe("job run record stores (#2964)", () => {
         error: "screen blew up",
       }),
     );
-    const runs = store.listByJob("s1");
+    const runs = await store.listByJob("s1");
     expect(runs.map((r) => r.started)).toEqual([
       "2026-11-03T00:00:03.000Z",
       "2026-11-03T00:00:02.000Z",
@@ -370,20 +379,23 @@ describe("job run record stores (#2964)", () => {
     expect(runs[0].outcome).toBe("failure");
     expect(runs[0].error).toBe("screen blew up");
     expect(runs[0].triggeredBy).toBe("manual");
-    expect(store.latestByJob("s1")?.started).toBe("2026-11-03T00:00:03.000Z");
+    expect((await store.latestByJob("s1"))?.started).toBe("2026-11-03T00:00:03.000Z");
   });
 
   it("a skipped callback run persists its detail code and its firing tuple (#5100)", async () => {
     const storage = new SqliteTestStorage();
-    const store = new SqlJobRunRecordStore(storage.sql as never);
+    const mockD1 = new MockD1Database();
     await recordScheduleCallbackRun(
       storage.sql as never,
       "autonomousMarketScreen",
       { userLogin: "alice", brokerId: "etrade", mode: "paper", accountType: "stock", accountId: "ET-GONE" },
       { id: "sched-5100" },
       async () => ({ outcome: "skipped", detail: "FAILURE_ACCOUNT_UNKNOWN" }),
+      // Issue #6101 — the ledger is D1: the store resolves from env.
+      { env: { AGENT_DB: mockD1 } },
     );
-    const runs = store.listByJob("sched-5100");
+    const store = new D1JobRunRecordStore(createD1JobRunRecordDb(mockD1 as never));
+    const runs = await store.listByJob("sched-5100");
     expect(runs).toHaveLength(1);
     expect(runs[0].outcome).toBe("skipped");
     expect(runs[0].detail).toBe("FAILURE_ACCOUNT_UNKNOWN");
@@ -600,10 +612,12 @@ describe("orchestrator runs routes (#2964)", () => {
 
   it("GET /schedules/runs lists recent runs across schedules", async () => {
     const ctx = baseCtx();
-    const store = new SqlJobRunRecordStore(
-      (ctx.agentCtx as any).storage.sql as never,
+    // Issue #6101 — the runs routes read the D1 ledger: seed and
+    // read through the D1 store over the ctx's own AGENT_DB.
+    const store = new D1JobRunRecordStore(
+      createD1JobRunRecordDb(ctx.env.AGENT_DB as unknown as D1Database),
     );
-    store.record(
+    await store.record(
       buildJobRunRecord({
         system: "orchestrator-schedule",
         jobId: "sched-9",
@@ -623,10 +637,12 @@ describe("orchestrator runs routes (#2964)", () => {
 
   it("GET /schedules/:id/runs returns that schedule's history, not the get-by-id 404", async () => {
     const ctx = baseCtx();
-    const store = new SqlJobRunRecordStore(
-      (ctx.agentCtx as any).storage.sql as never,
+    // Issue #6101 — the runs routes read the D1 ledger: seed and
+    // read through the D1 store over the ctx's own AGENT_DB.
+    const store = new D1JobRunRecordStore(
+      createD1JobRunRecordDb(ctx.env.AGENT_DB as unknown as D1Database),
     );
-    store.record(
+    await store.record(
       buildJobRunRecord({
         system: "orchestrator-schedule",
         jobId: "sched-9",
@@ -668,10 +684,11 @@ describe("orchestrator runs routes (#2964)", () => {
     });
     const res = await call(ctx, "/schedules/sched-9/trigger", "POST");
     expect(res?.status).toBe(200);
-    const store = new SqlJobRunRecordStore(
-      (ctx.agentCtx as any).storage.sql as never,
+    // Issue #6101 — the trigger route records into the D1 ledger.
+    const store = new D1JobRunRecordStore(
+      createD1JobRunRecordDb(ctx.env.AGENT_DB as unknown as D1Database),
     );
-    const runs = store.listByJob("sched-9");
+    const runs = await store.listByJob("sched-9");
     expect(runs).toHaveLength(1);
     expect(runs[0].outcome).toBe("success");
     // Issue #6503 — a Run-now click is a "triggered" dispatch
@@ -699,14 +716,17 @@ describe("orchestrator runs routes (#2964)", () => {
         payload,
         { id: "sched-9" },
         async () => ({ outcome: "success", descriptor: "collect IV history" }),
+        // Issue #6101 — the wrapper resolves the D1 store from env.
+        { env: ctx.env },
       );
     });
     const res = await call(ctx, "/schedules/sched-9/trigger", "POST");
     expect(res?.status).toBe(200);
-    const store = new SqlJobRunRecordStore(
-      (ctx.agentCtx as any).storage.sql as never,
+    // Issue #6101 — the trigger route records into the D1 ledger.
+    const store = new D1JobRunRecordStore(
+      createD1JobRunRecordDb(ctx.env.AGENT_DB as unknown as D1Database),
     );
-    const runs = store.listByJob("sched-9");
+    const runs = await store.listByJob("sched-9");
     expect(runs).toHaveLength(1);
     expect(runs[0].outcome).toBe("success");
     expect(runs[0].descriptor).toBe("collect IV history");
@@ -739,14 +759,17 @@ describe("orchestrator runs routes (#2964)", () => {
           payload,
           { id: "sched-9" },
           async () => ({ outcome: "success", descriptor }),
+          // Issue #6101 — the wrapper resolves the D1 store from env.
+          { env: ctx.env },
         );
       });
       const res = await call(ctx, "/schedules/sched-9/trigger", "POST");
       expect(res?.status).toBe(200);
-      const store = new SqlJobRunRecordStore(
-        (ctx.agentCtx as any).storage.sql as never,
+      // Issue #6101 — the trigger route records into the D1 ledger.
+      const store = new D1JobRunRecordStore(
+        createD1JobRunRecordDb(ctx.env.AGENT_DB as unknown as D1Database),
       );
-      const runs = store.listByJob("sched-9");
+      const runs = await store.listByJob("sched-9");
       expect(runs).toHaveLength(1);
       expect(runs[0].outcome).toBe("success");
       expect(runs[0].descriptor).toBe(descriptor);
@@ -760,9 +783,10 @@ describe("orchestrator runs routes (#2964)", () => {
     const ctx = baseCtx();
     const res = await call(ctx, "/schedules/nope/trigger", "POST");
     expect(res?.status).toBe(404);
-    const store = new SqlJobRunRecordStore(
-      (ctx.agentCtx as any).storage.sql as never,
+    // Issue #6101 — the D1 ledger is the only ledger: nothing landed.
+    const store = new D1JobRunRecordStore(
+      createD1JobRunRecordDb(ctx.env.AGENT_DB as unknown as D1Database),
     );
-    expect(store.listByJob("nope")).toHaveLength(0);
+    expect(await store.listByJob("nope")).toHaveLength(0);
   });
 });

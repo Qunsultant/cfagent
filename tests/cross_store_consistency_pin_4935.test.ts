@@ -5,12 +5,14 @@
  *
  * The contract states rules the tree already follows in its named
  * projection paths (run ledger, chain/schedule, shard jobs, audit
- * reports, telemetry realizations, canonical seed) — and records the
+ * reports, telemetry realizations) — and records the
  * five violations the #4935 audit found as follow-up sub-issues
  * (#4961–#4965). These pins hold the conforming shape so a new
  * dual-write path, a reordered write, a throwing hook, a scheduled
  * reconcile, or a non-atomic idempotency guard fails CI instead of
- * landing silently.
+ * landing silently. (Issue #6101 step 8 retired the canonical seed
+ * path — `seedCanonicalReports` is gone from the census, the
+ * callee list, and the P-C exception below.)
  *
  * The five pins (each has unit tests for its scanner below, then a
  * live test against src/):
@@ -21,8 +23,7 @@
  *   it to the census AND to the ADR's ledger, or the path does not
  *   land. `*.deprecated.ts` files are out of the scan (retired
  *   code, not a live path). Interface / stub type members
- *   (`recordRealizations(` in `ThesisRealizationStore`,
- *   `seedCanonicalReports(` in a `stub<{...}>` type argument)
+ *   (`recordRealizations(` in `ThesisRealizationStore`)
  *   are not calls: a line starting with the bare callee name
  *   and ending at the open paren (or carrying a `):` return-type
  *   annotation) is skipped — projection calls in this tree are
@@ -42,11 +43,12 @@
  * P-C — Never-throw. Each named projection hook / posting helper /
  *   projector function contains its own try/catch (or collects
  *   per-item errors into a result): a projection failure never
- *   throws into the DO write, the submission, or the run. The one
- *   deliberate exception is the canonical seed
+ *   throws into the DO write, the submission, or the run. There
+ *   used to be one deliberate exception, the canonical seed
  *   (`seedCanonicalReports`): a store failure during the seed
- *   propagates by design (an operator step whose failure the
- *   operator must see), so it is NOT in this pin.
+ *   propagated by design (an operator step whose failure the
+ *   operator must see). The seed was retired by #6101 step 8,
+ *   so the exception is gone with it — no exception remains.
  * P-D — Reconcile operator-only. The reconcile entry points are
  *   referenced only from admin-gated routes / DO doors (the
  *   allowlist); no tick, boot, or scheduled path references them.
@@ -60,10 +62,11 @@
  * - P-E: `d1TelemetryAdapter.recordRealizations` has no
  *   `ON CONFLICT` (F-2, #4962: SELECT-then-INSERT throws a PK
  *   violation under concurrent redelivery instead of no-op'ing).
- * - P-E: `runLedgerProjection.projectReport` has a read-before-write
- *   guard (latest version + LWW) but the version bump is not atomic
- *   (F-3, #4963: concurrent carriers can silently drop the newer
- *   content while reporting projected:true).
+ * Issue #6101 — the `runLedgerProjection.projectReport` P-E
+ * exception (F-3, #4963) dies with the projector: there is no
+ * read-before-write version bump anymore, because there is no
+ * projection. #4963 itself needs a ruling/closure, not a silent
+ * close here.
  *
  * Not pin-able here (ADR 0033 "Not pin-able", recorded with
  * grounds): the d1-only gate (F-1, #4961 — a runtime config
@@ -271,16 +274,11 @@ export function readCodeLines(relPath: string): string[] {
 
 /** Projection entry points whose calls the census governs. */
 export const PROJECTION_CALLEES = [
-  "projectCanonicalReportBestEffort",
-  "projectAsyncJobBestEffort",
-  "projectQueuedRunLedger",
   "projectAfterTransition",
   "projectTransition",
   "projectLegOutcomes",
   "projectEvaluationRealizations",
-  "seedCanonicalReports",
   "recordAuditEventBestEffort",
-  "postRunLedgerBestEffort",
   "recordAuditEvent",
   "recordRealizations",
 ] as const;
@@ -291,15 +289,6 @@ export const PROJECTION_CALLEES = [
  * table is a new dual-write path without contract review.
  */
 export const PROJECTION_CENSUS: Record<string, readonly string[]> = {
-  "src/agents/orchestrator.ts": [
-    "projectCanonicalReportBestEffort",
-    "projectAsyncJobBestEffort",
-  ],
-  "src/agents/orchestrator/asyncJobs.ts": ["projectAsyncJobBestEffort"],
-  "src/agents/orchestrator/reportDispatch.ts": [
-    "projectCanonicalReportBestEffort",
-  ],
-  "src/agents/orchestrator/canonicalReportSeed.ts": ["seedCanonicalReports"],
   "src/agents/scheduled-agent.ts": [
     "projectAfterTransition",
     "recordAuditEventBestEffort",
@@ -313,17 +302,13 @@ export const PROJECTION_CENSUS: Record<string, readonly string[]> = {
     "projectLegOutcomes",
     "recordAuditEventBestEffort",
   ],
-  "src/server/routes/privacy.ts": ["seedCanonicalReports"],
   "src/workflows/screenerCollation.ts": ["projectLegOutcomes"],
-  "src/services/runLedgerProjectionHooks.ts": ["postRunLedgerBestEffort"],
-  "src/agents/orchestrator/runLedgerReconcile.ts": ["postRunLedgerBestEffort"],
   "src/agents/research-agent.ts": ["projectEvaluationRealizations"],
   "src/telemetry/telemetryProjection.ts": ["recordRealizations"],
   "src/telemetry/telemetryRoute.ts": ["recordRealizations"],
   "src/data/createAuditReportPorts.ts": ["recordAuditEvent"],
   "src/data/auditReportProjection.ts": ["recordAuditEvent"],
   "src/data/chainScheduleProjection.ts": ["projectTransition"],
-  "src/server/routes/queue.ts": ["projectQueuedRunLedger"],
 };
 
 /** Modules whose `recordAuditEvent` is the D1 projection (not the IAAA log). */
@@ -469,24 +454,6 @@ export interface DoFirstEntry {
  */
 export const DO_FIRST_ENTRIES: DoFirstEntry[] = [
   {
-    file: "src/agents/orchestrator/reportDispatch.ts",
-    functionName: "persistScreenerReportCanonical",
-    persist: /storeReportAtGenerationWithR2\s*\(/,
-    projection: /projectCanonicalReportBestEffort\s*\(/,
-  },
-  {
-    file: "src/agents/orchestrator/reportDispatch.ts",
-    functionName: "persistPipelineGenerateReportCanonical",
-    persist: /storeReportAtGenerationWithR2\s*\(/,
-    projection: /projectCanonicalReportBestEffort\s*\(/,
-  },
-  {
-    file: "src/agents/orchestrator/reportDispatch.ts",
-    functionName: "persistParentScreenReportCanonical",
-    persist: /storeReportAtGenerationWithR2\s*\(/,
-    projection: /projectCanonicalReportBestEffort\s*\(/,
-  },
-  {
     file: "src/agents/scheduled-agent.ts",
     functionName: "synthesizeSchedule",
     persist: /saveSynthesized\s*\(/,
@@ -503,12 +470,6 @@ export const DO_FIRST_ENTRIES: DoFirstEntry[] = [
     functionName: "killSynthesizedSchedule",
     persist: /saveSynthesized\s*\(/,
     projection: /projectSynthesized\s*\(/,
-  },
-  {
-    file: "src/agents/orchestrator/asyncJobs.ts",
-    functionName: "projectAsyncJobTransition",
-    persist: /getRow\s*\(/,
-    projection: /projectAsyncJobBestEffort\s*\(/,
   },
 ];
 
@@ -562,21 +523,15 @@ export interface NeverThrowEntry {
  * Projection functions that must contain their own try/catch (or
  * per-item error collection): a projection failure never throws into
  * the DO write, the submission, or the run (ADR 0033 R-7.2).
- * `seedCanonicalReports` is deliberately NOT here: a store failure
- * during the seed propagates by design (an operator step whose
- * failure the operator must see).
+ * (The old `seedCanonicalReports` exception is gone with the seed,
+ * retired by #6101 step 8.)
  */
 export const NEVER_THROW_ENTRIES: NeverThrowEntry[] = [
-  { file: "src/services/runLedgerProjectionHooks.ts", functionName: "projectCanonicalReportBestEffort" },
-  { file: "src/services/runLedgerProjectionHooks.ts", functionName: "projectAsyncJobBestEffort" },
-  { file: "src/services/runLedgerProjectionHooks.ts", functionName: "fireCarriers" },
-  { file: "src/services/runLedgerProjectionPosting.ts", functionName: "postRunLedgerBestEffort" },
   { file: "src/data/chainScheduleProjection.ts", functionName: "projectTransition" },
   { file: "src/data/chainScheduleProjection.ts", functionName: "reconcileChainSchedules" },
   { file: "src/data/shardJobProjection.ts", functionName: "projectLegOutcomes" },
   { file: "src/data/shardJobProjection.ts", functionName: "reconcileShardJobs" },
   { file: "src/data/auditReportProjection.ts", functionName: "recordAuditEvent" },
-  { file: "src/agents/orchestrator/runLedgerReconcile.ts", functionName: "reconcileRunLedgerProjection" },
 ];
 
 export interface NeverThrowCheck {
@@ -615,7 +570,6 @@ export function checkNeverThrow(
 
 /** Reconcile entry points whose references the allowlist governs. */
 export const RECONCILE_NAMES = [
-  "reconcileRunLedgerProjection",
   "reconcileShardJobProjection",
   "reconcileChainSchedules",
   "reconcileShardJobs",
@@ -628,11 +582,6 @@ export const RECONCILE_NAMES = [
  * boot, or scheduled path references them (ADR 0033 R-7.4).
  */
 export const RECONCILE_ALLOWLIST: Record<string, readonly string[]> = {
-  reconcileRunLedgerProjection: [
-    "src/agents/orchestrator.ts",
-    "src/agents/orchestrator/runLedgerReconcile.ts",
-    "src/server/routes/privacy.ts",
-  ],
   reconcileShardJobProjection: [
     "src/agents/orchestrator.ts",
     "src/agents/orchestrator/shardJobReconcile.ts",
@@ -723,7 +672,6 @@ export interface IdempotencyEntry {
 export const IDEMPOTENCY_ENTRIES: IdempotencyEntry[] = [
   { file: "src/data/d1AuditReportAdapter.ts", method: "recordAuditEvent" },
   { file: "src/data/d1AuditReportAdapter.ts", method: "recordReport" },
-  { file: "src/data/d1RunLedgerAdapter.ts", method: "recordAsyncJob" },
   { file: "src/data/d1ChainScheduleAdapter.ts", method: "recordChain" },
   { file: "src/data/d1ChainScheduleAdapter.ts", method: "recordSchedule" },
   { file: "src/data/d1ShardJobAdapter.ts", method: "recordJob" },
@@ -732,12 +680,6 @@ export const IDEMPOTENCY_ENTRIES: IdempotencyEntry[] = [
     method: "recordRealizations",
     exceptionFinding: "F-2",
     exceptionIssue: 4962,
-  },
-  {
-    file: "src/data/runLedgerProjection.ts",
-    method: "projectReport",
-    exceptionFinding: "F-3",
-    exceptionIssue: 4963,
   },
 ];
 
@@ -868,11 +810,11 @@ describe("Cross-store consistency pins (#4935, ADR 0033)", () => {
       violations,
       "D1 projection write without a statement-level idempotency guard (ADR 0033 R-1):",
     ).toEqual([]);
-    // The known exceptions are visible, not hidden: exactly the two
-    // audit findings, each with its follow-up issue.
-    expect(exceptions).toHaveLength(2);
+    // The known exceptions are visible, not hidden: exactly the
+    // one remaining audit finding, with its follow-up issue.
+    // Issue #6101 — the F-3 exception died with the projector.
+    expect(exceptions).toHaveLength(1);
     expect(exceptions.join(" ")).toContain("F-2");
-    expect(exceptions.join(" ")).toContain("F-3");
   });
 });
 
@@ -903,28 +845,30 @@ describe("cross-store pin scanners (#4935)", () => {
   });
 
   it("P-A classifies a census call, an unknown call, and a definition", () => {
+    // Issue #6101 — the run-ledger callees are deleted, so the
+    // synthetic snippet uses surviving callees instead.
     const lines = stripComments([
-      "import { projectCanonicalReportBestEffort } from '../../services/runLedgerProjectionHooks';",
-      "await projectCanonicalReportBestEffort({ env, sql, reportId });",
+      "import { projectTransition } from './chainScheduleProjection';",
+      "await projectTransition({ store, record });",
       "await projectLegOutcomes({ store, legs });",
-      "export async function projectCanonicalReportBestEffort(args: {}) {}",
-      "async projectQueuedRunLedger(input: {}) {}",
+      "export async function projectTransition(args: {}) {}",
+      "async projectLegOutcomes(input: {}) {}",
     ]);
     const raw = [
-      "import { projectCanonicalReportBestEffort } from '../../services/runLedgerProjectionHooks';",
-      "await projectCanonicalReportBestEffort({ env, sql, reportId });",
+      "import { projectTransition } from './chainScheduleProjection';",
+      "await projectTransition({ store, record });",
       "await projectLegOutcomes({ store, legs });",
-      "export async function projectCanonicalReportBestEffort(args: {}) {}",
-      "async projectQueuedRunLedger(input: {}) {}",
+      "export async function projectTransition(args: {}) {}",
+      "async projectLegOutcomes(input: {}) {}",
     ];
     const result = scanFileForProjectionCalls(
-      "src/agents/orchestrator/reportDispatch.ts",
+      "src/data/createChainSchedulePorts.ts",
       lines,
       raw,
     );
     // The census call is allowed; the definition lines are not calls.
     expect(result.allowed.map((c) => c.callee)).toEqual([
-      "projectCanonicalReportBestEffort",
+      "projectTransition",
     ]);
     // projectLegOutcomes is not in this file's census row.
     expect(result.violations.map((v) => v.callee)).toEqual([

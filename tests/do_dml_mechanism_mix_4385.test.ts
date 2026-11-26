@@ -30,7 +30,10 @@
  *    #5175 slice 2 adds: the run-registry adapter's 2 INSERT + 2
  *    SELECT literals (doSqliteRunRegistryAdapter.ts) — a later
  *    slice moves this number down and updates this pin in the
- *    same PR;
+ *    same PR; issue #6101 moves it down 255 → 248: the two deleted
+ *    DO adapters (doSqliteJobRunRecordAdapter.ts,
+ *    doSqliteJobStageEventAdapter.ts) take their 3 writes + 4 reads
+ *    with them; the D1 writers replace them.
  *  - the named exemptions are recorded here with their reasons
  *    (Q4): the doSchema* ledger (5) and the kv_store funnel (11);
  *  - the P6c boundary is CLOSED by #4386: doSqliteOrmAdapters.ts
@@ -200,7 +203,7 @@ describe("DO mechanism mix (#4385)", () => {
     ]);
   });
 
-  it("the remaining inline count is 255 (250 #5034 baseline − 2 P6e mas_autopilot + 2 #5865 + 1 #3185 listByTenant read + 2 #3185 bridge prune/delete writes + 2 #3185 bridge prune/count reads)", () => {
+  it("the remaining inline count is 248 (255 − 3 #6101 writes − 4 #6101 reads: the two deleted DO adapters take their literals with them; the D1 writers replace them)", () => {
     let write = 0;
     let read = 0;
     for (const file of doFiles()) {
@@ -208,9 +211,9 @@ describe("DO mechanism mix (#4385)", () => {
       write += counts.write;
       read += counts.read;
     }
-    expect(write).toBe(123);
-    expect(read).toBe(132);
-    expect(write + read).toBe(255);
+    expect(write).toBe(120);
+    expect(read).toBe(128);
+    expect(write + read).toBe(248);
   });
 
   it("the named exemptions hold their recorded counts, with reasons", () => {

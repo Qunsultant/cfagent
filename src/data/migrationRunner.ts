@@ -1568,6 +1568,21 @@ export const MIGRATION_0092_UNIFIED_SCHEDULES_D1: DataMigration = {
   name: "0092_unified_schedules_d1",
   sql: d1MigrationSql(92),
 };
+/**
+ * Migration 0093 — the run-record identity columns + the carrier-table
+ * drop (#6101). The D1 run record gains platform_id / user_id /
+ * session_id (Q7) and correlation_id / trace_id as plain columns (Q8):
+ * nullable additive, NULL for pre-cutover rows, never backfilled (the
+ * #5102 precedent). The agent_tenant_projection_carriers table is
+ * dropped in the same migration: it dies with the #6099 projector, no
+ * carrier is ever configured again, and no code reads it. No rows are
+ * copied — the columns land empty and the table is dropped, not migrated.
+ */
+export const MIGRATION_0093_JOB_RUN_RECORD_IDENTITIES: DataMigration = {
+  version: 93,
+  name: "0093_job_run_record_identities",
+  sql: d1MigrationSql(93),
+};
 export const MIGRATION_0082_REFERRAL_TRIAL_EXTENSION: DataMigration = {
   version: 82,
   name: "0082_referral_trial_extension",
@@ -1847,6 +1862,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0090_JOB_INSTANCE_RUN_PROVENANCE,
   MIGRATION_0091_JOB_RUN_RECORD_PROVENANCE,
   MIGRATION_0092_UNIFIED_SCHEDULES_D1,
+  MIGRATION_0093_JOB_RUN_RECORD_IDENTITIES,
 ];
 
 function splitStatements(sqlText: string): string[] {

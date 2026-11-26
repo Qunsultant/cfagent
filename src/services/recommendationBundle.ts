@@ -732,12 +732,12 @@ export function buildBundleCanonicalReportInput(
  * (not in the route) so the route file stays under the #359 50 KB
  * target pinned by tests/etrade_routes_resplit_995.test.ts.
  */
-export function persistBundleReport(
+export async function persistBundleReport(
   orm: Parameters<typeof storeReportStage>[0],
   bundle: RecommendationBundle,
   primarySymbol: string,
   userLogin: string,
-): { reportId: string; created: boolean } | null {
+): Promise<{ reportId: string; created: boolean } | null> {
   return storeReportStage(orm, buildBundleCanonicalReportInput(bundle, primarySymbol, userLogin));
 }
 

@@ -437,7 +437,7 @@ export function createOptionsScreenPorts(
             ...(legResult.reason ? { reason: legResult.reason } : {}),
           };
         } else if (canonical) {
-          const stored = recordUnifiedOptionsRun(canonical, record);
+          const stored = await recordUnifiedOptionsRun(canonical, record);
           created = stored?.created ?? false;
           reportId = stored?.reportId ?? null;
           canonicalLeg = { status: "direct" };
