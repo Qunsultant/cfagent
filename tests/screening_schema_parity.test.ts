@@ -1092,7 +1092,7 @@ describe("#959 REST interactive screen routes share the schemas", () => {
     // sql-only storage dies at plan.persist.
     const store = new Map<string, unknown>();
     return {
-      env: {} as any,
+      env: { AGENT_DB: new MockD1Database() } as any,
       getOrm: () => ({ storeCanonicalReport: () => {} }) as any,
       agentCtx: {
         storage: {

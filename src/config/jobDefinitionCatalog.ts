@@ -96,6 +96,13 @@ export interface JobDefinitionParameter {
   default?: unknown;
   /** Named derivation in `PARAM_DERIVATIONS` (validated at load time). */
   derivation?: string;
+  /**
+   * Issue #6682 — a `list` parameter carrying explicit ticker symbols:
+   * bound through the one symbols normalizer (uppercase/trim/dedupe,
+   * feedJobs `normalizeSymbolsInput`); a list that normalizes to empty
+   * refuses by name rather than silently running symbol-less.
+   */
+  normalizeSymbols?: boolean;
   /** Issue #5493 — inclusive bounds of a number parameter, declared by the spec. */
   minimum?: number;
   maximum?: number;
@@ -187,6 +194,15 @@ export const JOB_DEFINITION_SPECS: Readonly<Record<string, JobDefinitionSpec>> =
         default: false,
         description: "Whether to deliver the report automatically after the scheduled screen completes.",
       },
+      {
+        name: "symbols",
+        label: "Symbols",
+        type: "list",
+        normalizeSymbols: true,
+        derivation: "symbolsShard",
+        description:
+          "Explicit tickers the screen runs over. Present ⇒ the feed fetches exactly these symbols (the symbols shard wins over the universe shards); absent ⇒ the universe's stored list.",
+      },
     ],
     executionMode: {
       concurrency: "sequential",
@@ -229,6 +245,14 @@ export const JOB_DEFINITION_SPECS: Readonly<Record<string, JobDefinitionSpec>> =
         axis: "universe",
         description:
           "The stored index list a parameterized feed job pulls. Absent ⇒ the job's own universe; a fixed-universe job refuses a universe input by name.",
+      },
+      {
+        name: "symbols",
+        label: "Symbols",
+        type: "list",
+        normalizeSymbols: true,
+        description:
+          "Explicit tickers the pull fetches. Present ⇒ the fetch set is exactly these symbols (feed.pull symbols mode; quotes jobs only, other datasets refuse by name); absent ⇒ the resolved universe's stored list.",
       },
       {
         name: "sources",
@@ -737,6 +761,17 @@ function resolveParameter(raw: unknown, specId: string): JobDefinitionParameter 
     raw.capabilityFrom !== undefined
       ? text(raw.capabilityFrom, `parameter "${name}" capabilityFrom`, specId)
       : undefined;
+  // Issue #6682 — symbols normalization belongs to a list parameter.
+  if (raw.normalizeSymbols !== undefined && raw.normalizeSymbols !== true) {
+    throw new Error(
+      `Job definition "${specId}" parameter "${name}" normalizeSymbols must be true when declared.`,
+    );
+  }
+  if (raw.normalizeSymbols === true && type !== "list") {
+    throw new Error(
+      `Job definition "${specId}" parameter "${name}" declares normalizeSymbols with type "${type}" — symbols normalization belongs to a list parameter.`,
+    );
+  }
   let defaultValue = raw.default;
   if (isRecord(defaultValue)) {
     if (typeof defaultValue.setting !== "string" || defaultValue.setting.trim() === "") {
@@ -761,6 +796,7 @@ function resolveParameter(raw: unknown, specId: string): JobDefinitionParameter 
     ...(maximum !== undefined ? { maximum } : {}),
     ...(atLeast !== undefined ? { atLeast } : {}),
     ...(capabilityFrom !== undefined ? { capabilityFrom } : {}),
+    ...(raw.normalizeSymbols === true ? { normalizeSymbols: true } : {}),
   };
 }
 

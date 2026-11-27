@@ -12,7 +12,6 @@ import type { Env, ScheduledTaskResult, StageChainConfig, TradeRecord, ScreenedS
 import { DatabaseORM, type SqlStorage } from "../orm";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { createJobRunRecordAdapter } from "../data/createJobRunRecordPorts";
-import { resolveIaaaTenant } from "../security/iaaaGithubEndToEnd";
 import { BusinessError, codedMessage } from "../outcomes/outcomeAspects";
 import { resolveRunBrokerContext, type RunBrokerContext, type RunBrokerSelection } from "./runBrokerContext";
 import { optionsFailureAlertText, ensureCodedOutcome, claimNoticeDelivery } from "./optionsRunAlertFormat";
@@ -930,13 +929,24 @@ export class ScheduledTasksService {
       if (!ledgerStore) {
         throw new Error("[run-ledger] D1 run-ledger binding unbound (AGENT_DB) (#6101).");
       }
+      // Issue #3179 — the tenant resolves owner-row-first (stored
+      // account tenant wins; env default only as the documented
+      // fallback inside resolveTickTenant), never via the env-default
+      // resolver directly.
+      const { createCommercialAdapter } = await import("../data/createCommercialPorts");
+      const { resolveTickTenant } = await import("./paidScreenSubmission");
+      const commercial = createCommercialAdapter(this.env as { AGENT_DB?: unknown });
+      const tickTenant = await resolveTickTenant(commercial, {
+        userId: this.userLogin,
+        env: this.env,
+      });
       await ledgerStore.foldJobOutcome(
         {
           kind: "discovery",
           origin: "discovery",
           ...input,
         },
-        resolveIaaaTenant(this.env),
+        tickTenant.tenantId,
         Date.now(),
       );
     } catch (err) {

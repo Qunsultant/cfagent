@@ -124,7 +124,7 @@ const D1_MIGRATION_SQL_SHA256: Record<number, string> = {
   56: "443b0eaf492fc13fdfaacf303218cd137fc2f6e6f5bf3bbd245a1096994a07b7",
   57: "af246269a138ece7bbae4aaed3297971b865ed6c39f4d4154c47c4c690136392",
   58: "60493ac87d07df6aa99d2cdad3a887782b59b8f1aa162cb1059b43191e324534",
-  59: "483a9808b7c8241c21e3cec650d0427bf8387e857798ca7ddc07611a9ebdb7b9",
+  59: "be6f6edb7b787340c0c29f0d3a2b905af3b9b6e152dcde6b84c1e028d760b199",
   60: "e348f1d119a1b9ce360b20503c108f92803667a3d551dcecc63afef51f5e8124",
   61: "eff48788a99a65b357988427be9eb5d08753e9b20596456774d1d2a1fc8c51f4",
   62: "b21d1c020ccfd18fbad2476742bcff83d3fe8ea99039b78d953caea8de3217f3",
@@ -250,7 +250,10 @@ const D1_MIGRATION_STATEMENT_COUNTS: Record<number, number> = {
   56: 2,
   57: 2,
   58: 31,
-  59: 4,
+  // #6101 fix round removes the carrier-table CREATE from
+  // migration 0059 (the table dies with the projector; the
+  // DROP in 0093 stays): 4 → 3.
+  59: 3,
   60: 3,
   61: 1,
   62: 3,
@@ -356,7 +359,7 @@ function expectedD1Model(): SchemaModel {
 }
 
 describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
-  it("catalogues all 311 runner statements: 292 schema + 19 seed", () => {
+  it("catalogues all 310 runner statements: 291 schema + 19 seed", () => {
     const catalogue = buildD1Catalogue();
     // #5086 adds migration 0070 (otel_config_overrides table): 224 → 225.
     // #4767 adds migrations 0071/0072 (4 D1 ALTERs): 225 → 229.
@@ -380,10 +383,14 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
     // record provenance columns): 290 → 295.
     // #6503 adds migration 0092 (D1 unified_schedules table + 3 indexes + 6 seeds): 295 → 305.
     // #6101 adds migration 0093 (run-record identity columns + carrier-table drop): 305 → 311.
-    // Union: 311 (schema 292, seeds 19).
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(311);
-    expect(catalogue.size()).toBe(311);
-    expect(catalogue.byKind("schema").length).toBe(292);    expect(catalogue.byKind("seed").length).toBe(19);
+    // #6101 fix round removes the carrier-table CREATE (migration
+    // 0059) — the table dies with the projector, so the catalogue
+    // must not plan its creation (a create-then-drop pair
+    // re-selects on every recreate run): 311 → 310.
+    // Union: 310 (schema 291, seeds 19).
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(310);
+    expect(catalogue.size()).toBe(310);
+    expect(catalogue.byKind("schema").length).toBe(291);    expect(catalogue.byKind("seed").length).toBe(19);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
       const upper = statement.trim().toUpperCase();
@@ -407,7 +414,7 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
       const verb = classify(entry.statement);
       verbs.set(verb, (verbs.get(verb) ?? 0) + 1);
     }
-    expect(verbs.get("CREATE TABLE")).toBe(116);
+    expect(verbs.get("CREATE TABLE")).toBe(115);
     expect(verbs.get("CREATE INDEX")).toBe(69);
     expect(verbs.get("CREATE UNIQUE INDEX")).toBe(11);
     // #6101 adds migration 0093 (run-record identity columns: 5

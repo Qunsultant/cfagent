@@ -34,6 +34,7 @@
 import { describe, expect, it } from "vitest";
 import { MCPClientManager } from "agents/mcp/client";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 import {
   createOpenaimpMcpFetch,
   ensureOpenaimpMcpConnection,
@@ -106,6 +107,7 @@ function screenFullResult(universe: string) {
 
 interface ScreenHarness {
   sql: MockSqlStorage;
+  d1: MockD1Database;
   traceStore: InMemoryMeshTraceStore;
   startedCommands: WorkflowJobCommand[];
   traceparent: string;
@@ -115,14 +117,18 @@ interface ScreenHarness {
 
 function makeScreenHarness(): ScreenHarness {
   const sql = new MockSqlStorage();
+  const d1 = new MockD1Database();
   const shardStore = new InMemoryShardJobAdapter();
   const traceStore = new InMemoryMeshTraceStore();
   const startedCommands: WorkflowJobCommand[] = [];
   const trace = newTraceContext();
   const traceparent = formatTraceparent(trace);
 
+  // #6101: the canonical report lands in D1 — the harness's
+  // write side (reportCtx) and the executor's door read side share
+  // this one d1 (threaded through executeCapturedJob).
   const reportCtx = {
-    env: {},
+    env: { AGENT_DB: d1 },
     ensureTables: () => sql,
   } as unknown as ReportDispatchContext;
 
@@ -173,7 +179,7 @@ function makeScreenHarness(): ScreenHarness {
     nowMs: () => Date.now(),
     traceStore,
   };
-  return { sql, traceStore, startedCommands, traceparent, traceId: trace.traceId, seams };
+  return { sql, d1, traceStore, startedCommands, traceparent, traceId: trace.traceId, seams };
 }
 
 /* ------------------------------------------------------------------ */
@@ -376,7 +382,7 @@ function receiptOf(result: unknown): Record<string, unknown> {
  */
 async function executeCapturedJob(
   drive: MeshDrive,
-  exec: { sql: MockSqlStorage; seams?: MeshScreenDoorSeams },
+  exec: { sql: MockSqlStorage; seams?: MeshScreenDoorSeams; d1?: MockD1Database },
 ): Promise<unknown> {
   expect(drive.submitted).toHaveLength(1);
   const job = drive.submitted[0];
@@ -393,7 +399,7 @@ async function executeCapturedJob(
     // paid gate's missing stored price. This acceptance test pins
     // the FREE discovered-path screen, not payment, so the paid
     // gate stays off in the executor context.
-    env: { MONETIZATION_ENABLED: "false" } as Env,
+    env: { MONETIZATION_ENABLED: "false", ...(exec.d1 ? { AGENT_DB: exec.d1 } : {}) } as Env,
     orm: {} as never,
     sessionId: "session-2496",
     audit: () => {},
@@ -566,7 +572,7 @@ describe("issue #2496 — chat screen through the discovered path (acceptance)",
 
     // The job executes through the real executor entry; the door
     // starts the ScreenerScreenWorkflow as the acting user.
-    const result = (await executeCapturedJob(drive, { sql: h.sql, seams: h.seams })) as {
+    const result = (await executeCapturedJob(drive, { sql: h.sql, seams: h.seams, d1: h.d1 })) as {
       success: boolean;
       universe: string;
       matchedCount: number;

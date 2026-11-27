@@ -15,6 +15,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
+import { MockD1Database } from "./mock-d1";
 import {
   createScheduledAgentPipelineControl,
   settleOrphanedPipelineRuns,
@@ -68,7 +69,7 @@ const DUMMY = {
 
 describe("settleOrphanedPipelineRuns on the host (#4002)", () => {
   it("settles a running instance as failed and the job dispatches again", async () => {
-    const { ctx, sql } = makeHostContext();
+    const { ctx, sql } = makeHostContext({ AGENT_DB: new MockD1Database() });
     const control = createScheduledAgentPipelineControl(ctx);
     await control.defineJob(DUMMY);
     const stores = createJobPipelineStoresFromSql(sql as unknown as SqlStorage);

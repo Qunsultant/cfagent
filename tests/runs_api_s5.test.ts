@@ -38,8 +38,9 @@
  * writer), engine rows via D1JobRunRecordStore.record, outcomes
  * via the fold. There is no DO row, no projection, no carrier row.
  * A report's twin link (linkedJobRunId) is stamped from the twinned
- * D1 record's d1 id. storeErrors.runs names the #6101 freeze: new
- * reports have no D1 row until the step-8 writer lands.
+ * D1 record's d1 id. There is no storeErrors.runs entry: the carrier
+ * check (and its runs entry) died with the projector, and the runs
+ * list is served whole from the D1 reports + jobRunRecords stores.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -115,9 +116,6 @@ const TS = {
 
 const OPTIONS_RUN_ID = `options_scanner:${TS.options}:balanced`;
 const SCREENER_RUN_ID = `screener:${TS.screener}`;
-
-/** The frozen-reports entry every /api/runs read names (#6101). */
-const FROZEN_RUNS = "frozen at the #6101 cutover";
 
 export interface SeedReportInput {
   runId: string;
@@ -302,7 +300,14 @@ describe("GET /api/runs (S5)", () => {
     // + named, never silent.
     expect(data.storeErrors?.reports).toBeUndefined();
     expect(data.storeErrors?.jobRunRecords).toBeUndefined();
-    expect(data.storeErrors?.runs).toMatch(FROZEN_RUNS);
+    // #6101 retired the projection-carrier check (and its runs entry)
+    // with the projector: the runs list is served whole from the D1
+    // reports + jobRunRecords stores, so there is no runs entry at all
+    // — the slice's FROZEN_RUNS flip expected an entry no route code
+    // produces, and every sibling /api/runs pin (workflow_runs_route,
+    // workflow_runs_part2_route_2786, workflow_runs_docs_columns_2786,
+    // workflow_runs_saga_chains_2780) pins it undefined.
+    expect(data.storeErrors?.runs).toBeUndefined();
     expect(data.storeErrors?.scans).toMatch("not projected");
     expect(data.storeErrors?.discovery).toMatch("not projected");
     expect(data.storeErrors?.screener).toMatch("not projected");

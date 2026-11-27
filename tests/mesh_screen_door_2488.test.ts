@@ -73,6 +73,7 @@ import type {
 } from "../src/workflows/workflowPorts";
 import type { AsyncJobSubmission, Env } from "../src/types";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 
 const LOGIN = "alice";
 
@@ -107,6 +108,7 @@ function screenFullResult(universe: string) {
 }
 
 interface ScreenHarness {
+  d1: MockD1Database;
   sql: MockSqlStorage;
   shardStore: InMemoryShardJobAdapter;
   traceStore: InMemoryMeshTraceStore;
@@ -128,8 +130,11 @@ function makeScreenHarness(opts: {
   const traceparent = formatTraceparent(trace);
   const tenantRef = { tenantId: "" };
 
+  // #6101: the screen run's canonical row lands in D1 — the
+  // report write env and the door read env share one binding.
+  const d1 = new MockD1Database();
   const reportCtx = {
-    env: {},
+    env: { AGENT_DB: d1 },
     ensureTables: () => sql,
   } as unknown as ReportDispatchContext;
 
@@ -184,7 +189,7 @@ function makeScreenHarness(opts: {
     nowMs: () => Date.now(),
     traceStore,
   };
-  return { sql, shardStore, traceStore, startedCommands, traceId: trace.traceId, traceparent, seams, tenantRef };
+  return { d1, sql, shardStore, traceStore, startedCommands, traceId: trace.traceId, traceparent, seams, tenantRef };
 }
 
 /* ------------------------------------------------------------------ */
@@ -432,7 +437,7 @@ describe("issue #2488 — chat screen through the turn tool path (free path)", (
       drive,
       "run_stock_screen",
       { universe: "NASDAQ100", filters: { minPrice: 10 } },
-      { sql: h.sql, seams: h.seams },
+      { sql: h.sql, seams: h.seams, env: { AGENT_DB: h.d1 } },
     )) as {
       success: boolean;
       universe: string;
@@ -480,7 +485,7 @@ describe("issue #2488 — chat screen through the turn tool path (free path)", (
   it("defaults the universe to NASDAQ100 (the route default) when the model omits it", async () => {
     const h = makeScreenHarness();
     const drive = await makeTurnDrive({ login: LOGIN, sql: h.sql });
-    const result = (await driveTurnToolToExecution(drive, "run_stock_screen", {}, { sql: h.sql, seams: h.seams })) as {
+    const result = (await driveTurnToolToExecution(drive, "run_stock_screen", {}, { sql: h.sql, seams: h.seams, env: { AGENT_DB: h.d1 } })) as {
       success: boolean;
       universe: string;
     };
@@ -570,6 +575,7 @@ const STOCK_PRICE_USD = 0.02;
 const PAID_TENANT = workflowTenantId({} as Env);
 
 interface PaidHarness {
+  d1: MockD1Database;
   sql: MockSqlStorage;
   seams: MeshScreenDoorSeams;
   screenerStarts: WorkflowJobCommand[];
@@ -586,8 +592,9 @@ function makePaidHarness(opts: { budgetVerdict?: { allowed: boolean; reason?: st
   const paymentCreates: PaidHarness["paymentCreates"] = [];
   const coverageConsumed: PaidHarness["coverageConsumed"] = [];
 
+  const d1 = new MockD1Database();
   const reportCtx = {
-    env: {},
+    env: { AGENT_DB: d1 },
     ensureTables: () => sql,
   } as unknown as ReportDispatchContext;
   const deps: ScreenerWorkflowDeps = {
@@ -730,7 +737,7 @@ function makePaidHarness(opts: { budgetVerdict?: { allowed: boolean; reason?: st
       };
     },
   };
-  return { sql, seams, screenerStarts, budgetCalls, paymentCreates, coverageConsumed };
+  return { d1, sql, seams, screenerStarts, budgetCalls, paymentCreates, coverageConsumed };
 }
 
 describe("issue #2488 — chat paid screen through the turn tool path (monetization on)", () => {
@@ -741,7 +748,7 @@ describe("issue #2488 — chat paid screen through the turn tool path (monetizat
       drive,
       "run_stock_screen",
       { universe: "NASDAQ100" },
-      { sql: h.sql, seams: h.seams },
+      { sql: h.sql, seams: h.seams, env: { AGENT_DB: h.d1 } },
     )) as { success: boolean; matchedCount: number };
 
     expect(h.budgetCalls).toEqual([{ operation: "nlq.execute", amountCents: 2 }]);
@@ -823,7 +830,7 @@ describe("issue #2488 — golden tasks for the door surface", () => {
             drive,
             "run_stock_screen",
             { universe: "NASDAQ100", filters: { minPrice: 10 } },
-            { sql: h.sql, seams: h.seams },
+            { sql: h.sql, seams: h.seams, env: { AGENT_DB: h.d1 } },
           )) as { success: boolean; matchedCount: number };
           return {
             outcome: result.success ? ("completed" as const) : ("error" as const),
@@ -874,7 +881,7 @@ describe("issue #2488 — golden tasks for the door surface", () => {
             drive,
             "run_stock_screen",
             { universe: "NASDAQ100" },
-            { sql: h.sql, seams: h.seams },
+            { sql: h.sql, seams: h.seams, env: { AGENT_DB: h.d1 } },
           )) as { success: boolean };
           return {
             outcome: result.success ? ("completed" as const) : ("error" as const),

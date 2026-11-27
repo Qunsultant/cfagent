@@ -3605,6 +3605,7 @@ export async function handleSchedulesRoutes(
         const result = auditChainPruneSkipped
           ? { skipped: true, pruned: 0 }
           : await runStorageRetention(ctx.getOrm(), {
+              env: ctx.env,
               retentionDays: ctx.env.MAS_MESSAGES_RETENTION_DAYS,
               eventsRetentionDays: ctx.env.MAS_EVENTS_RETENTION_DAYS,
               memoryRetentionDays: ctx.env.MAS_MEMORY_RETENTION_DAYS,

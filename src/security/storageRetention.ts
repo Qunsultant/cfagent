@@ -222,7 +222,7 @@
  */
 
 import type { DatabaseORM } from "../orm";
-import type { AuditEvent } from "../types";
+import type { AuditEvent, Env } from "../types";
 import type { AsyncEventLogPort } from "../data/asyncEventLogPorts";
 import { generationId, newRunId } from "../services/executionTreeIds";
 import { createStructuredLogger } from "../observability/structuredLogger";
@@ -305,6 +305,12 @@ export interface StorageRetentionOptions {
    * row (there is no "default" tenant to file it under).
    */
   userLogin?: string;
+  /**
+   * Issue #6101 — the D1 door the nightly retention report row folds
+   * through. `storeCanonicalReport` reads AGENT_DB off this env; without
+   * it the row is silently dropped (fail-closed, never throws).
+   */
+  env?: Partial<Env>;
   /**
    * #6102 (REQUIRED): the writer for the pass's STORAGE_RETENTION
    * summary row. The row lands in D1 through this writer — never
@@ -665,7 +671,7 @@ export async function runStorageRetention(
       body: { pruned, cutoffIso, windowDays, batchSize, maxPerRun, capped },
       createdAt: new Date(nowMs).toISOString(),
       userLogin: options.userLogin,
-    });
+    }, options.env);
     }
   } catch {
     // Non-critical report persistence error

@@ -53,6 +53,7 @@ import type {
 } from "../src/workflows/workflowPorts";
 import type { Env } from "../src/types";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 
 const LOGIN = "alice";
 
@@ -322,8 +323,11 @@ function makeDoorHarness(): DoorHarness {
   const shardStore = new InMemoryShardJobAdapter();
   const traceStore = new InMemoryMeshTraceStore();
   const startedCommands: WorkflowJobCommand[] = [];
+  // #6101: the screen run's canonical row lands in D1 — the
+  // write env and the door env share one binding.
+  const d1 = new MockD1Database();
   const reportCtx = {
-    env: {},
+    env: { AGENT_DB: d1 },
     ensureTables: () => sql,
   } as unknown as ReportDispatchContext;
   const deps: ScreenerWorkflowDeps = {
@@ -376,7 +380,7 @@ function makeDoorHarness(): DoorHarness {
     monetizationOn: async () => false,
   };
   const ctx = {
-    env: {},
+    env: { AGENT_DB: d1 },
     ensureTables: () => sql,
     ...seams,
   } as unknown as MeshScreenDoorContext;

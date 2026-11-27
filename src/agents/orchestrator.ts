@@ -2236,7 +2236,7 @@ export class OrchestratorAgent extends PortThink {
       // never turn a completed analysis into a failed one.
       const { recordOptionsOrchestratorRun } = await import("../services/optionsServeRecord");
       await recordOptionsOrchestratorRun(
-        { orm: this.getOrm() as never, storage: this.ctx.storage },
+        { orm: this.getOrm() as never, storage: this.ctx.storage, env: this.env },
         {
           timestamp: res.timestamp,
           success: res.success,

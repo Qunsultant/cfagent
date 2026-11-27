@@ -518,6 +518,9 @@ export async function handleEtradeOptionsRoutes(
           dataAgent: new OptionsDataAgent(new DynamicOptionsScreener(etrade.client, undefined, await etrade.getUniverseDeps?.(ctx.agentCtx?.storage))),
           storage: ctx.agentCtx?.storage as unknown as OptionsStageStorage | undefined,
           getSql: ctx.agentCtx?.storage?.sql ? () => ctx.agentCtx.storage.sql : undefined,
+          // Issue #6101: thread ctx.env so the engine run record lands in D1 — without it
+          // the settlement gets the fail-closed unbound recorder and the route answers 500.
+          env: ctx.env,
           queue: ctx.env.SCREENER_EVENTS ?? null,
         });
         const poolByType = new Map<string, { type: string; label: string; generated: number; bestScore: number }>();

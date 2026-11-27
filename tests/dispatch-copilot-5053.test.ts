@@ -108,7 +108,7 @@ describe("copilot dispatch mode (#5053)", () => {
     expect(documentRunType({ trigger: "goal" })).toBeNull();
   });
 
-  it("the unified options serve record stores trigger copilot", () => {
+  it("the unified options serve record stores trigger copilot", async () => {
     const record = {
       runId: "options:2026-11-18T03:00:00.000Z",
       generationId: "options:2026-11-18T03:00:00.000Z",
@@ -121,7 +121,7 @@ describe("copilot dispatch mode (#5053)", () => {
     const stored = unifiedOptionsRunRecordToStoreInput(record);
     expect((stored.body as Record<string, unknown>).trigger).toBe("copilot");
     const orm = { storeCanonicalReport: vi.fn(() => ({ reportId: "u1", created: true })) };
-    const out = recordUnifiedOptionsRun(orm as never, record);
+    const out = await recordUnifiedOptionsRun(orm as never, record);
     expect(out).toEqual({ reportId: "u1", created: true });
     const call = orm.storeCanonicalReport.mock.calls[0][0] as {
       body: Record<string, unknown>;

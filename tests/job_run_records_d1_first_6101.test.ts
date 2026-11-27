@@ -109,14 +109,20 @@ describe("migration 0093 — run-record identities + carrier drop", () => {
     // 0093 is an ALTER on the table 0047 creates (and the carrier
     // table 0081 creates): apply the pre-0093 ensure chain first,
     // assert the pre-state, then apply 0093 alone.
+    // NOTE: migration 0059 no longer creates the carrier table —
+    // the #6101 fix round removed its CREATE from the catalogue
+    // (the table dies with the projector; the catalogue must not
+    // plan its creation). The pre-state table is staged here
+    // explicitly, with the exact pre-#6101 DDL: a world that had
+    // the table is what 0093 has to drop.
     const mock = new MockD1Database();
     const d1 = mock as unknown as D1Database;
     const db = createD1JobRunRecordDb(d1);
     await applyMigrations(db as unknown as MigrationDb, [
       MIGRATION_0004_AGENT_AUDIT_REPORTS,
       MIGRATION_0047_JOB_RUN_RECORDS,
-      // 0059 creates the carrier table (the #4116 projection); it
-      // is the table 0093 drops.
+      // 0059 used to create the carrier table (the #4116
+      // projection); it no longer does — see the NOTE above.
       MIGRATION_0059_RUN_LEDGER,
       MIGRATION_0072_JOB_RUN_RECORDS_RUN_KIND,
       MIGRATION_0073_JOB_RUN_RECORDS_RECENT_IDX,
@@ -126,6 +132,15 @@ describe("migration 0093 — run-record identities + carrier drop", () => {
       MIGRATION_0086_JOB_RUN_RECORDS_OUTCOME_FACTS,
       MIGRATION_0091_JOB_RUN_RECORD_PROVENANCE,
     ]);
+    // Stage the pre-#6101 carrier table explicitly (see NOTE).
+    mock.sqlite.exec(`CREATE TABLE IF NOT EXISTS agent_tenant_projection_carriers (
+  tenant_id TEXT PRIMARY KEY,
+  queues_enabled INTEGER NOT NULL,
+  orm_enabled INTEGER NOT NULL,
+  sweep_enabled INTEGER NOT NULL,
+  read_mode TEXT NOT NULL,
+  updated_at_ms INTEGER NOT NULL
+)`);
     const colsBefore = mock.sqlite
       .prepare("PRAGMA table_info(job_run_records)")
       .all() as Array<{ name: string }>;

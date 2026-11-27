@@ -48,6 +48,7 @@ vi.mock("../src/orchestrate", () => ({
 }));
 
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
+import { makeLedgerStub } from "./ledger-stub";
 import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 
@@ -233,6 +234,7 @@ function makeEnv(fakeD1: any, slackUrl?: string) {
       get: () => ({ budgetCheck: async () => ({ allowed: true }) }),
     },
     AGENT_DB: fakeD1,
+    ORCHESTRATOR_AGENT: makeLedgerStub().namespace,
     SESSION_STORE: null,
     ...(slackUrl ? { SLACK_WEBHOOK_URL: slackUrl } : {}),
   };

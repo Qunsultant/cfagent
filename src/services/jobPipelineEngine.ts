@@ -871,6 +871,30 @@ interface RunContext {
    * Null until a retryable attempt fails.
    */
   lastLegError: { message: string; attempt: number } | null;
+  /**
+   * Issue #6678 — per-leg (unit attempt) elapsed times on the
+   * real clock. A slow-progressing leg never fails an attempt,
+   * so lastLegError stays null and the deadline terminal error
+   * named no leg (2026-11-26 recurrence). Every attempt records
+   * its start; settle stamps the end, and an attempt still
+   * in-flight at the deadline is named with its elapsed-so-far.
+   * In-memory only: the terminal record persists the summary
+   * via the error message, like lastLegError.
+   */
+  legTimings: Array<{
+    stageId: string;
+    unitId: string;
+    attempt: number;
+    startedAtMs: number;
+    endedAtMs: number | null;
+    outcome: "in-flight" | "completed" | "failed" | "timed_out";
+  }>;
+  /** #6678 — real-clock start of the execution tree, for budget composition. */
+  runStartedAtMs: number;
+  /** #6678 — the resolved whole-execution budget (feed runs), set by executeRun. */
+  executionBudgetMs: number | undefined;
+  /** #6678 — set when the retry gate stops on budget exhaustion instead of starting another attempt. */
+  budgetExhausted: boolean;
   /** The one node path a stage action forces re-execution of (re-run), or null on a normal run. */
   forceStage: string | null;
 }
@@ -3654,6 +3678,10 @@ export class JobPipelineControl {
       activeUnits: new Map(),
       notes: [],
       lastLegError: null,
+      legTimings: [],
+      runStartedAtMs: Date.now(),
+      executionBudgetMs: undefined,
+      budgetExhausted: false,
       forceStage: opts.forceStage,
     };
   }
@@ -3794,6 +3822,13 @@ export class JobPipelineControl {
       runKey: opts.runInstanceKey,
     });
     if (!opts.resuming) await this.persistLedger(ctx);
+    // Issue #6678 — the execution budget the legs compose
+    // against: the same resolved bound the race below enforces,
+    // stamped on the real clock so attempt timings and the
+    // retry gate share one budget instead of each leg silently
+    // spending against its own bound.
+    ctx.executionBudgetMs = runDeadlineMs;
+    ctx.runStartedAtMs = Date.now();
 
     try {
       const scoped = this.nodeAtPath(definition.root, opts.scopePath);
@@ -3918,12 +3953,33 @@ export class JobPipelineControl {
       // non-deadline failure is untouched: its own message
       // already is the leg error.
       const message = error instanceof Error ? error.message : String(error);
+      // Issue #6678 — the deadline terminal error names the
+      // legs that consumed the budget: every recorded attempt
+      // with its elapsed time (in-flight legs measured to now),
+      // plus the budget-exhaustion naming when the retry gate
+      // stopped the run. A slow leg that never failed an
+      // attempt is named here even though lastLegError is null.
+      const legSummary =
+        error instanceof FeedJobTimeoutError &&
+        error.code === FEED_JOB_CODES.deadlineExceeded &&
+        ctx.legTimings.length > 0
+          ? ` Leg timings: ${ctx.legTimings
+              .map(
+                (leg) =>
+                  `${leg.stageId} attempt ${leg.attempt}: ${Math.max(0, (leg.endedAtMs ?? Date.now()) - leg.startedAtMs)}ms (${leg.outcome})`,
+              )
+              .join("; ")}.${
+              ctx.budgetExhausted && ctx.executionBudgetMs !== undefined
+                ? ` The execution budget of ${ctx.executionBudgetMs}ms was consumed by cumulative legs; no further attempt was started.`
+                : ""
+            }`
+          : "";
       const terminalMessage =
         error instanceof FeedJobTimeoutError &&
         error.code === FEED_JOB_CODES.deadlineExceeded &&
         ctx.lastLegError !== null
-          ? `${message} Last leg error (attempt ${ctx.lastLegError.attempt}): ${ctx.lastLegError.message}`
-          : message;
+          ? `${message} Last leg error (attempt ${ctx.lastLegError.attempt}): ${ctx.lastLegError.message}${legSummary}`
+          : `${message}${legSummary}`;
       instance = { ...instance, state: "failed", desiredState: "none", lastError: terminalMessage };
       await this.setInstance(instance);
       await publishJobStatus(publisher, {
@@ -4721,6 +4777,19 @@ export class JobPipelineControl {
           at: running?.startedAt ?? this.iso(),
           ...(running?.startedAt ? { startedAt: running.startedAt } : {}),
         });
+        // Issue #6678 — record the attempt's leg timing before
+        // it starts, so a leg still in-flight when the deadline
+        // fires is named with its elapsed-so-far instead of
+        // leaving the terminal error leg-less.
+        const legTiming = {
+          stageId,
+          unitId: unit.unitId,
+          attempt: tries,
+          startedAtMs: Date.now(),
+          endedAtMs: null as number | null,
+          outcome: "in-flight" as "in-flight" | "completed" | "failed" | "timed_out",
+        };
+        ctx.legTimings.push(legTiming);
         try {
           const executed = await this.runUnit(stage, node, () =>
             this.execSteps(ctx, node, path, input, {
@@ -4733,6 +4802,8 @@ export class JobPipelineControl {
               resumeItem: resume.itemIndex,
             }),
           );
+          legTiming.endedAtMs = Date.now();
+          legTiming.outcome = "completed";
           const out = executed.output;
           if (shardKey !== null) {
             await this.writeArtifact(
@@ -4770,6 +4841,11 @@ export class JobPipelineControl {
           });
           return out;
         } catch (error) {
+          legTiming.endedAtMs = Date.now();
+          legTiming.outcome =
+            error instanceof JobPipelineError && error.code === "job_stage_timed_out"
+              ? "timed_out"
+              : "failed";
           if (error instanceof RunStopped) throw error;
           const message = error instanceof Error ? error.message : String(error);
           const attemptNow =
@@ -4834,7 +4910,23 @@ export class JobPipelineControl {
             // and the leg that was slow is undiagnosable from
             // the production error.
             ctx.lastLegError = { message, attempt: attemptNow };
-            await this.sleep(computeBackoffDelayMs(attemptBudget, tries));
+            // Issue #6678 — legs compose against the execution
+            // budget: when the elapsed time plus the backoff
+            // would consume the remaining budget, stop here and
+            // settle by name instead of starting an attempt the
+            // race would kill unnamed mid-leg.
+            const backoffMs = computeBackoffDelayMs(attemptBudget, tries);
+            if (
+              ctx.executionBudgetMs !== undefined &&
+              Date.now() - ctx.runStartedAtMs + backoffMs >= ctx.executionBudgetMs
+            ) {
+              ctx.budgetExhausted = true;
+              throw new FeedJobTimeoutError(
+                FEED_JOB_CODES.deadlineExceeded,
+                ctx.executionBudgetMs,
+              );
+            }
+            await this.sleep(backoffMs);
             // Issue #4544 — a forced re-run restarts at step 0
             // on retry, exactly as it starts: deriving here
             // would find the dispatch's recorded step artifacts

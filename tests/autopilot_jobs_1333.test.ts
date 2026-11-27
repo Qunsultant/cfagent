@@ -1,19 +1,34 @@
 /**
  * Issue #1333: GET /autopilot/jobs serves the job-outcome sink —
  * the feed Autopilot Control renders, newest first, labeled by
- * origin. Seeded here through the same recordJobOutcome sink the
- * producers write, so the endpoint test pins the contract, not a
- * fixture shape.
+ * origin. #6101: the DO sink is gone — the feed reads the folded
+ * outcome facts on the D1 run records, so the tests seed through
+ * the D1 fold (the same shape the producers fold), not the DO sink.
  */
 import { describe, it, expect } from "vitest";
 import { MockSqlStorage } from "./mock-sql";
 import { handleAutopilotRoutes } from "../src/agents/routes/autopilot";
-import { recordJobOutcome } from "../src/services/jobOutcomes";
+import { MockD1Database } from "./mock-d1";
+import { createJobRunRecordAdapter } from "../src/data/createJobRunRecordPorts";
+import { resolveIaaaTenant } from "../src/security/iaaaGithubEndToEnd";
 
 describe("GET /autopilot/jobs (#1333)", () => {
+  // #6101: seed through the D1 fold — the route reads D1, and the
+  // DO recordJobOutcome sink no longer feeds it.
+  async function seedOutcome(d1: MockD1Database, input: Record<string, unknown>) {
+    const env = { AGENT_DB: d1 };
+    const store = createJobRunRecordAdapter(env as never);
+    await store!.foldJobOutcome(
+      input as never,
+      resolveIaaaTenant(env as never),
+      Date.now(),
+    );
+  }
+
   it("returns recorded outcomes newest first", async () => {
     const sql = new MockSqlStorage();
-    recordJobOutcome(sql, {
+    const d1 = new MockD1Database();
+    await seedOutcome(d1, {
       id: "auth-fail",
       kind: "options",
       trigger: "scheduled",
@@ -22,7 +37,7 @@ describe("GET /autopilot/jobs (#1333)", () => {
       origin: "job-tree",
       createdAt: "2026-10-24T04:58:00.000Z",
     });
-    recordJobOutcome(sql, {
+    await seedOutcome(d1, {
       id: "goal-zero",
       kind: "goal",
       trigger: "manual",
@@ -34,6 +49,7 @@ describe("GET /autopilot/jobs (#1333)", () => {
     });
     const ctx = {
       ensureTables: () => sql,
+      env: { AGENT_DB: d1 },
       audit: () => {},
       getAutopilotState: () => ({}),
       writeAutopilotState: (p: any) => p,
@@ -55,8 +71,9 @@ describe("GET /autopilot/jobs (#1333)", () => {
 
   it("honors the limit parameter", async () => {
     const sql = new MockSqlStorage();
+    const d1 = new MockD1Database();
     for (let i = 0; i < 3; i++) {
-      recordJobOutcome(sql, {
+      await seedOutcome(d1, {
         id: `job-${i}`,
         kind: "stock",
         trigger: "scheduled",
@@ -65,7 +82,7 @@ describe("GET /autopilot/jobs (#1333)", () => {
         createdAt: `2026-10-24T0${i}:00:00.000Z`,
       });
     }
-    const ctx = { ensureTables: () => sql, audit: () => {} } as any;
+    const ctx = { ensureTables: () => sql, env: { AGENT_DB: d1 }, audit: () => {} } as any;
     const res = await handleAutopilotRoutes(
       new Request("https://agent.internal/api/autopilot/jobs?limit=2", { method: "GET" }),
       new URL("https://agent.internal/api/autopilot/jobs?limit=2"),

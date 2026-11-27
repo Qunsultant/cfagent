@@ -47,7 +47,12 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 
 export interface OptionsServeRecordDeps {
   orm: {
-    storeCanonicalReport: (input: Record<string, unknown>) => Promise<{ reportId: string; created: boolean } | null>;
+    // Issue #6101 — the optional env is the D1 door: AGENT_DB rides it;
+    // without it storeCanonicalReport fails closed and the row is dropped.
+    storeCanonicalReport: (
+      input: Record<string, unknown>,
+      env?: Partial<Env>
+    ) => Promise<{ reportId: string; created: boolean } | null>;
     /** The DO SQLite behind the ORM (kept for call compatibility; the job-outcome sink is gone, #6101). */
     getSql?: () => unknown;
   };
@@ -919,7 +924,7 @@ export async function recordOptionsOrchestratorRun(
       },
       createdAt: new Date().toISOString(),
       ...(run.userLogin ? { userLogin: run.userLogin } : {}),
-    });
+    }, deps.env);
   } catch (err) {
     structuredLog.warn("optionsServeRecord.orchestrator_store_canonical_failed", {
       message: `[OrchestratorAgent] Could not store options report canonical: ${err instanceof Error ? err.message : String(err)}`,

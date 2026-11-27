@@ -93,6 +93,9 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import { createJobRunRecordAdapter } from "../src/data/createJobRunRecordPorts";
+import { resolveIaaaTenant } from "../src/security/iaaaGithubEndToEnd";
 import { DatabaseORM } from "../src/orm";
 import type { Env } from "../src/types";
 
@@ -658,10 +661,20 @@ describe("J01 system 2: mas_job_outcomes sink", () => {
   });
   it("the /autopilot/jobs route clamps limit 1–200, default 50", async () => {
     const sql = new MockSqlStorage();
+    // #6101: the route reads D1, so the 205 rows are seeded through
+    // the D1 fold (the DO sink tests above pin recordJobOutcome
+    // itself and are untouched).
+    const d1 = new MockD1Database();
+    const env = { AGENT_DB: d1 };
+    const store = createJobRunRecordAdapter(env as never);
     for (let i = 0; i < 205; i++) {
-      recordJobOutcome(sql, { ...base, id: `delivery-${i}`, createdAt: `2026-10-24T10:${String(i % 60).padStart(2, "0")}:00.000Z` });
+      await store!.foldJobOutcome(
+        { ...base, id: `delivery-${i}`, createdAt: `2026-10-24T10:${String(i % 60).padStart(2, "0")}:00.000Z` } as never,
+        resolveIaaaTenant(env as never),
+        Date.now(),
+      );
     }
-    const ctx = { ensureTables: () => sql } as any;
+    const ctx = { ensureTables: () => sql, env } as any;
     const over = await handleAutopilotRoutes(
       new Request("https://agent.internal/autopilot/jobs?limit=500"),
       new URL("https://agent.internal/autopilot/jobs?limit=500"),

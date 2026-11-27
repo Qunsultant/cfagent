@@ -16,6 +16,7 @@
  * must preserve.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { MockD1Database } from "./mock-d1";
 
 import {
   handleEtradeOptionsRoutes,
@@ -115,7 +116,9 @@ describe("compare route through the pipeline (#3186 step 3e)", () => {
     const orm = new DatabaseORM(sql as never);
     const storage = memoryStorage();
     const ctx = {
-      env: {},
+      // #6101: the engine settlement records the run to D1;
+      // without AGENT_DB the recorder fails closed.
+      env: { AGENT_DB: new MockD1Database() },
       requestedEnv: undefined,
       getOrm: () => orm,
       agentCtx: { storage: { ...storage, sql } },

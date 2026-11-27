@@ -23,6 +23,8 @@ import { resolveTradingLimits } from "../src/trading";
 import { McpToolFactory } from "../src/mcps/openaimp/commands";
 import { resolveToolScope } from "../src/mcps/openaimp/mcpPermissionPorts";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import { createJobRunRecordAdapter } from "../src/data/createJobRunRecordPorts";
 import { stubBroker, simpleOrder } from "./cancelTestPort";
 
 function limitsWith(cancelMaxCount: number | null) {
@@ -208,11 +210,14 @@ describe("#3885 — records and surfaces", () => {
     const store = createInMemoryCancelPreviewStore();
     const preview = await cancelAllOrders(broker, { limits: limitsWith(10) }, store);
     const receipt = await cancelAllOrders(broker, { token: preview.previewToken, limits: limitsWith(10) }, store);
-    recordScopedCancelOutcome(sql, receipt, "alpaca_cancel_all", {} as any, "cancel_all:test");
+    const d1 = new MockD1Database();
+    await recordScopedCancelOutcome(sql, receipt, "alpaca_cancel_all", { AGENT_DB: d1 } as any, "cancel_all:test");
 
-    const rows = Array.from(sql.exec("SELECT * FROM mas_job_outcomes") as any) as any[];
-    expect(rows[0]).toMatchObject({ id: "order:cancel_all:test", status: "completed", scanned: 1, matched: 1 });
-    expect(JSON.parse(rows[0].delivery_json).action).toBe("cancel_all");
+    // #6101: the scoped cancel folds onto the D1 run ledger.
+    const row = await createJobRunRecordAdapter({ AGENT_DB: d1 } as never)!.latestByJob("order:cancel_all:test");
+    expect(row).toBeDefined();
+    expect(row).toMatchObject({ jobId: "order:cancel_all:test", operation: "trading", outcome: "success", scanned: 1, matched: 1 });
+    expect(row!.deliveryStates.action).toBe("cancel_all");
   });
 
   it("the tool is registered on the trade scope with a confirm token", () => {

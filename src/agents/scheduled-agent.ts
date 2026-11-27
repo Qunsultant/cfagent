@@ -190,6 +190,7 @@ import { resolveWorkflowRunsStageReadLimit } from "../config/workflowRunsStageRe
 import { assertExecutionModeSupported, resolveExecutionMode } from "../services/jobPipelineConfig";
 import { addressableStages, jobDefinitionSpec } from "../config/jobDefinitionCatalog";
 import { buildJobConfigFromSpec } from "../services/jobDefinitionSpecBuilder";
+import { buildFeedRunInputDefinition } from "../services/runInputCarrier";
 import { bindJobDefinitionParams, bindStageOverrides } from "../services/jobDefinitionParamBinders";
 import { buildFeedJobRegistry } from "../services/feedJobs";
 import {
@@ -1344,11 +1345,26 @@ export class ScheduledAgent extends PortThink {
       trigger?: JobRunTrigger;
       /** Issue #6557 — the firing schedule payload's provenance. */
       provenance?: JobRunProvenance | null;
+      /**
+       * Issue #6682 — dispatch run inputs (universe/symbols/source/…),
+       * bound by the one carrier into an ephemeral spec definition.
+       * Absent ⇒ the job's own definition runs, as before.
+       */
+      runInputs?: Record<string, unknown>;
     },
   ): Promise<{ jobId: string; runId: string; state: string; error?: string }> {
     const ctx = this.pipelineContext();
     const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
     await ensureScheduledAgentPipelineJobs(ctx, control);
+    // Issue #6682 — the one run-input carrier: bound inputs define an
+    // ephemeral per-run job through the same bind → build → define
+    // sequence as the define route; the run then dispatches that
+    // definition. A binder refusal propagates by name before any run.
+    const carried = buildFeedRunInputDefinition(jobId, opts?.runInputs, opts?.userLogin);
+    const dispatchJobId = carried ? carried.ephemeralJobId : jobId;
+    if (carried) {
+      await control.defineJob(carried.config);
+    }
     // Issue #4767 — a Run-now records the dispatch trigger: an
     // explicit trigger from a caller that knows it (a copilot
     // dispatch passes "copilot"); otherwise the job's root
@@ -1361,7 +1377,7 @@ export class ScheduledAgent extends PortThink {
         : resolveRunNowTrigger(definition);
     // Issue #6557 — a scheduled firing passes the payload's provenance;
     // every other caller passes none and the run records nulls.
-    const dispatch = await control.runJob(jobId, {
+    const dispatch = await control.runJob(dispatchJobId, {
       trigger,
       ...(opts?.provenance ? { provenance: opts.provenance } : {}),
     });

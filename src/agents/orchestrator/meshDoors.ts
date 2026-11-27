@@ -579,11 +579,16 @@ export async function runFeedJobViaDoor(
   env: Env,
   actingLogin: string | undefined | null,
   source: string,
+  runInputs?: Record<string, unknown>,
 ): Promise<FeedJobRunDoorResult> {
   const login = requireActingLogin(actingLogin);
   const entry = resolveFeedJobOrThrow(source);
   const door = getScheduledAgentDoor(env);
-  const run = await door.runPipelineJob(entry.jobId, { userLogin: login });
+  const run = await door.runPipelineJob(entry.jobId, {
+    userLogin: login,
+    // Issue #6682 — the one carrier binds these at dispatch.
+    ...(runInputs ? { runInputs } : {}),
+  });
   const status = await door.getFeedJobSurfaceStatus(entry.jobId);
   return {
     jobId: entry.jobId,

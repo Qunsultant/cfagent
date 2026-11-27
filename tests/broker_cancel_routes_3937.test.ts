@@ -28,6 +28,8 @@ vi.mock("../src/services/orderCancellation", async (importOriginal) => {
 import { handleBrokerOrderRoutes, type BrokerOrderRouteContext } from "../src/agents/routes/brokerOrders";
 import { TradingPlatformRegistry, BROKER_CATALOG } from "../src/trading";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import { createJobRunRecordAdapter } from "../src/data/createJobRunRecordPorts";
 import { stubBroker, simpleOrder } from "./cancelTestPort";
 import type { BrokerRemoteOrder } from "../src/types";
 
@@ -70,9 +72,14 @@ function etradePlatform(initial: BrokerRemoteOrder[]) {
   };
 }
 
+// #6101: the cancel outcome folds onto D1, so each route call gets
+// its own MockD1Database; the test reads back from that call's d1.
+let lastCtxD1: MockD1Database | null = null;
+
 function baseCtx(sql: MockSqlStorage): BrokerOrderRouteContext {
+  lastCtxD1 = new MockD1Database();
   return {
-    env: {} as any,
+    env: { AGENT_DB: lastCtxD1 } as any,
     getOrm: () => ({ trades: { findMany: () => [] }, getSql: () => sql }) as any,
     readSettingRaw: (key: string) => (key === "trading:limits" ? JSON.stringify({ cancelMaxCount: 10 }) : null),
     audit: vi.fn(),
@@ -123,9 +130,11 @@ describe("cancel-ticker serves the selected broker (#3937)", () => {
     expect(body.cancelled.map((e: any) => e.orderId).sort()).toEqual(["1", "2"]);
     expect(platform.cancelled.sort()).toEqual(["1", "2"]);
     expect(platform.orders.get("3")?.status).toBe("OPEN");
-    const rows = Array.from(sql.exec("SELECT * FROM mas_job_outcomes") as any);
+    // #6101: the outcome row lives in D1 now (jobId carries a
+    // timestamp, so read back the recent rows).
+    const rows = await createJobRunRecordAdapter({ AGENT_DB: lastCtxD1! })!.listRecent(10);
     expect(rows).toHaveLength(1);
-    expect(JSON.parse(rows[0].delivery_json)).toMatchObject({ action: "cancel_ticker", broker: "etrade", mode: "paper" });
+    expect(rows[0].deliveryStates).toMatchObject({ action: "cancel_ticker", broker: "etrade", mode: "paper" });
   });
 
   it("still serves Alpaca through its service port", async () => {
@@ -140,8 +149,8 @@ describe("cancel-ticker serves the selected broker (#3937)", () => {
     const body = await res!.json();
     expect(body.success).toBe(true);
     expect(body.cancelled.map((e: any) => e.orderId).sort()).toEqual(["a1", "a2"]);
-    const rows = Array.from(sql.exec("SELECT * FROM mas_job_outcomes") as any);
-    expect(JSON.parse(rows[0].delivery_json)).toMatchObject({ broker: "alpaca" });
+    const rows = await createJobRunRecordAdapter({ AGENT_DB: lastCtxD1! })!.listRecent(10);
+    expect(rows[0].deliveryStates).toMatchObject({ broker: "alpaca" });
   });
 
   it("refuses by name a broker whose catalog says no orderCancel", async () => {

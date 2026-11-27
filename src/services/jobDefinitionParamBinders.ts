@@ -29,6 +29,7 @@ import type { DataProviderCapability } from "../trading";
 import { assertExecutionModeSupported, resolveExecutionMode } from "./jobPipelineConfig";
 import type { JobDefinitionPerStage } from "./jobDefinitionSpecBuilder";
 import { dataProviderDeclaredCapabilities } from "./optionsProviderContext";
+import { normalizeSymbolsInput } from "./feedJobs";
 import { RETRY_BUCKET_NAMES, isRetryBucketName } from "./pipelinePolicy";
 import type { StageRetryBucket } from "../workflows/stageRunnerPorts";
 
@@ -116,6 +117,18 @@ function normalizeDeclaredValue(
         );
       }
       values.push(item.trim());
+    }
+    // Issue #6682 — a symbols list binds through the one normalizer;
+    // a list that normalizes to empty refuses by name (an explicit
+    // empty list is a symbol-less run, never a silent default).
+    if (param.normalizeSymbols) {
+      const symbols = normalizeSymbolsInput(values);
+      if (symbols.length === 0) {
+        throw new Error(
+          `Job definition "${specId}" parameter "${param.name}" is invalid: the symbols list is empty — name at least one symbol, or omit the parameter to run the definition's universe.`,
+        );
+      }
+      return symbols;
     }
     if (param.axis) return values.map((value) => assertAxisValue(specId, param, value));
     if (param.options && param.options.length > 0) {

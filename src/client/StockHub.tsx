@@ -584,7 +584,18 @@ export function StockHub({
     universe,
     ...(sector && sector !== "ALL" ? { sector } : {}),
     ...(minScore.trim() !== "" ? { minScore: Number(minScore) } : {}),
-    ...(providerSupportsFilter(activeProvider, assetClass, "search") ? { search: symbolSearch.trim() || undefined } : {}),
+    // Issue #6682 — a comma/space-separated ticker list in the Ticker
+    // field is an explicit symbols run input (the feed fetches exactly
+    // these); a single token stays the substring search it always was.
+    ...(() => {
+      const tokens = symbolSearch.split(/[\s,]+/).map((t) => t.trim()).filter(Boolean);
+      const isTickerList =
+        tokens.length > 1 && tokens.every((t) => /^[A-Z0-9./-]{1,16}$/i.test(t));
+      if (isTickerList) return { symbols: tokens.map((t) => t.toUpperCase()) };
+      return providerSupportsFilter(activeProvider, assetClass, "search")
+        ? { search: symbolSearch.trim() || undefined }
+        : {};
+    })(),
     ...(providerSupportsFilter(activeProvider, assetClass, "limit") ? { limit: numberFilter(stockLimit) } : {}),
     ...(providerSupportsFilter(activeProvider, assetClass, "exchange") ? { exchange } : {}),
     ...(providerSupportsFilter(activeProvider, assetClass, "price-range") ? {

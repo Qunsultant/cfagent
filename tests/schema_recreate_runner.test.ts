@@ -154,8 +154,12 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // twin): 529 → 535.
     // #6503 adds migration 0092 (unified_schedules table + 3 indexes + 6 seeds), each one step:
     // steps 535 → 545.
-    // Union: 545.
-    expect(p.steps).toHaveLength(545);
+    // #6101 adds migration 0093 (5 job_run_records identity ALTERs +
+    // the carriers DROP): 545 → 551; the #6101 fix round removes the
+    // dead carriers CREATE leg (the DROP is unselected on a fresh
+    // world): 551 → 550.
+    // Union: 550.
+    expect(p.steps).toHaveLength(550);
     expect(p.skipped).toHaveLength(1);
     expect(p.skipped[0].code).toBe(SEED_FORM_CODE);
     expect(p.skipped[0].reason).toMatch(/call site/i);
@@ -203,8 +207,12 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // Issue #6557 adds 6 provenance steps: 529 → 535.
     // #6503 adds migration 0092 (unified_schedules table + 3 indexes + 6 seeds): 512 → 522 entries,
     // 535 → 545 resolved steps.
-    // Union: 545.
-    expect(harness).toHaveLength(545);    // Production move 1: the rebuild CREATE for agent_price_catalogue
+    // #6101 adds migration 0093 (5 job_run_records identity ALTERs +
+    // the carriers DROP): 545 → 551; the #6101 fix round removes the
+    // dead carriers CREATE leg (the DROP is unselected on a fresh
+    // world): 551 → 550.
+    // Union: 550.
+    expect(harness).toHaveLength(550);    // Production move 1: the rebuild CREATE for agent_price_catalogue
     // must stay after the RENAME that clears its table (a second
     // table-creation for the same table cannot run before the rename
     // on real SQLite). Production move 2: the legacy seed is hoisted
@@ -392,9 +400,16 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
     // schema entries, of which 3 are selected and 1 is skipped (the
     // projected-model walk already has it), and all 6 seeds are
     // selected (5 system schedules + the built-in goals): 302 → 305.
-    expect(selected.schema).toHaveLength(305);
+    // #6101 adds migration 0093 (5 job_run_records identity ALTERs, all
+    // selected on a fresh D1 leg; the carriers DROP is unselected —
+    // nothing to drop): 305 → 310; the #6101 fix round removes the
+    // dead carriers CREATE leg: 310 → 309.
+    expect(selected.schema).toHaveLength(309);
     expect(selected.seeds).toHaveLength(19);
-    expect(selected.skipped).toHaveLength(26);
+    // #6101's 0093 adds 1 skipped D1 step: the carriers DROP is
+    // unselected on a fresh D1 leg (nothing to drop — the CREATE leg
+    // is gone): 26 → 27.
+    expect(selected.skipped).toHaveLength(27);
     expect(
       codesOf(selected.skipped),
     ).toContain("schema.orm.mas_transactions.alter_table_add_column_tenant_id");

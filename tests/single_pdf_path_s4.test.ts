@@ -32,6 +32,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 
 /* ------------------------------------------------------------------ */
 /* Mocks (route behaviour pins)                                        */
@@ -261,6 +262,8 @@ function optionsCtx() {
   };
   return {
     env: {
+      // #6101: the options screen records the run on D1 now.
+      AGENT_DB: new MockD1Database(),
       ORCHESTRATOR_AGENT: {
         idFromName: (name: string) => name,
         get: () => ({

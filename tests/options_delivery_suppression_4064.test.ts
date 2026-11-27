@@ -23,6 +23,7 @@
  *    same store.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { MockD1Database } from "./mock-d1";
 import { DatabaseSync } from "node:sqlite";
 import { createManualOptionsScreenDelivery } from "../src/workflows/manualOptionsScreen";
 import { createGoalOptionsLegDelivery } from "../src/workflows/goalOptionsLeg";
@@ -631,7 +632,9 @@ describe("manual route wiring (#4064)", () => {
       }),
     };
     const ctx = {
-      env: {},
+      // #6101: the engine settlement records the run to D1;
+      // without AGENT_DB the recorder fails closed.
+      env: { AGENT_DB: new MockD1Database() },
       getOrm: () => orm,
       agentCtx: { storage: { ...storage, sql } },
       ensureTables: () => sql,
@@ -687,7 +690,9 @@ describe("manual route wiring (#4064)", () => {
       }),
     };
     const ctx = {
-      env: {},
+      // #6101: the engine settlement records the run to D1;
+      // without AGENT_DB the recorder fails closed.
+      env: { AGENT_DB: new MockD1Database() },
       getOrm: () => orm,
       agentCtx: { storage: { ...storage, sql } },
       ensureTables: () => sql,

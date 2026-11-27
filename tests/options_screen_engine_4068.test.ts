@@ -14,6 +14,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
+import { MockD1Database } from "./mock-d1";
 import type { SqlStorage } from "../src/orm";
 import {
   optionsEngineStoresFromSql,
@@ -305,7 +306,8 @@ describe("options screen on the J engine (#4068)", () => {
 
   it("SQL engine stores record the run durably (latestRun success)", async () => {
     const sql = new SqliteTestStorage();
-    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage);
+    const d1 = new MockD1Database();
+    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage, { AGENT_DB: d1 });
     const runId = "options-engine-sql:1";
     const { ports } = stubPorts();
     const outcome = await runOptionsScreenViaEngine(

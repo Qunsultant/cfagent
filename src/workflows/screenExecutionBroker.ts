@@ -230,13 +230,18 @@ export function buildStockScreenWorkflowCommand(
   // it when the spec carries none.
   const provider = deps.provider ?? spec.provider;
   return buildParentScreenCommand({
-    jobId: spec.jobId ?? manualWorkflowJobId(spec.universe),
+    jobId: spec.jobId ?? manualWorkflowJobId(spec.symbols?.length ? "symbols" : spec.universe),
     source: "manual",
     trigger: workflowTriggerForSpec(spec),
     ...(spec.trigger !== undefined ? { specTrigger: spec.trigger } : {}),
     userLogin: spec.userLogin ?? deps.userLogin,
     tenantId: deps.tenantId,
-    shards: shardsForUniverse(spec.universe),
+    // Issue #6682 — explicit tickers ride one symbols shard (the
+    // premium path's shape), so feed.pull's explicitSymbolsFor sees
+    // the caller's list; absent, the universe shards stand.
+    shards: spec.symbols?.length
+      ? [{ shardId: "symbols", symbols: [...spec.symbols] }]
+      : shardsForUniverse(spec.universe),
     ...(spec.scheduleId !== undefined ? { scheduleId: spec.scheduleId } : {}),
     ...(spec.goalId !== undefined ? { goalId: spec.goalId } : {}),
     ...(spec.patternRef !== undefined ? { patternRef: spec.patternRef } : {}),

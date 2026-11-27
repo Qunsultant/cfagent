@@ -82,6 +82,10 @@ import {
 } from "../src/trading/screeningSchemas";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import { createAuditReportAdapter } from "../src/data/createAuditReportPorts";
+import { ensureAuditReportSchema } from "../src/data/d1AuditReportAdapter";
+import { resolveIaaaTenant } from "../src/security/iaaaGithubEndToEnd";
 import {
   handleScreenerResearchRoutes,
   type ScreenerResearchRouteContext,
@@ -332,6 +336,14 @@ describe("C1 R1: production screening runtime", () => {
   });
 });
 
+// #6101 (step 8): the canonical report lives in D1 agent_reports now, so
+// read-backs go through the D1 adapter, not the DO mas_reports table.
+async function countCanonicalReports(d1: MockD1Database) {
+  const adapter = createAuditReportAdapter({ AGENT_DB: d1 as never })!;
+  await ensureAuditReportSchema(adapter.db);
+  return adapter.listReports(resolveIaaaTenant({ AGENT_DB: d1 as never }), { source: "goal_screen" });
+}
+
 /* ------------------------------------------------------------------ */
 /* R1 — shared run execution (report + activity + delivery seams)      */
 /* ------------------------------------------------------------------ */
@@ -345,6 +357,7 @@ describe("C1 R1: executeGoalScreenRun records the run on the canonical seams", (
 
   it("stores a canonical mas_reports record and an activity entry for an executed run", async () => {
     const { orm } = setup();
+    const d1 = new MockD1Database();
     const agent = {
       runGoalScreen: vi.fn(async () => ({
         task: { id: "task-1", status: "completed" },
@@ -355,7 +368,7 @@ describe("C1 R1: executeGoalScreenRun records the run on the canonical seams", (
     const out = await executeGoalScreenRun({
       agent: agent as any,
       orm: orm as any,
-      env: {},
+      env: { AGENT_DB: d1 },
       userLogin: "alice",
       scenario: incomeScenario(),
       scenarioSource: "built",
@@ -365,7 +378,10 @@ describe("C1 R1: executeGoalScreenRun records the run on the canonical seams", (
     expect(out.executed).toBe(true);
     expect(out.result?.status).toBe("complete");
     expect(agent.runGoalScreen).toHaveBeenCalledTimes(1);
-    const rows = [...orm.exec("SELECT source, title FROM mas_reports WHERE source = 'goal_screen'")] as any[];
+    // #6101 (step 8): the row lands in D1 agent_reports — read it back there.
+    // The row's reportId is a random UUID (toScheduledReportRecord), so the
+    // read-back lists by source, exactly like the old DO query did.
+    const rows = await countCanonicalReports(d1);
     expect(rows).toHaveLength(1);
     expect(rows[0].title).toContain("income");
     const feed = buildScreeningActivityFeed(orm as any, "alice", 10);
@@ -377,6 +393,7 @@ describe("C1 R1: executeGoalScreenRun records the run on the canonical seams", (
 
   it("a duplicate (executed=false) stores no second canonical report", async () => {
     const { orm } = setup();
+    const d1 = new MockD1Database();
     const agent = {
       runGoalScreen: vi.fn(async () => ({
         task: { id: "task-1", status: "completed" },
@@ -387,7 +404,7 @@ describe("C1 R1: executeGoalScreenRun records the run on the canonical seams", (
     const out = await executeGoalScreenRun({
       agent: agent as any,
       orm: orm as any,
-      env: {},
+      env: { AGENT_DB: d1 },
       userLogin: "alice",
       scenario: incomeScenario(),
       scenarioSource: "built",
@@ -395,7 +412,8 @@ describe("C1 R1: executeGoalScreenRun records the run on the canonical seams", (
       idempotencyKey: "goal-screen:scheduled:alice:1",
     });
     expect(out.executed).toBe(false);
-    const rows = [...orm.exec("SELECT source FROM mas_reports WHERE source = 'goal_screen'")] as any[];
+    // #6101 (step 8): no report exists in D1 either — the run never executed.
+    const rows = await countCanonicalReports(d1);
     expect(rows).toHaveLength(0);
   });
 
@@ -610,7 +628,7 @@ describe("C1 R1: screening routes (goal-screen + backtest)", () => {
         result: fakeGoalResult(),
       })),
     };
-    const { ctx, orm } = routeCtx(agent);
+    const { ctx } = routeCtx(agent);
     const res = await handleScreenerResearchRoutes(
       req("POST", "/screening/goal-screen", { goalKind: "income" }, { "x-user-login": "alice" }),
       urlOf("/screening/goal-screen"),
@@ -623,8 +641,10 @@ describe("C1 R1: screening routes (goal-screen + backtest)", () => {
     expect(mockedStart).toHaveBeenCalledTimes(1);
     expect(agent.runGoalScreen).not.toHaveBeenCalled();
     // The canonical row is written by the engine job's store stage,
-    // never by the route: no row exists at submission time.
-    const rows = [...orm.exec("SELECT source FROM mas_reports WHERE source = 'goal_screen'")] as any[];
+    // never by the route: no row exists at submission time — read D1,
+    // where the row lands (#6101 step 8), not the frozen DO table.
+    const d1 = new MockD1Database();
+    const rows = await countCanonicalReports(d1);
     expect(rows).toHaveLength(0);
   });
 

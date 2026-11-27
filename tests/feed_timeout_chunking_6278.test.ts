@@ -88,7 +88,8 @@ describe("Alpaca batch quotes chunking + per-request timeout (#6278)", () => {
         seen.push(symbols);
         const snapshots: Record<string, unknown> = {};
         for (const s of symbols) snapshots[s] = snapshotRow();
-        return { ok: true, json: async () => ({ snapshots }) } as Response;
+        // Issue #6690: documented top-level symbol map, not wrapped.
+        return { ok: true, json: async () => snapshots } as Response;
       }),
     );
     const provider = new AlpacaMarketDataProvider(PAPER_ENV);

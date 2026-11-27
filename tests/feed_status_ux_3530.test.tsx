@@ -456,6 +456,27 @@ describe("feed status block rendering (issue #3530 status UX)", () => {
     expect(buttonWithText(row, "Run now")).toBeTruthy();
   });
 
+  it("a pipeline run newer than the dataset artifact renders its outcome and reason (#6235)", async () => {
+    const job: FeedJobView = {
+      ...PIPELINE_JOB,
+      pipeline: {
+        state: "failed",
+        currentRunId: "run-6235",
+        lastRunStatus: "failure",
+        lastRunAt: "2026-11-08T08:00:04.000Z",
+        lastError: "FEED_FETCH_FAILED: Yahoo batch quotes returned no results",
+      } as FeedJobView["pipeline"],
+    };
+    installFetch({
+      lists: [{ providers: [provider({ feed: FEED_FRESH, feedJobs: [job] })], routes: [] }],
+    });
+    await renderPanel();
+    await click(container, "yahoo");
+    const row = providerItem("yahoo");
+    expect(row.textContent).toContain("Pipeline run: failure");
+    expect(row.textContent).toContain("FEED_FETCH_FAILED");
+  });
+
   it("feed block renders even when capture health says no-data (the two facts are not conflated)", async () => {
     installFetch({ lists: [{ providers: [provider({ feed: FEED_FRESH, health: HEALTH })], routes: [] }] });
     await renderPanel();

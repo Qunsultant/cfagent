@@ -464,14 +464,18 @@ function screenFullResult(universe: string) {
 
 function makeScreenHarness() {
   const sql = new MockSqlStorage();
+  const d1 = new MockD1Database();
   const shardStore = new InMemoryShardJobAdapter();
   const traceStore = new InMemoryMeshTraceStore();
   const startedCommands: WorkflowJobCommand[] = [];
   const trace = newTraceContext();
   const traceparent = formatTraceparent(trace);
 
+  // #6101: the canonical write + read both need the D1 binding — one
+  // shared MockD1Database for the write side (reportCtx) and the read
+  // side (ctx.env).
   const reportCtx = {
-    env: {},
+    env: { AGENT_DB: d1 },
     ensureTables: () => sql,
   } as unknown as ReportDispatchContext;
 
@@ -527,7 +531,7 @@ function makeScreenHarness() {
     // this harness pins the free workflow-run path, not the paid branch —
     // so the paid gate stays off (the price stub in makePaidHarness serves
     // only the paid tasks, never this one).
-    env: { MONETIZATION_ENABLED: "0" } as NlqPortsContext["env"],
+    env: { MONETIZATION_ENABLED: "0", AGENT_DB: d1 } as NlqPortsContext["env"],
     ensureTables: () => sql as never,
     workflowPort: recordingPort,
     readWorkflowJobHistory: (tenantId, chainId) =>
@@ -744,8 +748,13 @@ function makePaidHarness(opts: { budgetVerdict?: { allowed: boolean; reason?: st
   const paymentCreates: Array<{ id: string; params: PaymentWorkflowEventParams }> = [];
   const coverageConsumed: Array<{ userId: string; paidVia: string; priceUSD: number }> = [];
 
+  const d1 = new MockD1Database();
   const reportCtx = {
-    env: {},
+    // #6101: the canonical report now lands in D1, so the write
+    // side (reportCtx) and the port read side (ctx.env below)
+    // share one MockD1Database — otherwise the paid drive's
+    // read-back finds nothing and the run reports failure.
+    env: { AGENT_DB: d1 },
     ensureTables: () => sql,
   } as unknown as ReportDispatchContext;
   const deps: ScreenerWorkflowDeps = {
@@ -879,7 +888,7 @@ function makePaidHarness(opts: { budgetVerdict?: { allowed: boolean; reason?: st
       } as never;
     },
     getSocialBriefStore: () => null,
-    env: {} as NlqPortsContext["env"],
+    env: { AGENT_DB: d1 } as NlqPortsContext["env"],
     ensureTables: () => sql as never,
     workflowPort: recordingScreenerPort,
     readWorkflowJobHistory: (tenantId, chainId) =>

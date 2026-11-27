@@ -21,6 +21,8 @@ import { describe, expect, it } from "vitest";
 import { createInMemoryJobPipelineStores } from "../src/data/inMemoryJobPipelineAdapter";
 import { InMemoryJobRunRecordStore } from "../src/data/inMemoryJobRunRecordAdapter";
 import { createInMemoryJobStageEventStore } from "../src/data/inMemoryJobStageEventAdapter";
+import { MockD1Database } from "./mock-d1";
+import { createD1JobStageEventStore } from "../src/data/d1JobStageEventAdapter";
 import type { JobStageEventRecord } from "../src/data/jobStageEventPorts";
 import {
   JobPipelineControl,
@@ -297,12 +299,16 @@ describe("6028-P15 a past run's stages survive its checkpoint", () => {
         definitionVersion: 1,
       },
     ];
-    const sql = fakeSql(rows);
+    // #6101: readResearchStages reads persisted rows only from
+    // D1 now — seed them there and pass d1 (the DO fakeSql is gone).
+    const d1 = new MockD1Database();
+    const d1Events = createD1JobStageEventStore(d1);
+    for (const row of rows) await d1Events.record(row);
     const read = await readResearchStages({
       runId: "r-past",
       stores: createInMemoryJobPipelineStores(),
       runRecorder: jobRunRecorderFromStore(new InMemoryJobRunRecordStore()),
-      sql: sql as never,
+      d1,
     });
     const feed = read.stages.find((stage) => stage.stageId === "feed")!;
     expect(feed.status).toBe("completed");
@@ -314,61 +320,3 @@ describe("6028-P15 a past run's stages survive its checkpoint", () => {
   });
 });
 
-/**
- * The smallest SqlStorage double the stage store needs: the catalogue's
- * CREATE/ALTER/INDEX statements are accepted and ignored, the two reads the
- * adapter issues (PRAGMA table_info + the run's rows) answer.
- */
-function fakeSql(rows: JobStageEventRecord[]) {
-  return {
-    exec: (statement: string, ...params: unknown[]) => {
-      const text = String(statement);
-      if (text.startsWith("PRAGMA table_info")) {
-        return [
-          { name: "event_key" },
-          { name: "claim_key" },
-          { name: "run_id" },
-          { name: "job_id" },
-          { name: "stage_id" },
-          { name: "unit_id" },
-          { name: "action" },
-          { name: "at" },
-          { name: "started_at" },
-          { name: "ended_at" },
-          { name: "detail" },
-          { name: "stage_status" },
-          { name: "duration_ms" },
-          { name: "unit_count" },
-          { name: "failed_unit_count" },
-          { name: "result_ref" },
-          { name: "definition_version" },
-        ];
-      }
-      if (text.includes("SELECT event_key")) {
-        const runId = String(params[0] ?? "");
-        return rows
-          .filter((row) => row.runId === runId)
-          .map((row) => ({
-            event_key: row.eventKey,
-            claim_key: row.claimKey,
-            run_id: row.runId,
-            job_id: row.jobId,
-            stage_id: row.stageId,
-            unit_id: row.unitId,
-            action: row.action,
-            at: row.at,
-            started_at: row.startedAt,
-            ended_at: row.endedAt,
-            detail: row.detail,
-            stage_status: row.stageStatus ?? null,
-            duration_ms: row.durationMs ?? null,
-            unit_count: row.unitCount ?? null,
-            failed_unit_count: row.failedUnitCount ?? null,
-            result_ref: row.resultRef ?? null,
-            definition_version: row.definitionVersion ?? null,
-          }));
-      }
-      return [];
-    },
-  };
-}

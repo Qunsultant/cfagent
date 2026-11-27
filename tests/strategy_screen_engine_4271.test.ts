@@ -18,6 +18,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
+import { MockD1Database } from "./mock-d1";
 import type { SqlStorage } from "../src/orm";
 import {
   optionsEngineStoresFromSql,
@@ -243,7 +244,8 @@ describe("strategy screen on the J engine (#4271)", () => {
 
   it("dispatches the eight stages through the engine and records the strategy job durably (SQL)", async () => {
     const sql = new SqliteTestStorage();
-    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage);
+    const d1 = new MockD1Database();
+    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage, { AGENT_DB: d1 });
     const runId = "strategy-engine-sql:1";
     const order: string[] = [];
     const { ports } = stubPorts(order);
@@ -282,7 +284,8 @@ describe("strategy screen on the J engine (#4271)", () => {
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: makeChain("AAPL") });
     try {
       const sql = new SqliteTestStorage();
-      const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage);
+      const d1 = new MockD1Database();
+      const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage, { AGENT_DB: d1 });
       const result = await runOptionsPanelViaEngine(
         undefined,
         baseStrategyRequest(),
@@ -316,7 +319,8 @@ describe("strategy screen on the J engine (#4271)", () => {
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: makeChain("AAPL") });
     try {
       const sql = new SqliteTestStorage();
-      const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage);
+      const d1 = new MockD1Database();
+      const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage, { AGENT_DB: d1 });
       const saved: Array<{ result: unknown; options: unknown }> = [];
       const scanRunStore = {
         save: async (result: unknown, options: unknown) => {

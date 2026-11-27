@@ -130,7 +130,7 @@ describe("stage contracts (#1999)", () => {
       } as never,
       "alice",
     );
-    const stored = (svc as unknown as { persistIvCollectionReport: (r: unknown, t: string) => boolean }).persistIvCollectionReport(
+    const stored = await (svc as unknown as { persistIvCollectionReport: (r: unknown, t: string) => Promise<boolean> }).persistIvCollectionReport(
       { date: "2026-10-28", recorded: 1, alreadyRecorded: 0, failed: 0, outcomes: [] },
       "2026-10-28T00:00:00.000Z",
     );
@@ -139,13 +139,13 @@ describe("stage contracts (#1999)", () => {
     expect(audits.find((a) => a.type === "options.iv_collection_persist_failed")).toBeDefined();
   });
 
-  it("IV collection persist success reports stored (#1999)", () => {
+  it("IV collection persist success reports stored (#1999)", async () => {
     const svc = new ScheduledTasksService(
       {} as never,
       { storeCanonicalReport: () => "iv_collection:2026-10-28", events: { create: () => {} } } as never,
       "alice",
     );
-    const stored = (svc as unknown as { persistIvCollectionReport: (r: unknown, t: string) => boolean }).persistIvCollectionReport(
+    const stored = await (svc as unknown as { persistIvCollectionReport: (r: unknown, t: string) => Promise<boolean> }).persistIvCollectionReport(
       { date: "2026-10-28", recorded: 1, alreadyRecorded: 0, failed: 0, outcomes: [] },
       "2026-10-28T00:00:00.000Z",
     );

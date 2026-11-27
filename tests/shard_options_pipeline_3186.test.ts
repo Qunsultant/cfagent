@@ -9,6 +9,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
+import { MockD1Database } from "./mock-d1";
 import { executeShardJob, type ShardExecutorDeps } from "../src/services/shardExecutors";
 import { DatabaseORM } from "../src/orm";
 import { UnifiedOptionsService } from "../src/trading";
@@ -89,7 +90,7 @@ function makeDeps(client: unknown): ShardExecutorDeps {
   const mockOrm = new DatabaseORM({ exec: vi.fn(() => []) } as any);
   return {
     sql: new SqliteTestStorage() as any,
-    env: {},
+    env: { AGENT_DB: new MockD1Database() },
     orm: mockOrm,
     storage: {},
     createETradeService: () => ({ client }) as never,

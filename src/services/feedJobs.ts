@@ -862,7 +862,7 @@ function symbolsOfList(list: StoredIndexList): string[] {
  * membership rule (#4065) — one normalizer, so the two runs
  * can never disagree on what "the same symbols" means.
  */
-function normalizeSymbolsInput(
+export function normalizeSymbolsInput(
   symbols: readonly unknown[] | undefined,
 ): string[] {
   return Array.from(

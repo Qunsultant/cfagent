@@ -93,7 +93,7 @@ function buildBundle() {
 }
 
 describe("bundle canonical persistence (store seam)", () => {
-  it("builds a bundle-source canonical row through the shared seam", () => {
+  it("builds a bundle-source canonical row through the shared seam", async () => {
     const bundle = buildBundle();
     const input = buildBundleCanonicalReportInput(bundle, "XYZ");
     expect(input.runId).toBe(bundle.id);
@@ -107,7 +107,7 @@ describe("bundle canonical persistence (store seam)", () => {
     expect(input.createdAt).toBe(bundle.asOf);
 
     const seen: unknown[] = [];
-    const stored = storeReportStage(
+    const stored = await storeReportStage(
       { storeCanonicalReport: (i) => { seen.push(i); return { reportId: "rep-bundle-1", created: true }; } },
       input,
     );

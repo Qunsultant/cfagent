@@ -17,6 +17,8 @@ import {
   submitAsyncJob,
   type AsyncJobsContext,
 } from "../src/agents/orchestrator/asyncJobs";
+import { MockD1Database } from "./mock-d1";
+import { createJobRunRecordAdapter, type JobRunRecord } from "../src/data/createJobRunRecordPorts";
 import type { ScreenerRunOutcome } from "../src/services/screenerFollowups";
 
 type Row = Record<string, unknown>;
@@ -130,7 +132,8 @@ function makeCtx(sql: FakeSql, captures?: ServeCaptures): AsyncJobsContext {
   const historyStore = captures?.history ?? new Map<string, unknown>();
   const canonicalRows = captures?.canonical ?? [];
   return {
-    env: { SLACK_WEBHOOK_URL: "https://hooks.slack.com/x", SCREENER_EMAIL_TO: "ops@example.com" },
+    // #6101: the serve record folds its outcome onto D1.
+    env: { SLACK_WEBHOOK_URL: "https://hooks.slack.com/x", SCREENER_EMAIL_TO: "ops@example.com", AGENT_DB: new MockD1Database() },
     agentCtx: {
       storage: {
         sql: storage,
@@ -183,7 +186,7 @@ async function runServe(outcome: ScreenerRunOutcome): Promise<{
   serve: ReturnType<typeof getAsyncJob>;
   deliveries: Row[];
   canonical: Array<Record<string, unknown>>;
-  outcomes: Row[];
+  outcomes: JobRunRecord[];
   history: Map<string, unknown>;
 }> {
   const sql = new FakeSql();
@@ -198,7 +201,9 @@ async function runServe(outcome: ScreenerRunOutcome): Promise<{
     serve: getAsyncJob(ctx, jobId),
     deliveries: sql.rows("mas_async_jobs").filter((r) => r.capability === "followup.deliver"),
     canonical: captures.canonical,
-    outcomes: sql.rows("mas_job_outcomes"),
+    // #6101: the outcome row lives in D1 now (the same d1 the
+    // ctx folds onto — the serve record shares the ctx env).
+    outcomes: await createJobRunRecordAdapter({ AGENT_DB: (ctx.env as { AGENT_DB: unknown }).AGENT_DB })!.listRecent(10),
     history: captures.history,
   };
 }
@@ -301,8 +306,8 @@ describe("Keyless options serve records the run (#3264)", () => {
     expect(runs).toHaveLength(1);
     expect(runs?.[0].timestamp).toBe("2026-10-24T12:00:00.000Z");
     expect(outcomes).toHaveLength(1);
-    expect(outcomes[0].id).toBe("scheduled:options:chain-1");
-    expect(outcomes[0].kind).toBe("options");
+    expect(outcomes[0].jobId).toBe("scheduled:options:chain-1");
+    expect(outcomes[0].operation).toBe("options");
     expect(outcomes[0].trigger).toBe("scheduled");
   });
 
@@ -323,7 +328,7 @@ describe("Keyless options serve records the run (#3264)", () => {
     expect(String(body.xlsxError)).toContain("FAILURE_REPORT_ARTIFACT_MISSING");
     expect(String(body.csvError)).toContain("FAILURE_REPORT_ARTIFACT_MISSING");
     expect(outcomes).toHaveLength(1);
-    expect(outcomes[0].id).toBe("scheduled:options:chain-2");
+    expect(outcomes[0].jobId).toBe("scheduled:options:chain-2");
   });
 
   it("a keyless stock outcome records nothing (the rule is options-only)", async () => {

@@ -32,10 +32,11 @@ vi.mock("../src/services/providerConnections", async (importOriginal) => {
 });
 
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 import { DatabaseORM } from "../src/orm";
 import { ScheduledTasksService } from "../src/services/scheduledTasks";
 import { DynamicOptionsScreener } from "../src/trading/optionsScreener";
-import { listJobOutcomes } from "../src/services/jobOutcomes";
+import { createJobRunRecordAdapter } from "../src/data/createJobRunRecordPorts";
 import {
   recordOptionsServeReport,
   storeOptionsCanonicalReport,
@@ -111,9 +112,12 @@ describe("recordOptionsServeReport", () => {
       getSql: () => sql,
     };
     const storage = memoryStorage();
+    // #6101: the outcome folds onto D1 (recordOptionsServeReport
+    // threads deps.env through); the read-back is the D1 run record.
+    const d1 = new MockD1Database();
 
     const ok = await recordOptionsServeReport(
-      { orm: orm as any, storage },
+      { orm: orm as any, storage, env: { AGENT_DB: d1 } },
       {
         kind: "options",
         timestamp: "2026-10-28T12:00:00.000Z",
@@ -136,13 +140,14 @@ describe("recordOptionsServeReport", () => {
     expect(ok).toBe(true);
     expect(orm.storeCanonicalReport.mock.calls[0][0]).toMatchObject({ userLogin: OWNER });
 
-    const outcomes = listJobOutcomes(sql as any, 10);
-    expect(outcomes).toHaveLength(1);
-    expect(outcomes[0]).toMatchObject({
-      id: "scheduled:options:chain-1",
-      kind: "options",
+    const store = createJobRunRecordAdapter({ AGENT_DB: d1 });
+    const row = await store!.latestByJob("scheduled:options:chain-1");
+    expect(row).toBeDefined();
+    expect(row).toMatchObject({
+      jobId: "scheduled:options:chain-1",
+      operation: "options",
       trigger: "scheduled",
-      status: "completed",
+      outcome: "success",
       scanned: 12,
       matched: 4,
       pdfKey: "options/pdf/run-1",
@@ -198,9 +203,12 @@ describe("recordOptionsServeReport", () => {
       storeCanonicalReport: vi.fn(() => ({ reportId: "r2", created: true })),
       getSql: () => sql,
     };
+    // #6101: the outcome folds onto D1; the read-back is the D1 run
+    // record (outcome "failure" replaces the DO status "failed").
+    const d1 = new MockD1Database();
 
     await recordOptionsServeReport(
-      { orm: orm as any, storage: memoryStorage() },
+      { orm: orm as any, storage: memoryStorage(), env: { AGENT_DB: d1 } },
       {
         kind: "options",
         timestamp: "2026-10-28T13:00:00.000Z",
@@ -216,9 +224,10 @@ describe("recordOptionsServeReport", () => {
       } as any,
     );
 
-    const [row] = listJobOutcomes(sql as any, 10);
-    expect(row.status).toBe("failed");
-    expect(row.codedError).toContain("FAILURE_SCREEN_NO_CONTRACTS_EVALUATED");
+    const store = createJobRunRecordAdapter({ AGENT_DB: d1 });
+    const row = await store!.latestByJob("scheduled:options:chain-2");
+    expect(row?.outcome).toBe("failure");
+    expect(row?.codedError).toContain("FAILURE_SCREEN_NO_CONTRACTS_EVALUATED");
   });
 });
 

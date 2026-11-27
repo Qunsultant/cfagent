@@ -72,7 +72,7 @@ function fixtureSha256(name: string): string {
 }
 
 describe("schema equality — all planes (#4282 P4)", () => {
-  it("the frozen combined baseline is the clean-checkout seed (191 tables / 119 indexes)", () => {
+  it("the frozen combined baseline is the clean-checkout seed (190 tables / 119 indexes)", () => {
     const model = combinedExpectedModel();
     // #6072 adds migration 0080 (agent_screener_task_entries table):
     // 183 → 184 tables. #6099 adds migration 0081 (job_run_records
@@ -89,7 +89,10 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // #6151 S4 adds migration 0087 (nav admin config: 3 tables + 1 index): 187 → 190 tables, 117 → 118 indexes.
     // #5160 adds migration 0088 (IDP attributes profile: rebuild + lookup-index table + 1 unique index): 187 → 188 tables, 117 → 118 indexes.
     // Union: 191 tables, 119 indexes.
-    expect(Object.keys(model.tables).length).toBe(191);
+    // #6101 adds migration 0093 (job_run_records identity columns, no
+    // new table) and DROPs agent_tenant_projection_carriers:
+    // 191 → 190 tables, indexes unchanged at 119.
+    expect(Object.keys(model.tables).length).toBe(190);
     expect(Object.keys(model.indexes).length).toBe(119);
     expect(fixtureSha256("schema_component_combined_expected_model.json")).toBe(
       COMBINED_FIXTURE_SHA256,
@@ -120,9 +123,12 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // #6503 adds migration 0092 (unified_schedules table + 3 indexes):
     // d1 tables 113 → 114, d1 indexes 77 → 80. (The table already
     // lived on the DO plane, so the union counts below do not move.)
-    // Union: d1 [114, 80].
+    // #6101 adds migration 0093 (job_run_records identity columns, no
+    // new table) and DROPs agent_tenant_projection_carriers:
+    // d1 tables 114 → 113, d1 indexes unchanged at 80.
+    // Union: d1 [113, 80].
     const counts: Record<string, [number, number]> = {
-      d1: [114, 80],
+      d1: [113, 80],
       do: [70, 41],
       orm: [13, 14],
       remainder: [19, 15],
@@ -166,7 +172,10 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(new Set(executedCodes).size).toBe(
       COMBINED_CATALOGUE_ENTRIES.length,
     );
-    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(535);    // #6503 adds migration 0092 (unified_schedules table + 3 indexes + 6 seeds): 525 → 535 entries.
+    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(540);    // #6503 adds migration 0092 (unified_schedules table + 3 indexes + 6 seeds): 525 → 535 entries.
+    // #6101 adds migration 0093 (5 job_run_records identity ALTERs +
+    // the carriers DROP): 535 → 541; the #6101 fix round removes the
+    // dead carriers CREATE leg from the catalogue: 541 → 540.
     // Issue #6167 adds 1 entry (the host_version remainder ALTER
     // on mas_async_jobs): 452 → 453. Issue #5100 (F3 of #5094) adds 13:
     // 453 → 466 entries. Issue #5102 (F5 of #5094) adds 5 entries
@@ -233,7 +242,10 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // Issue #6557 adds 6 entries, each one statement: 530 → 536 statements.
     // #6503 adds migration 0092 (unified_schedules table + 3 indexes + 6 seeds), each one statement:
     // 536 → 546 statements.
-    expect(executedStatements).toBe(546);
+    // #6101 adds migration 0093 (5 job_run_records identity ALTERs +
+    // the carriers DROP), each one statement: 546 → 552; the #6101
+    // fix round removes the dead carriers CREATE leg: 552 → 551.
+    expect(executedStatements).toBe(551);
     const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);
@@ -284,17 +296,24 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // Issue #6006 adds nine more D1-only ALTERs (the outcome-facts
     // migration 0086) that the DO CREATE also wipes: eleven columns in
     // catalogue order (the harness sorts them by column name).
+    // #6101 adds five more D1-only ALTERs (migration 0093, the
+    // identity columns) that the DO CREATE also wipes: sixteen.
     expect(diff.missingColumns).toEqual([
       { table: "job_run_records", column: "coded_error" },
+      { table: "job_run_records", column: "correlation_id" },
       { table: "job_run_records", column: "csv_key" },
       { table: "job_run_records", column: "delivery_states_json" },
       { table: "job_run_records", column: "matched" },
       { table: "job_run_records", column: "origin" },
       { table: "job_run_records", column: "pdf_key" },
+      { table: "job_run_records", column: "platform_id" },
       { table: "job_run_records", column: "projected_at_ms" },
       { table: "job_run_records", column: "report_url" },
       { table: "job_run_records", column: "scanned" },
+      { table: "job_run_records", column: "session_id" },
       { table: "job_run_records", column: "tenant_id" },
+      { table: "job_run_records", column: "trace_id" },
+      { table: "job_run_records", column: "user_id" },
       { table: "job_run_records", column: "xlsx_key" },
     ]);
     expect(diff.extraColumns).toEqual([]);

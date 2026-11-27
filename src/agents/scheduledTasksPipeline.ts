@@ -11,8 +11,10 @@
  *
  * - The control plane is built over this agent's DO SQLite (the
  *   pipeline stores' DO residency), its run records go through
- *   the platform JobRunRecordStore (the DO adapter of the same
- *   port the workflow residency serves from D1), and its status
+ *   the platform JobRunRecordStore — the D1 adapter when AGENT_DB
+ *   is bound, so a settled host run is an engine D1 record the
+ *   D1-only run ledger reads (#6103/#6235), with the DO adapter
+ *   only as the unbound-deployment fallback — and its status
  *   publication rides the JOB_PIPELINE_EVENTS queue substrate.
  * - getScheduledTasks() declarations are built from the control
  *   plane's registerSchedules output over a recording

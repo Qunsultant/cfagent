@@ -109,11 +109,15 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
   // #6503 adds migration 0092 (D1 unified_schedules table + 3
   // indexes + 6 seed entries: 5 system schedules + the 9 built-in
   // goals): 536 → 546. Union: 546.
-    expect(first.summary.totalSteps).toBe(546);
-    expect(first.summary.executed).toBe(546);
+  // #6101 adds migration 0093 (5 job_run_records identity ALTERs +
+  // the carriers DROP): 546 → 552; the #6101 fix round removes the
+  // dead carriers CREATE leg (the DROP is unselected on a fresh world):
+  // 552 → 551. Union: 551.
+    expect(first.summary.totalSteps).toBe(551);
+    expect(first.summary.executed).toBe(551);
     expect(first.summary.failed).toBe(0);
     expect(first.summary.skipped).toBe(0);
-    expect(first.executed).toHaveLength(546);
+    expect(first.executed).toHaveLength(551);
     expect(first.failed).toEqual([]);
     expect(first.skipped).toEqual([]);
     // Uncreatable layers are deployment facts, not changes: they are
@@ -243,8 +247,8 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
     });
     // The report is truthful: everything before the failing step
     // executed, the failing step is named, everything after it is
-    // skipped — and the three counts sum to the 546 resolved steps.
-    // (#6102 adds migration 0089: 523 → 530; #6557 adds 6: → 536; #6503 adds migration 0092: 536 → 546.)
+    // skipped — and the three counts sum to the 551 resolved steps.
+    // (#6102 adds migration 0089: 523 → 530; #6557 adds 6: → 536; #6503 adds migration 0092: 536 → 546; #6101 adds migration 0093: 546 → 552, minus the removed carriers CREATE leg: 552 → 551.)
     expect(partial.summary.failed).toBe(1);
     expect(partial.failed).toHaveLength(1);
     expect(partial.failed[0].code).toBe(UNIQUE_INDEX_CODE);
@@ -252,8 +256,8 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
       partial.summary.executed +
         partial.summary.failed +
         partial.summary.skipped,
-    ).toBe(546);
-    expect(partial.summary.totalSteps).toBe(546);
+    ).toBe(551);
+    expect(partial.summary.totalSteps).toBe(551);
     // The degradation is VISIBLE, never silent: the post-run equality
     // check fails. The missing indexes are exactly the failed step's
     // index plus the indexes of the skipped steps (the run stopped in

@@ -51,6 +51,7 @@ import { runOptionsStrategyScreenViaDoor } from "../src/agents/orchestrator/mesh
 import { McpToolFactory } from "../src/mcps/openaimp/commands";
 import { MCP_TOOL_SCOPES } from "../src/mcps/openaimp/mcpPermissionPorts";
 import { DynamicOptionsScreener } from "../src/trading/optionsScreener";
+import { MockD1Database } from "./mock-d1";
 import type { ETradeOptionChain, ETradeOptionExpireDate } from "../src/types";
 import type { ScanRequestTemplate } from "../src/trading";
 
@@ -206,6 +207,7 @@ async function dispatchManual(
   sql: SqlStorage,
   storage: OptionsStageStorage,
   runId: string,
+  d1: MockD1Database,
 ) {
   const request = {
     ...MANUAL_REQUEST,
@@ -225,7 +227,9 @@ async function dispatchManual(
       }),
       claims: memoryStageClaims(),
       queue: null,
-      engineStores: optionsEngineStoresFromSql(sql),
+      // #6101: the engine settlement records the run to D1;
+      // without AGENT_DB the recorder fails closed.
+      engineStores: optionsEngineStoresFromSql(sql, { AGENT_DB: d1 }),
     },
   );
   return outcome;
@@ -235,6 +239,7 @@ async function dispatchPanel(
   sql: SqlStorage,
   storage: OptionsStageStorage,
   runId: string,
+  d1: MockD1Database,
 ) {
   const request = {
     ...PANEL_REQUEST,
@@ -249,7 +254,9 @@ async function dispatchPanel(
       }),
       claims: memoryStageClaims(),
       queue: null,
-      engineStores: optionsEngineStoresFromSql(sql),
+      // #6101: the engine settlement records the run to D1;
+      // without AGENT_DB the recorder fails closed.
+      engineStores: optionsEngineStoresFromSql(sql, { AGENT_DB: d1 }),
     },
   );
   return outcome;
@@ -259,6 +266,7 @@ async function dispatchScan(
   sql: SqlStorage,
   storage: OptionsStageStorage,
   runId: string,
+  d1: MockD1Database,
 ) {
   const outcome = await runOptionsScreenViaEngine(
     { runId, userLogin: "tester", request: scanRequest(runId) },
@@ -269,7 +277,9 @@ async function dispatchScan(
       }),
       claims: memoryStageClaims(),
       queue: null,
-      engineStores: optionsEngineStoresFromSql(sql),
+      // #6101: the engine settlement records the run to D1;
+      // without AGENT_DB the recorder fails closed.
+      engineStores: optionsEngineStoresFromSql(sql, { AGENT_DB: d1 }),
     },
   );
   return outcome;
@@ -294,14 +304,16 @@ describe("options copilot stage control (#4066)", () => {
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: makeChain("AAPL") });
     try {
       const { sql, storage } = makeDoStorage();
+      const d1 = new MockD1Database();
       const runId = "control-manual:1";
-      const outcome = await dispatchManual(sql, storage, runId);
+      const outcome = await dispatchManual(sql, storage, runId, d1);
       expect(outcome.outcome).toBe("completed");
       const before = await storage.get(`options:${runId}:screen`);
       expect(before).toBeDefined();
 
       const result = await controlOptionsStage({
         sql,
+        env: { AGENT_DB: d1 },
         storage,
         runId,
         stage: "screen",
@@ -329,8 +341,9 @@ describe("options copilot stage control (#4066)", () => {
     // (0 chains, fetch errors) and the SCREEN stage throws "no chains
     // could be fetched", so the run fails at screen.
     const { sql, storage } = makeDoStorage();
+    const d1 = new MockD1Database();
     const runId = "control-manual:failed";
-    const outcome = await dispatchManual(sql, storage, runId);
+    const outcome = await dispatchManual(sql, storage, runId, d1);
     expect(outcome.outcome).toBe("failed");
     expect(outcome.failedStage).toBe("screen");
 
@@ -342,6 +355,7 @@ describe("options copilot stage control (#4066)", () => {
     try {
       const stale = await controlOptionsStage({
         sql,
+        env: { AGENT_DB: d1 },
         storage,
         runId,
         stage: "screen",
@@ -351,6 +365,7 @@ describe("options copilot stage control (#4066)", () => {
       expect(stale.state).toBe("failed");
       const refetch = await controlOptionsStage({
         sql,
+        env: { AGENT_DB: d1 },
         storage,
         runId,
         stage: "chainFetch",
@@ -360,6 +375,7 @@ describe("options copilot stage control (#4066)", () => {
       expect(refetch.state).toBe("completed");
       const reenrich = await controlOptionsStage({
         sql,
+        env: { AGENT_DB: d1 },
         storage,
         runId,
         stage: "enrich",
@@ -369,6 +385,7 @@ describe("options copilot stage control (#4066)", () => {
       expect(reenrich.state).toBe("completed");
       const recovered = await controlOptionsStage({
         sql,
+        env: { AGENT_DB: d1 },
         storage,
         runId,
         stage: "screen",
@@ -390,12 +407,14 @@ describe("options copilot stage control (#4066)", () => {
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: makeChain("AAPL") });
     try {
       const { sql, storage } = makeDoStorage();
+      const d1 = new MockD1Database();
       const runId = "control-manual:2";
-      const outcome = await dispatchManual(sql, storage, runId);
+      const outcome = await dispatchManual(sql, storage, runId, d1);
       expect(outcome.outcome).toBe("completed");
       const stopped = await expectControlError(
         controlOptionsStage({
           sql,
+          env: { AGENT_DB: d1 },
           storage,
           runId,
           stage: "screen",
@@ -408,6 +427,7 @@ describe("options copilot stage control (#4066)", () => {
       await expectControlError(
         controlOptionsStage({
           sql,
+          env: { AGENT_DB: d1 },
           storage,
           runId,
           stage: "screen",
@@ -423,10 +443,11 @@ describe("options copilot stage control (#4066)", () => {
 
   it("an unknown stage refuses stage_vocabulary_unknown — display stages too", async () => {
     const { sql, storage } = makeDoStorage();
+    const d1 = new MockD1Database();
     const runId = "control-manual:3";
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: makeChain("AAPL") });
     try {
-      expect((await dispatchManual(sql, storage, runId)).outcome).toBe("completed");
+      expect((await dispatchManual(sql, storage, runId, d1)).outcome).toBe("completed");
     } finally {
       DynamicOptionsScreener.clearTestChainsFixture();
     }
@@ -434,6 +455,7 @@ describe("options copilot stage control (#4066)", () => {
       const error = await expectControlError(
         controlOptionsStage({
           sql,
+          env: { AGENT_DB: d1 },
           storage,
           runId,
           stage,
@@ -469,13 +491,14 @@ describe("options copilot stage control (#4066)", () => {
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: makeChain("AAPL") });
     try {
       const { sql, storage } = makeDoStorage();
+      const d1 = new MockD1Database();
       const runId = "control-manual:pre-4066";
-      const outcome = await dispatchManual(sql, storage, runId);
+      const outcome = await dispatchManual(sql, storage, runId, d1);
       expect(outcome.outcome).toBe("completed");
       // Simulate a pre-#4066 definition: the run completed, but the
       // stored definition carries no dispatch request (the request
       // rode only the step deps then, not the definition).
-      const stores = optionsEngineStoresFromSql(sql);
+      const stores = optionsEngineStoresFromSql(sql, { AGENT_DB: d1 });
       const jobId = optionsScreenJobId(runId);
       const definition = await stores.stores.definitions.getDefinition(jobId);
       expect(definition).toBeDefined();
@@ -485,6 +508,7 @@ describe("options copilot stage control (#4066)", () => {
       const error = await expectControlError(
         controlOptionsStage({
           sql,
+          env: { AGENT_DB: d1 },
           storage,
           runId,
           stage: "screen",
@@ -499,6 +523,7 @@ describe("options copilot stage control (#4066)", () => {
       await expectControlError(
         controlOptionsStage({
           sql,
+          env: { AGENT_DB: d1 },
           storage,
           runId,
           stage: "screen",
@@ -556,12 +581,14 @@ describe("options copilot stage control (#4066)", () => {
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: makeChain("AAPL") });
     try {
       const { sql, storage } = makeDoStorage();
+      const d1 = new MockD1Database();
       const runId = "control-manual:4";
-      expect((await dispatchManual(sql, storage, runId)).outcome).toBe("completed");
+      expect((await dispatchManual(sql, storage, runId, d1)).outcome).toBe("completed");
       for (const stage of ["shapeReport", "deliver"]) {
         const error = await expectControlError(
           controlOptionsStage({
             sql,
+            env: { AGENT_DB: d1 },
             storage,
             runId,
             stage,
@@ -581,12 +608,14 @@ describe("options copilot stage control (#4066)", () => {
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: makeChain("AAPL") });
     try {
       const { sql, storage } = makeDoStorage();
+      const d1 = new MockD1Database();
       const runId = "control-panel:1";
-      const outcome = await dispatchPanel(sql, storage, runId);
+      const outcome = await dispatchPanel(sql, storage, runId, d1);
       expect(outcome.outcome).toBe("completed");
       for (const stage of ["shapeReport", "deliver"] as const) {
         const result = await controlOptionsStage({
           sql,
+          env: { AGENT_DB: d1 },
           storage,
           runId,
           stage,
@@ -605,11 +634,13 @@ describe("options copilot stage control (#4066)", () => {
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: makeChain("AAPL") });
     try {
       const { sql, storage } = makeDoStorage();
+      const d1 = new MockD1Database();
       const runId = "control-scan:1";
-      const outcome = await dispatchScan(sql, storage, runId);
+      const outcome = await dispatchScan(sql, storage, runId, d1);
       expect(outcome.outcome).toBe("completed");
       const result = await controlOptionsStage({
         sql,
+        env: { AGENT_DB: d1 },
         storage,
         runId,
         stage: "screen",
@@ -627,6 +658,7 @@ describe("options copilot stage control (#4066)", () => {
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: makeChain("AAPL") });
     try {
       const { sql, storage } = makeDoStorage();
+      const d1 = new MockD1Database();
       const res = await runOptionsStrategyAction(
         fakeEtrade() as never,
         "options_strategies",
@@ -650,6 +682,7 @@ describe("options copilot stage control (#4066)", () => {
         } as never,
         {
           engineSql: sql,
+          env: { AGENT_DB: d1 },
           pipelineStorage: storage,
           userLogin: "tester",
         },
@@ -660,7 +693,7 @@ describe("options copilot stage control (#4066)", () => {
       // host DO, and it carries the dispatch request. Issue #4271:
       // the panel is a strategy screen, so its job is the strategy
       // job (strategy-screen:<runId>), not the options job.
-      const stores = optionsEngineStoresFromSql(sql);
+      const stores = optionsEngineStoresFromSql(sql, { AGENT_DB: d1 });
       const definitions = await stores.stores.definitions.listDefinitions();
       // #5175 slice 3: the strategy job is strategy-screen:<runId>; the panel run id mints run: now.
       const panelJob = definitions.find((d) => d.jobId.startsWith("strategy-screen:"));
@@ -674,6 +707,7 @@ describe("options copilot stage control (#4066)", () => {
       const runId = panelJob!.jobId.slice("strategy-screen:".length);
       const controlled = await controlOptionsStage({
         sql,
+        env: { AGENT_DB: d1 },
         storage,
         runId,
         stage: "screen",
@@ -691,9 +725,10 @@ describe("options copilot stage control (#4066)", () => {
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: makeChain("AAPL") });
     try {
       const { sql, storage } = makeDoStorage();
+      const d1 = new MockD1Database();
       const result = await runOptionsStrategyScreenViaDoor(
         {
-          env: {} as never,
+          env: { AGENT_DB: d1 } as never,
           orm: {} as never,
           storage: storage as never,
           createEtradeService: () => fakeEtrade() as never,
@@ -708,7 +743,7 @@ describe("options copilot stage control (#4066)", () => {
       );
       expect(result.status).toBe("ranked_opportunities");
       expect(result.count).toBeGreaterThan(0);
-      const stores = optionsEngineStoresFromSql(sql);
+      const stores = optionsEngineStoresFromSql(sql, { AGENT_DB: d1 });
       const definitions = await stores.stores.definitions.listDefinitions();
       // Issue #4271: the scan is a strategy screen, so its job is the
       // strategy job (strategy-screen:<runId>), not the options job.
@@ -718,6 +753,7 @@ describe("options copilot stage control (#4066)", () => {
       const runId = scanJob!.jobId.slice("strategy-screen:".length);
       const controlled = await controlOptionsStage({
         sql,
+        env: { AGENT_DB: d1 },
         storage,
         runId,
         stage: "screen",
@@ -741,8 +777,9 @@ describe("options copilot stage control (#4066)", () => {
       );
       expect(paid.contracts.length).toBeGreaterThan(0);
       const { sql, storage } = makeDoStorage();
+      const d1 = new MockD1Database();
       const runId = "control-manual:paid-parity";
-      const outcome = await dispatchManual(sql, storage, runId);
+      const outcome = await dispatchManual(sql, storage, runId, d1);
       expect(outcome.outcome).toBe("completed");
       const manual = await storage.get<{ result?: { contracts?: unknown[] } }>(
         `options:${runId}:screen`,

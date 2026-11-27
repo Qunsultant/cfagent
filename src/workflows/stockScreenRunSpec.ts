@@ -148,6 +148,12 @@ export interface StockScreenRunSpec extends StockScreenRunProvenance {
   deliver: boolean;
   filters: StockScreenerFilter;
   universe: string;
+  /**
+   * Issue #6682: explicit tickers the run screens (the request's
+   * symbols envelope). Present ⇒ the command carries a symbols shard
+   * and the feed fetches exactly these; absent ⇒ universe-scoped.
+   */
+  symbols?: string[];
   minScore?: number;
   asyncRequested: boolean;
   delivery: StockScreenDelivery;
@@ -301,6 +307,7 @@ export function buildStockScreenRunSpec(args: {
       deliver: args.source === "etrade",
       filters,
       universe,
+      ...(parsedScreen.value.symbols !== undefined ? { symbols: parsedScreen.value.symbols } : {}),
       ...(minScore !== undefined ? { minScore } : {}),
       asyncRequested: args.asyncRequested,
       delivery,
