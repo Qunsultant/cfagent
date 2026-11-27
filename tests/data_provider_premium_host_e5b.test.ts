@@ -55,6 +55,7 @@ vi.mock("../src/services/providerConnections", async (importOriginal) => {
 
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 // #5609 (G-7): the premium routes resolve their price from the
 // catalogue (getApprovedPremiumPrice). This suite binds no D1, so
 // the catalogue resolves from the approved in-memory fixture —
@@ -84,9 +85,9 @@ import {
 } from "../src/trading/dataProviders/providerConfigStore";
 import {
   listCapturesByProvider,
-  listCapturesByRun,
 } from "../src/trading/dataProviders/captureStore";
 import { listScheduledReports } from "../src/services/scheduledReports";
+import { createProviderCaptureAdapter } from "../src/data/createProviderCapturePorts";
 import type { Env } from "../src/types";
 
 const LOGIN = "e5b_premium_trader";
@@ -111,6 +112,9 @@ function optionsEnv() {
   return {
     APP_NAME: "cfagent-test",
     APP_BASE_URL: "https://agent.openaimp.com",
+    // #6101 step 8: the canonical seam writes D1 agent_reports, so
+    // the host env binds a fresh MockD1Database per test.
+    AGENT_DB: new MockD1Database() as any,
     SESSION_SECRET: "e5b-session-secret",
     GITHUB_CLIENT_ID: "gh_id",
     GITHUB_CLIENT_SECRET: "e5b-github-secret",
@@ -260,6 +264,25 @@ async function runPaidScan(ctx: PremiumRouteContext, login: string = LOGIN) {
   return response!;
 }
 
+/**
+ * #6101 step 8: with AGENT_DB bound, buildDataProviderPorts hands
+ * the service a D1 capture adapter, so the scan's chain fetches land
+ * in D1 agent_data_captures (tenant "primary" — no IAAA_TENANT_ID
+ * is set on this env), not the DO capture store. Read them back
+ * through the same port the service wrote through.
+ */
+async function d1CapturesByProvider(env: Env) {
+  const adapter = createProviderCaptureAdapter(env as any);
+  expect(adapter).not.toBeNull();
+  return adapter!.listCapturesByProvider("primary", "etrade");
+}
+
+async function d1CapturesByRun(env: Env, runId: string) {
+  const adapter = createProviderCaptureAdapter(env as any);
+  expect(adapter).not.toBeNull();
+  return adapter!.listCapturesByRun("primary", runId);
+}
+
 // ---------------------------------------------------------------------------
 // (a) + (b): on-platform paid scans
 // ---------------------------------------------------------------------------
@@ -295,7 +318,7 @@ describe("premium options-scan on-platform (issue #1206)", () => {
     expect(body.screenResult.matchedCount).toBeGreaterThan(0);
 
     // The fetches were captured on-platform, under ONE run id.
-    const captures = listCapturesByProvider(sql as any, "primary", "etrade");
+    const captures = await d1CapturesByProvider(env);
     expect(captures.length).toBeGreaterThan(0);
     expect(captures.every((c) => c.capability === "optionsChains")).toBe(true);
     expect(captures.every((c) => c.status === "captured")).toBe(true);
@@ -305,12 +328,12 @@ describe("premium options-scan on-platform (issue #1206)", () => {
     expect(typeof runId).toBe("string");
     expect(runId.length).toBeGreaterThan(0);
     // The capture store's run read returns exactly the scan's rows.
-    expect(listCapturesByRun(sql as any, "primary", runId)).toHaveLength(
+    expect(await d1CapturesByRun(env, runId)).toHaveLength(
       captures.length
     );
 
     // Canonical persistence still happens in the route, as before.
-    const reports = listScheduledReports(sql as never, {
+    const reports = await listScheduledReports(env as never, {
       sourceFilter: "options_scanner",
     });
     expect(reports).toHaveLength(1);
@@ -347,7 +370,7 @@ describe("premium options-scan on-platform (issue #1206)", () => {
     expect(body.success).toBe(true);
     expect(body.screenResult.matchedCount).toBeGreaterThan(0);
 
-    const captures = listCapturesByProvider(sql as any, "primary", "etrade");
+    const captures = await d1CapturesByProvider(env);
     expect(captures.length).toBeGreaterThan(0);
     expect(captures.every((c) => c.capability === "optionsChains")).toBe(true);
     expect(new Set(captures.map((c) => c.runId)).size).toBe(1);
@@ -386,7 +409,7 @@ describe("premium options-scan unpaid preservation (issue #1206)", () => {
       0
     );
     expect(
-      listScheduledReports(sql as never, { sourceFilter: "options_scanner" })
+      await listScheduledReports(env as never, { sourceFilter: "options_scanner" })
     ).toHaveLength(0);
   });
 });

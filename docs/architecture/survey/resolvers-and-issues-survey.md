@@ -362,7 +362,7 @@ Name | file:line | signature (definition's first line; multi-line signatures tru
 - resolveQueueScheduleDefaultSection | src/config/scheduleSections.ts:183 | export function resolveQueueScheduleDefaultSection(
 - resolveScheduleSourceFilters | src/config/scheduleSourceModes.ts:143 | export function resolveScheduleSourceFilters(
 - resolveJobSubset | src/config/vocabulary.ts:414 | export function resolveJobSubset(
-- resolveLinkedJobRunId | src/data/runLedgerProjection.ts:92 | export function resolveLinkedJobRunId(
+- resolveLinkedJobRunId | src/services/scheduledReports.ts:720 | export function resolveLinkedJobRunId(
 - resolveJobPipelineControlObservers | src/observability/otelJobPipelineObservers.ts:190 | export function resolveJobPipelineControlObservers(
 - resolvePendingScheduleApproval | src/services/agentScheduleCapability.ts:529 | export function resolvePendingScheduleApproval(
 - resolveAnalyzeJob | src/services/analyzePipelineJobs.ts:141 | export function resolveAnalyzeJob(
@@ -547,7 +547,7 @@ Name | file:line | signature (definition's first line; multi-line signatures tru
 - resolveRunContext | src/data/providerCapturePorts.ts:232 | export function resolveRunContext(
 - resolveOrphanSweepDelete | src/data/retention1766.ts:106 | export function resolveOrphanSweepDelete(raw: unknown): boolean {
 - resolveSnapshotEnabled | src/data/retention1766.ts:198 | export function resolveSnapshotEnabled(raw: unknown): boolean {
-- resolveReportLink | src/data/runLedgerProjection.ts:115 | async function resolveReportLink(
+- resolveReportLink | src/services/scheduledReports.ts:743 | async function resolveReportLink(
 - resolveScanBackfillLinkage | src/data/scanRunPorts.ts:104 | export function resolveScanBackfillLinkage(
 - resolveStatementText | src/data/schemaComponent/executor.ts:66 | export function resolveStatementText(
 - resolveRecreatePlan | src/data/schemaComponent/recreateRunner.ts:393 | export function resolveRecreatePlan(): RecreatePlan {

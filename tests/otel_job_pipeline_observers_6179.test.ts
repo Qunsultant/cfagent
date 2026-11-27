@@ -13,6 +13,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
+import { MockD1Database } from "./mock-d1";
 import { TracerProvider, SimpleSpanProcessor, InMemorySpanExporter } from "@opentelemetry/sdk-trace";
 import { ensureOtelContextManager } from "../src/observability/otelTraces";
 
@@ -390,7 +391,8 @@ describe("runOptionsScreenViaEngine with the otel seam (#6179)", () => {
   it("a wired screen writes exactly one ledger row for its run id (no duplicates)", async () => {
     const runId = "options-engine-otel:4";
     const sql = new SqliteTestStorage();
-    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage);
+    const d1 = new MockD1Database();
+    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage, { AGENT_DB: d1 });
     const { ports } = stubPorts();
     const { otel, settled } = recordingOtel();
     const outcome = await runOptionsScreenViaEngine(

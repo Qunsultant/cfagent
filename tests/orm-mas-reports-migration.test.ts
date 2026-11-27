@@ -19,6 +19,7 @@
 import { describe, it, expect } from "vitest";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 
 const LEGACY_MAS_REPORTS_COLS = [
   { name: "id", type: "TEXT", pk: 1 },
@@ -177,12 +178,14 @@ describe("mas_reports migration (issue #389)", () => {
     expect(() => orm.initializeSchema("legacy_do_session")).not.toThrow();
   });
 
-  it("storeCanonicalReport works through the migrated table, idempotent on generation id", () => {
+  it("storeCanonicalReport works through the migrated table, idempotent on generation id", async () => {
     const sql = new LegacyMasReportsSql();
     const orm = new DatabaseORM(sql);
     orm.initializeSchema("legacy_do_session");
+    // #6101: the door is async now and lands in D1.
+    const d1 = new MockD1Database();
 
-    const first = orm.storeCanonicalReport({
+    const first = await orm.storeCanonicalReport({
       runId: "run-new",
       generationId: "gen-1",
       title: "New report",
@@ -190,11 +193,11 @@ describe("mas_reports migration (issue #389)", () => {
       summary: "after migration",
       body: { key: "value" },
       userLogin: "tenant@example.com",
-    });
+    } as any, { AGENT_DB: d1 } as any);
     expect(first).not.toBeNull();
     expect(first?.created).toBe(true);
 
-    const second = orm.storeCanonicalReport({
+    const second = await orm.storeCanonicalReport({
       runId: "run-new",
       generationId: "gen-1",
       title: "New report",
@@ -202,7 +205,7 @@ describe("mas_reports migration (issue #389)", () => {
       summary: "after migration",
       body: { key: "value" },
       userLogin: "tenant@example.com",
-    });
+    } as any, { AGENT_DB: d1 } as any);
     expect(second).not.toBeNull();
     expect(second?.created).toBe(false);
     expect(second?.reportId).toBe(first?.reportId);

@@ -1549,7 +1549,7 @@ async function readStoredScreenBodies(
 ): Promise<StoredScreenBody[]> {
   let hits: ScheduledReportHit[];
   try {
-    hits = listScheduledReports(ctx.ensureTables(), {
+    hits = await listScheduledReports(ctx.env, {
       userLogin,
       sourceFilter: "screener",
       limit: 100,

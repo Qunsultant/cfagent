@@ -115,8 +115,50 @@ import {
 } from "../src/agents/orchestrator/scheduledTasksCopilot";
 import { TradingPlatformRegistry } from "../src/trading";
 import { InMemoryCommercialAdapter } from "../src/data/inMemoryCommercialAdapter";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
 import { BROKER_ENVIRONMENT_SETTING_KEY } from "../src/agents/routes/brokerEnvironment";
+
+/** Minimal D1Database stand-in over node:sqlite (the #6101 double). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: { changes: info.changes, last_row_id: info.lastInsertRowid },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+}
+
+/** The D1 run-ledger store over one mock binding (#6101). */
+function ledgerD1(d1: MockD1Database) {
+  return new D1JobRunRecordStore(createD1JobRunRecordDb(d1 as unknown as D1Database));
+}
 
 class SqliteTestStorage {
   readonly sqlite = new DatabaseSync(":memory:");
@@ -140,6 +182,9 @@ async function emptyCommercial(): Promise<InMemoryCommercialAdapter> {
 async function runDeclaredHandler(
   sql: SqliteTestStorage,
   audits: Array<{ type: string; payload: Record<string, unknown> }>,
+  // Issue #6101 — the firing records its ledger row in D1: the
+  // handler resolves the store from env.AGENT_DB.
+  d1: MockD1Database,
 ) {
   const settings = new Map<string, string>([
     ["stock_copilot:sessions", "pre_market,regular,after_hours,exto"],
@@ -150,6 +195,7 @@ async function runDeclaredHandler(
     env: {
       STOCK_COPILOT_PAPER_ENABLED: "1",
       STOCK_COPILOT_AROUND_THE_CLOCK: "true",
+      AGENT_DB: d1,
     } as any,
     agentCtx: { storage: { sql: sql as any } } as any,
     getScreenerExecutionContext: async () => ({
@@ -185,6 +231,7 @@ afterEach(() => {
 describe("Issue #4001 — a firing whose setup throws still leaves a trace", () => {
   it("a platform-construction throw records a failure ledger row for the cycle", async () => {
     const sql = new SqliteTestStorage();
+    const d1 = new MockD1Database();
     const audits: Array<{ type: string; payload: Record<string, unknown> }> =
       [];
     vi.spyOn(TradingPlatformRegistry, "getPlatform").mockImplementation(
@@ -195,9 +242,9 @@ describe("Issue #4001 — a firing whose setup throws still leaves a trace", () 
     // The handler catches internally (it never throws out), so the
     // firing "completes" — the question is only whether it left a
     // trace.
-    await runDeclaredHandler(sql, audits);
-    const store = new SqlJobRunRecordStore(sql as any);
-    const rows = store.listByJob(STOCK_COPILOT_TASK_ID);
+    await runDeclaredHandler(sql, audits, d1);
+    const store = ledgerD1(d1);
+    const rows = await store.listByJob(STOCK_COPILOT_TASK_ID);
     expect(rows.length).toBe(1);
     expect(rows[0].outcome).toBe("failure");
     expect(rows[0].error).toMatch(/not registered/);
@@ -209,11 +256,12 @@ describe("Issue #4001 — a firing whose setup throws still leaves a trace", () 
 
   it("a successful firing records exactly one ledger row (no double-recording)", async () => {
     const sql = new SqliteTestStorage();
+    const d1 = new MockD1Database();
     const audits: Array<{ type: string; payload: Record<string, unknown> }> =
       [];
-    await runDeclaredHandler(sql, audits);
-    const store = new SqlJobRunRecordStore(sql as any);
-    const rows = store.listByJob(STOCK_COPILOT_TASK_ID);
+    await runDeclaredHandler(sql, audits, d1);
+    const store = ledgerD1(d1);
+    const rows = await store.listByJob(STOCK_COPILOT_TASK_ID);
     expect(rows.length).toBe(1);
     expect(rows[0].outcome).not.toBe("failure");
     expect(

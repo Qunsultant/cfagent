@@ -28,6 +28,8 @@ import {
 import { McpToolFactory } from "../src/mcps/openaimp/commands";
 import { resolveToolScope } from "../src/mcps/openaimp/mcpPermissionPorts";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import { createJobRunRecordAdapter } from "../src/data/createJobRunRecordPorts";
 
 function order(overrides: Record<string, any> = {}) {
   return {
@@ -241,25 +243,27 @@ describe("#3883 — cancelling one order", () => {
 });
 
 describe("#3883 — the ledger records every cancel", () => {
-  function ledgerRows(sql: MockSqlStorage): any[] {
-    return Array.from(sql.exec("SELECT * FROM mas_job_outcomes") as any);
+  // #6101: the cancel folds onto the D1 run ledger; read it back
+  // from D1 (the DO mas_job_outcomes table receives no new writes).
+  async function latestRun(d1: MockD1Database, jobId: string) {
+    return createJobRunRecordAdapter({ AGENT_DB: d1 } as never)!.latestByJob(jobId);
   }
 
   it("records a confirmed cancel as order:<id> with outcome cancelled and the broker status", async () => {
     const sql = new MockSqlStorage();
+    const d1 = new MockD1Database();
     const receipt = await cancelSingleOrder(port({ orders: { "ord-1": order() } }), { orderId: "ord-1" });
-    recordCancelOutcome(sql, receipt, "alpaca_cancel_order", { ALPACA_TRADING_TYPE: "paper" } as any);
+    await recordCancelOutcome(sql, receipt, "alpaca_cancel_order", { ALPACA_TRADING_TYPE: "paper", AGENT_DB: d1 } as any);
 
-    const rows = ledgerRows(sql);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      id: "order:ord-1",
-      kind: "trading",
-      status: "completed",
+    const row = await latestRun(d1, "order:ord-1");
+    expect(row).toBeDefined();
+    expect(row).toMatchObject({
+      jobId: "order:ord-1",
+      operation: "trading",
+      outcome: "success",
       origin: "alpaca_cancel_order",
     });
-    const delivery = JSON.parse(rows[0].delivery_json);
-    expect(delivery).toMatchObject({ action: "cancel", outcome: "cancelled", brokerStatus: "canceled", broker: "alpaca" });
+    expect(row!.deliveryStates).toMatchObject({ action: "cancel", outcome: "cancelled", brokerStatus: "canceled", broker: "alpaca" });
   });
 
   it("records a refused cancel as failed with its code", async () => {
@@ -267,10 +271,12 @@ describe("#3883 — the ledger records every cancel", () => {
     const receipt = await cancelSingleOrder(port({ orders: { "ord-1": order({ status: "filled" }) } }), {
       orderId: "ord-1",
     });
-    recordCancelOutcome(sql, receipt, "alpaca_cancel_order", {} as any);
-    const rows = ledgerRows(sql);
-    expect(rows[0]).toMatchObject({ id: "order:ord-1", status: "failed", coded_error: "cancel_not_possible" });
-    expect(JSON.parse(rows[0].delivery_json).outcome).toBe("cancel_failed");
+    const d1 = new MockD1Database();
+    await recordCancelOutcome(sql, receipt, "alpaca_cancel_order", { AGENT_DB: d1 } as any);
+    const row = await latestRun(d1, "order:ord-1");
+    expect(row).toBeDefined();
+    expect(row).toMatchObject({ jobId: "order:ord-1", outcome: "failure", codedError: "cancel_not_possible" });
+    expect(row!.deliveryStates.outcome).toBe("cancel_failed");
   });
 });
 

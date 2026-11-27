@@ -19,6 +19,8 @@ import { resolveTradingLimits } from "../src/trading";
 import { McpToolFactory } from "../src/mcps/openaimp/commands";
 import { resolveToolScope } from "../src/mcps/openaimp/mcpPermissionPorts";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import { createJobRunRecordAdapter } from "../src/data/createJobRunRecordPorts";
 import { stubBroker, simpleOrder } from "./cancelTestPort";
 
 function limitsWith(cancelMaxCount: number | null, symbol?: string) {
@@ -152,20 +154,20 @@ describe("#3884 — the cancel cap (#3888)", () => {
 });
 
 describe("#3884 — records and surfaces", () => {
-  function ledgerRows(sql: MockSqlStorage): any[] {
-    return Array.from(sql.exec("SELECT * FROM mas_job_outcomes") as any);
-  }
-
   it("records ONE cancel_ticker run with the real counts", async () => {
     const sql = new MockSqlStorage();
     const broker = stubBroker([simpleOrder({ id: "a1" }), simpleOrder({ id: "a2", __refuse: true })]);
     const receipt = await cancelTickerOrders(broker, { symbol: "AAPL" });
-    recordScopedCancelOutcome(sql, receipt, "alpaca_cancel_ticker", { ALPACA_TRADING_TYPE: "paper" } as any, "cancel_ticker:test");
+    // #6101: the cancel outcome folds onto D1 (recordScopedCancelOutcome
+    // threads env through); the read-back is the D1 run record.
+    const d1 = new MockD1Database();
+    await recordScopedCancelOutcome(sql, receipt, "alpaca_cancel_ticker", { ALPACA_TRADING_TYPE: "paper", AGENT_DB: d1 } as any, "cancel_ticker:test");
 
-    const rows = ledgerRows(sql);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ id: "order:cancel_ticker:test", kind: "trading", status: "failed", scanned: 2, matched: 1 });
-    expect(JSON.parse(rows[0].delivery_json)).toMatchObject({ action: "cancel_ticker", outcome: "cancel_failed", symbol: "AAPL" });
+    const store = createJobRunRecordAdapter({ AGENT_DB: d1 });
+    const row = await store!.latestByJob("order:cancel_ticker:test");
+    expect(row).toBeDefined();
+    expect(row).toMatchObject({ jobId: "order:cancel_ticker:test", operation: "trading", outcome: "failure", scanned: 2, matched: 1 });
+    expect(row!.deliveryStates).toMatchObject({ action: "cancel_ticker", outcome: "cancel_failed", symbol: "AAPL" });
   });
 
   it("the tool is registered on the trade scope and declares the shared filter", () => {

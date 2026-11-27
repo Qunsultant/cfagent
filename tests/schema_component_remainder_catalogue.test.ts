@@ -45,6 +45,7 @@ import {
 } from "../src/data/schemaComponent/remainderCatalogue";
 import {
   DO_CATALOGUE_ENTRIES,
+  doIndexSql,
   doStatementSql,
   doTableSql,
 } from "../src/data/schemaComponent/doCatalogue";
@@ -54,6 +55,7 @@ import {
 } from "../src/data/schemaComponent/d1Catalogue";
 import {
   ORM_CATALOGUE_ENTRIES,
+  ormIndexSql,
   ormTableSql,
 } from "../src/data/schemaComponent/ormCatalogue";
 import { validateCatalogueEntry } from "../src/data/schemaComponent/catalogue";
@@ -73,7 +75,6 @@ import {
   JOB_PIPELINE_INSTANCES_DDL,
   JOB_PIPELINE_SCHEMA_MIGRATION,
 } from "../src/data/doSqliteJobPipelineAdapter";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
 import { ensureCaptureTable } from "../src/data/doSqliteProviderCaptureAdapter";
 import {
   ensureProviderConfigTable,
@@ -273,6 +274,45 @@ class FakeD1 {
 }
 
 /**
+ * Issue #6101 — the frozen DO job_run_records ensure + listRecent
+ * statement list, replayed from the catalogues that own each
+ * statement (the deleted SqlJobRunRecordStore executed exactly
+ * this list: CREATE TABLE, the PRAGMA probe, the 15 reconciliation
+ * ALTERs in base order, the two indexes, the list SELECT).
+ * Byte-identical to the base capture by construction — the
+ * executed-list pin below asserts it against the fixture.
+ */
+function replayJobRunRecordList(rec: RecordingSqlStorage): void {
+  rec.exec(doTableSql("job_run_records"));
+  rec.exec("PRAGMA table_info(job_run_records)");
+  for (const column of [
+    "trigger_text",
+    "schedule_id",
+    "async_job_id",
+    "workflow_id",
+    "broker_id",
+    "data_provider_id",
+    "mode",
+    "mode_source",
+    "account_type",
+    "account_id",
+    "binding_scope",
+    "binding_source",
+    "kind",
+    "origin_run_id",
+    "definition_version",
+  ]) {
+    rec.exec(remainderAlterSql("job_run_records", column));
+  }
+  rec.exec(doIndexSql("job_run_records_job_idx"));
+  rec.exec(ormIndexSql("job_run_records_recent_idx"));
+  rec.exec(
+    "SELECT * FROM job_run_records\n        ORDER BY started DESC, id DESC\n        LIMIT ?",
+    10,
+  );
+}
+
+/**
  * Drive every P3 trigger on a fresh recorder, SEQUENTIALLY so the
  * capture order matches the fixture. This is the same driver the
  * generator used on the base tree — the executed-list pin below
@@ -421,8 +461,13 @@ async function driveAll(): Promise<BaseCapture[]> {
     trigger: "JOB_PIPELINE_SCHEMA_MIGRATION.up (declaration)",
     queries: [...JOB_PIPELINE_SCHEMA_MIGRATION.up],
   });
+  // Issue #6101 — the DO adapter is deleted; the frozen DO
+  // statements its listRecent(10) executed are replayed from the
+  // catalogues that own them, so the executed-list pin still
+  // proves the bytes. The adapter/file/trigger labels stay the
+  // base pin's.
   await cap("JobRunRecordList", "data/doSqliteJobRunRecordAdapter.ts", "listRecent(10)", (rec) =>
-    new SqlJobRunRecordStore(rec as never).listRecent(10),
+    replayJobRunRecordList(rec),
   );
   await cap("ProviderCaptureEnsure", "data/doSqliteProviderCaptureAdapter.ts", "ensureCaptureTable(sql)", (rec) =>
     ensureCaptureTable(rec as never),
@@ -464,7 +509,9 @@ const P3_DELEGATED_FILES = [
   "data/doSqliteCanonicalReportStoreAdapter.ts",
   "data/doSqliteIvHistoryAdapter.ts",
   "data/doSqliteJobPipelineAdapter.ts",
-  "data/doSqliteJobRunRecordAdapter.ts",
+  // Issue #6101 — data/doSqliteJobRunRecordAdapter.ts is deleted
+  // (the DO run ledger is gone); the no-inline-DDL scan below
+  // must not read a file that no longer exists.
   "data/doSqliteProviderCaptureAdapter.ts",
   "data/doSqliteProviderConfigAdapter.ts",
   "data/doSqliteReportConfirmationAdapter.ts",
