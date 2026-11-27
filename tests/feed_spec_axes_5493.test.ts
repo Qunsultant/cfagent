@@ -152,6 +152,8 @@ describe("5493-P01 the feed spec declares its axes and parameters", () => {
     expect([...byName.keys()]).toEqual([
       "feedJobId",
       "universe",
+      // Issue #6682 — explicit symbols are a declared run input.
+      "symbols",
       "sources",
       "dataset",
       "shards",

@@ -243,7 +243,7 @@ export interface FeedPipelineDoorLike {
   cancelPipelineChainStage(jobId: string, stage: string): Promise<JobInstanceRecord>;
   runPipelineJob(
     jobId: string,
-    opts?: { userLogin?: string },
+    opts?: { userLogin?: string; runInputs?: Record<string, unknown> },
   ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
   pausePipelineJob(jobId: string): Promise<JobInstanceRecord>;
   resumePipelineJob(
@@ -578,6 +578,19 @@ function outcomeRefusalCode(error: string | undefined): string | null {
  * else ⇒ the 409 FEED_JOB_ACTION_REFUSED the sibling feed-job
  * action route already answers control-plane refusals with.
  */
+/**
+ * Issue #6682 — the dispatch run inputs a feed-run request carries:
+ * the JSON body object verbatim (the carrier's binder validates and
+ * refuses undeclared keys by name). No body / a non-object body ⇒ no
+ * inputs, and the job's own definition runs.
+ */
+async function readRunInputs(request: Request): Promise<Record<string, unknown> | undefined> {
+  const body = (await request.json().catch(() => undefined)) as unknown;
+  return typeof body === "object" && body !== null && !Array.isArray(body)
+    ? (body as Record<string, unknown>)
+    : undefined;
+}
+
 function feedRunRefusalResponse(code: string | null, message: string): Response {
   if (code === "FEED_JOB_NOT_CONFIGURED") {
     return Response.json(
@@ -1140,6 +1153,10 @@ export async function handleDataProviderRoutes(
       try {
         outcome = await door.runPipelineJob(def.id, {
           userLogin: ctx.userLogin,
+          // Issue #6682 — the request body carries the run inputs
+          // (universe/symbols/sources/…); the carrier binds them and
+          // refuses undeclared keys by name. No body ⇒ no inputs.
+          runInputs: await readRunInputs(request),
         });
       } catch (error) {
         // The control plane refuses by name (already running, not
@@ -1350,7 +1367,10 @@ export async function handleDataProviderRoutes(
       try {
         const result =
           action === "run"
-            ? await door.runPipelineJob(jobId, { userLogin: ctx.userLogin })
+            ? await door.runPipelineJob(jobId, {
+                userLogin: ctx.userLogin,
+                runInputs: await readRunInputs(request),
+              })
             : action === "pause"
               ? await door.pausePipelineJob(jobId)
               : action === "resume"

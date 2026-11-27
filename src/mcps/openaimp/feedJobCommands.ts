@@ -35,23 +35,44 @@ const SOURCE_PROPERTY = {
 } as const;
 
 export class RunFeedJobCommand
-  implements IMcpToolCommand<{ source: string }>
+  implements IMcpToolCommand<{ source: string; universe?: string; symbols?: string[]; dataset?: string }>
 {
   readonly name = "run_feed_job";
   readonly description =
-    "Run a data-provider feed job now through the job pipeline (the ScheduledAgent host's control plane) and return its settled outcome plus its status. The run pulls the source's dataset through the provider port and persists it as the platform's local copy. Examples: source \"yahoo\" runs the Yahoo Nasdaq-100 quotes job; \"alpaca\", \"etrade\", \"public\" run those providers' quotes jobs; \"nasdaq100\" refreshes the stored Nasdaq-100 universe; \"sp100\" runs Yahoo quotes over the S&P 100; \"fundamentals\" runs the Yahoo fundamentals job; \"technicals\" runs the Yahoo technicals job (persisted daily bars for enrich RSI/MACD/ATR and the screener UX); \"sentiment\" runs the Yahoo sentiment job (persisted news sentiment for enrich and the screener UX). Requires the chat turn's acting identity.";
+    "Run a data-provider feed job now through the job pipeline (the ScheduledAgent host's control plane) and return its settled outcome plus its status. The run pulls the source's dataset through the provider port and persists it as the platform's local copy. Examples: source \"yahoo\" runs the Yahoo Nasdaq-100 quotes job; \"alpaca\", \"etrade\", \"public\" run those providers' quotes jobs; \"nasdaq100\" refreshes the stored Nasdaq-100 universe; \"sp100\" runs Yahoo quotes over the S&P 100; \"fundamentals\" runs the Yahoo fundamentals job; \"technicals\" runs the Yahoo technicals job (persisted daily bars for enrich RSI/MACD/ATR and the screener UX); \"sentiment\" runs the Yahoo sentiment job (persisted news sentiment for enrich and the screener UX). Optional run inputs (#6682): universe (the stored list a parameterized job pulls), symbols (explicit tickers — the fetch set is exactly these), dataset. Requires the chat turn's acting identity.";
   readonly jsonSchema = {
     type: "object" as const,
-    properties: { source: SOURCE_PROPERTY },
+    properties: {
+      source: SOURCE_PROPERTY,
+      universe: { type: "string", description: "Run input: the stored universe list a parameterized feed job pulls (e.g. nasdaq100, sp100)." },
+      symbols: { type: "array", items: { type: "string" }, description: "Run input: explicit tickers; the pull fetches exactly these symbols." },
+      dataset: { type: "string", description: "Run input: the dataset to pull (quotes, fundamentals, historicalBars, news, optionsChains, screenUniverse)." },
+    },
     required: ["source"],
   };
   readonly zodSchema = z.object({
     source: z.string().min(1).describe("Feed job source or name"),
+    universe: z.string().min(1).optional(),
+    symbols: z.array(z.string().min(1)).optional(),
+    dataset: z.string().min(1).optional(),
   });
 
-  async execute(input: { source: string }, context: McpToolContext) {
+  async execute(
+    input: { source: string; universe?: string; symbols?: string[]; dataset?: string },
+    context: McpToolContext,
+  ) {
     const actingLogin = context.actingLogin?.();
-    const result = await runFeedJobViaDoor(context.env, actingLogin, input.source);
+    const runInputs: Record<string, unknown> = {
+      ...(input.universe !== undefined ? { universe: input.universe } : {}),
+      ...(input.symbols !== undefined ? { symbols: input.symbols } : {}),
+      ...(input.dataset !== undefined ? { dataset: input.dataset } : {}),
+    };
+    const result = await runFeedJobViaDoor(
+      context.env,
+      actingLogin,
+      input.source,
+      Object.keys(runInputs).length > 0 ? runInputs : undefined,
+    );
     context.audit("mcp.tool_called", "orchestrator", {
       tool: this.name,
       jobId: result.jobId,
