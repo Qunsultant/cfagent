@@ -58,7 +58,6 @@ import type { Env, ShardChainContext } from "../types";
 import type { JobNodeConfig } from "../data/jobPipelinePorts";
 import { createJobPipelineStoresFromD1 } from "../data/createJobPipelinePorts";
 import type { ScheduledTasksPipelineContext } from "../agents/scheduledTasksPipeline";
-import { pipelineSql } from "../agents/scheduledTasksPipeline";
 import { SHARED_ORCHESTRATOR_INSTANCE } from "../security/serviceIdentity";
 import {
   DynamicOptionsScreener,
@@ -98,7 +97,6 @@ import {
 import { optionsArtifactKey } from "../workflows/optionsScreenPorts";
 import { createScannerScreenPorts } from "../workflows/strategyScreenPorts";
 import {
-  optionsEngineStoresFromSql,
   runStrategyScreenViaEngine,
   type OptionsEngineStores,
 } from "../workflows/optionsScreenEngine";
@@ -311,14 +309,22 @@ export function optionsChainStepDepsForWorkflow(env: Env): OptionsChainStepDeps 
   };
 }
 
-/** The production step deps for the ScheduledAgent residency (the agent's SQL is the engine home). */
+/** The production step deps for the ScheduledAgent residency (D1 engine stores, env-bound seams). */
 export function optionsChainStepDepsForScheduledAgent(
   ctx: ScheduledTasksPipelineContext,
 ): OptionsChainStepDeps {
   const env = ctx.env;
+  if (!env.AGENT_DB) {
+    throw new Error(
+      "job_stores_unavailable: the ScheduledAgent options-chain steps need the AGENT_DB binding for their D1 engine stores — refusing an unwired chain residency.",
+    );
+  }
   return {
     env,
-    engineStores: optionsEngineStoresFromSql(pipelineSql(ctx)),
+    engineStores: {
+      stores: createJobPipelineStoresFromD1(env.AGENT_DB),
+      runRecorder: chainJobRunRecorderFromD1(env.AGENT_DB),
+    },
     queue: stageQueueSendFromEnv(env),
     chainSourceFor: (args) => resolveChainSourceForRequest(env, args),
     blobPut: defaultBlobPut(env),

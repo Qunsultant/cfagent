@@ -5,8 +5,8 @@
  * - the enrich → analyze hand-off: a recorded enrich completion
  *   dispatches the analyze job consuming it, on the host's own
  *   control plane (a run record lands — here the run refuses
- *   ANALYZE_JOB_NOT_CONFIGURED BY NAME, because this host context
- *   has no AGENT_DB, so the enriched/analyzed stores are unbound);
+ *   ANALYZE_INPUT_MISSING BY NAME, because this D1-bound host
+ *   context has no usable enriched dataset);
  * - the hand-off is selective: failed enrich runs, unknown jobs,
  *   feed completions (they map to enrich, not analyze), and
  *   analyze jobs' own completions dispatch nothing (no cascade,
@@ -22,9 +22,12 @@ import {
   type PipelineCompletionNote,
   type ScheduledTasksPipelineContext,
 } from "../src/agents/scheduledTasksPipeline";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
-import type { SqlStorage } from "../src/orm";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
 import type { Env } from "../src/types";
+import { MockD1Database } from "./mock-d1";
 
 /** The node:sqlite DO-storage double (tests/feed_pipeline_host_3543 idiom). */
 class SqliteTestStorage {
@@ -41,6 +44,7 @@ class SqliteTestStorage {
 
 function makeHostContext(env: Partial<Env> = {}) {
   const sql = new SqliteTestStorage();
+  const d1 = new MockD1Database();
   const kv = new Map<string, unknown>();
   const agentCtx = {
     storage: {
@@ -52,10 +56,10 @@ function makeHostContext(env: Partial<Env> = {}) {
     },
   };
   const ctx = {
-    env: env as Env,
+    env: { AGENT_DB: d1 as unknown as Env["AGENT_DB"], ...env } as Env,
     agentCtx: agentCtx as unknown as ScheduledTasksPipelineContext["agentCtx"],
   } satisfies ScheduledTasksPipelineContext;
-  return { ctx, sql };
+  return { ctx, sql, d1 };
 }
 
 const ENRICH_ID = "yahoo-nasdaq100-quotes-enrich";
@@ -73,14 +77,14 @@ function note(overrides: Partial<PipelineCompletionNote> = {}): PipelineCompleti
 }
 
 async function pollRecords(
-  sql: SqliteTestStorage,
+  d1: MockD1Database,
   jobId: string,
-): Promise<ReturnType<SqlJobRunRecordStore["listByJob"]>> {
-  const store = new SqlJobRunRecordStore(sql as unknown as SqlStorage);
-  let records = store.listByJob(jobId, 5);
+): Promise<Awaited<ReturnType<D1JobRunRecordStore["listByJob"]>>> {
+  const store = new D1JobRunRecordStore(createD1JobRunRecordDb(d1 as never));
+  let records = await store.listByJob(jobId, 5);
   for (let i = 0; i < 40 && records.length === 0; i++) {
     await new Promise((r) => setTimeout(r, 50));
-    records = store.listByJob(jobId, 5);
+    records = await store.listByJob(jobId, 5);
   }
   return records;
 }
@@ -111,43 +115,43 @@ describe("the enrich → analyze host hand-off (#3537)", () => {
   });
 
   it("a completed enrich run dispatches its analyze job on the host plane", async () => {
-    const { ctx, sql } = makeHostContext();
+    const { ctx, d1 } = makeHostContext();
     await expect(dispatchAnalyzeAfterEnrichCompletion(ctx, note())).resolves.toBeUndefined();
-    const records = await pollRecords(sql, ANALYZE_ID);
+    const records = await pollRecords(d1, ANALYZE_ID);
     expect(records).toHaveLength(1);
     expect(records[0].system).toBe("job-pipeline");
-    // No AGENT_DB ⇒ the analyze stores are unbound and the run
-    // refuses BY NAME (never a silent no-op success).
+    // D1 is bound but no usable enriched dataset exists, so the
+    // run refuses BY NAME (never a silent no-op success).
     expect(records[0].outcome).toBe("failure");
-    expect(records[0].error ?? "").toContain("ANALYZE_JOB_NOT_CONFIGURED");
+    expect(records[0].error ?? "").toContain("ANALYZE_INPUT_MISSING");
   });
 
   it("a failed enrich run dispatches nothing", async () => {
-    const { ctx, sql } = makeHostContext();
+    const { ctx, d1 } = makeHostContext();
     await dispatchAnalyzeAfterEnrichCompletion(ctx, note({ state: "failed" }));
-    const store = new SqlJobRunRecordStore(sql as unknown as SqlStorage);
+    const store = new D1JobRunRecordStore(createD1JobRunRecordDb(d1 as never));
     // Give any (incorrect) dispatch a chance to land, then assert absence.
     await new Promise((r) => setTimeout(r, 250));
-    expect(store.listByJob(ANALYZE_ID, 5)).toHaveLength(0);
+    expect(await store.listByJob(ANALYZE_ID, 5)).toHaveLength(0);
   });
 
   it("a feed job's completion maps to no analyze job", async () => {
-    const { ctx, sql } = makeHostContext();
+    const { ctx, d1 } = makeHostContext();
     await dispatchAnalyzeAfterEnrichCompletion(
       ctx,
       note({ jobId: "yahoo-nasdaq100-quotes" }),
     );
-    const store = new SqlJobRunRecordStore(sql as unknown as SqlStorage);
+    const store = new D1JobRunRecordStore(createD1JobRunRecordDb(d1 as never));
     await new Promise((r) => setTimeout(r, 250));
-    expect(store.listByJob(ANALYZE_ID, 5)).toHaveLength(0);
+    expect(await store.listByJob(ANALYZE_ID, 5)).toHaveLength(0);
   });
 
   it("an analyze job's own completion does not cascade", async () => {
-    const { ctx, sql } = makeHostContext();
+    const { ctx, d1 } = makeHostContext();
     await dispatchAnalyzeAfterEnrichCompletion(ctx, note({ jobId: ANALYZE_ID }));
-    const store = new SqlJobRunRecordStore(sql as unknown as SqlStorage);
+    const store = new D1JobRunRecordStore(createD1JobRunRecordDb(d1 as never));
     await new Promise((r) => setTimeout(r, 250));
-    expect(store.listByJob(ANALYZE_ID, 5)).toHaveLength(0);
+    expect(await store.listByJob(ANALYZE_ID, 5)).toHaveLength(0);
   });
 
   it("an unknown job's completion dispatches nothing and never throws", async () => {
