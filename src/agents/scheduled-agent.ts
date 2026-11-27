@@ -54,7 +54,6 @@ import {
 } from "../config/builtinScheduledGoals";
 import {
   buildJobRunRecord,
-  normalizeJobRunRecord,
   type JobRunRecord,
 } from "../services/jobRunRecords";
 import { newRunId } from "../services/executionTreeIds";
@@ -113,7 +112,6 @@ import type {
 import { goalToRecord, isUnchangedGoalRecord, recordToGoal } from "../services/unifiedScheduleManagement";
 import {
   fetchLedgerRuns,
-  mergeLedgerRuns,
   postLedgerRun,
 } from "../services/unifiedLedger";
 import {
@@ -503,10 +501,10 @@ export const SCHEDULED_AGENT_AUDIT_ACTOR = "scheduled-agent";
 
 /**
  * Issue #3122 — the DO storage key for pending agent-schedule
- * approvals (goal kind). Same KV-list pattern as goals / ticks /
- * jobRunRecords on this DO; the orchestrator DO keeps its own
- * pending approvals in its sql table (same port shape, separate
- * instance — each DO decides only its own approvals).
+ * approvals (goal kind). Same KV-list pattern as goals / ticks on
+ * this DO; the orchestrator DO keeps its own pending approvals in
+ * its sql table (same port shape, separate instance — each DO
+ * decides only its own approvals).
  */
 export const PENDING_SCHEDULE_APPROVALS_KEY = "pendingScheduleApprovals";
 
@@ -565,7 +563,10 @@ export class ScheduledAgent extends PortThink {
    * Issue #3121 Phase 2 (#3123) — the ledger post function for the
    * shared orchestrator instance (the same stub channel as the
    * goal-lifecycle audit sink), or null when the host binds no
-   * ORCHESTRATOR_AGENT. A null post keeps the legacy KV ledger.
+   * ORCHESTRATOR_AGENT. Issue #6101 (step 9, Q6) — the KV
+   * `"jobRunRecords"` key is retired: a null post means no ledger
+   * at all (reads return [], records return false), never a KV
+   * fallback. Pre-cutover KV rows stay in storage, unread.
    */
   private ledgerPost(): ((req: Request) => Promise<Response>) | null {
     try {
@@ -873,29 +874,22 @@ export class ScheduledAgent extends PortThink {
   }
 
   /**
-   * Issue #2964 — per-run result records. The legacy home is the
-   * DO key-value `"jobRunRecords"` key (newest first, capped);
-   * issue #3121 Phase 2 (#3123) moves new rows to the one physical
-   * ledger (OrchestratorAgent DO SQLite, shared instance) and this
-   * read merges both homes, so history is never dropped silently.
-   * Recording never breaks a tick: a storage failure is swallowed,
-   * so a run that happened but left no record is still visible via
-   * the tick.
+   * Issue #2964 — per-run result records. The home is the one
+   * physical ledger (OrchestratorAgent DO SQLite, shared instance,
+   * reached through the ledger post); issue #3121 Phase 2 (#3123)
+   * moved new rows there. Issue #6101 (step 9, Q6) retires the
+   * legacy DO key-value `"jobRunRecords"` key: no read or write
+   * touches it, and no contents are migrated — pre-cutover KV rows
+   * stay in storage, unread. Recording never breaks a tick: a
+   * failed or absent post returns false (the caller hears about
+   * it through the boolean / onRecordFailure hook), so a run that
+   * happened but left no record is still visible via the tick.
    */
-  private async getKvJobRuns(): Promise<JobRunRecord[]> {
-    const stored = await this.ctx.storage.get<JobRunRecord[]>("jobRunRecords");
-    // Issue #3121 S1 — rows stored before the §4 columns read back
-    // normalized (trigger "unknown", ids null); no silent backfill.
-    return (stored ?? []).map((record) => normalizeJobRunRecord(record));
-  }
-
   private async getJobRuns(): Promise<JobRunRecord[]> {
-    const legacy = await this.getKvJobRuns().catch(() => [] as JobRunRecord[]);
     const post = this.ledgerPost();
-    if (!post) return legacy;
+    if (!post) return [];
     const shared = await fetchLedgerRuns(post, { limit: this.jobRunRecordCap() });
-    if (!shared) return legacy;
-    return mergeLedgerRuns(shared, legacy).slice(0, this.jobRunRecordCap());
+    return shared ?? [];
   }
 
   /**
@@ -929,17 +923,17 @@ export class ScheduledAgent extends PortThink {
         ...record,
       });
       const post = this.ledgerPost();
-      if (post) {
-        // The one physical ledger, best-effort: a 401 (no service
-        // user configured) or a failed post falls through to the
-        // legacy KV key below — the row is never lost, and the
-        // merged read covers both homes.
-        const serviceLogin = getServiceUserLogin(this.env);
-        if (await postLedgerRun(post, built, serviceLogin)) return true;
+      // Issue #6101 (step 9, Q6) — the one physical ledger is the
+      // only home: no post, or a failed post, means the row did not
+      // land (false + the hook), never a KV row. The throw routes
+      // through the catch below so onRecordFailure hears about it.
+      if (!post) {
+        throw new Error("no ledger post: ORCHESTRATOR_AGENT unbound");
       }
-      const runs = await this.getKvJobRuns();
-      runs.unshift(built);
-      await this.ctx.storage.put("jobRunRecords", runs.slice(0, this.jobRunRecordCap()));
+      const serviceLogin = getServiceUserLogin(this.env);
+      if (!(await postLedgerRun(post, built, serviceLogin))) {
+        throw new Error("ledger post failed");
+      }
       return true;
     } catch (err) {
       if (onRecordFailure) {
@@ -1545,7 +1539,11 @@ export class ScheduledAgent extends PortThink {
    */
   async recordStageEvent(event: JobStageEventRecord): Promise<boolean> {
     const ctx = this.pipelineContext();
-    return createScheduledAgentStageEventStore(ctx).record(event);
+    const store = createScheduledAgentStageEventStore(ctx);
+    // #6101 step 7: null when AGENT_DB is unbound — nothing is
+    // recorded anywhere, so the persist honestly reports false.
+    if (!store) return false;
+    return store.record(event);
   }
 
   /**
@@ -1664,7 +1662,11 @@ export class ScheduledAgent extends PortThink {
   /** Issue #4360 — a run's recorded stage events, in recorded order. */
   async listStageEvents(runId: string): Promise<JobStageEventRecord[]> {
     const ctx = this.pipelineContext();
-    return createScheduledAgentStageEventStore(ctx).listByRun(runId);
+    const store = createScheduledAgentStageEventStore(ctx);
+    // #6101 step 7: null when AGENT_DB is unbound — unbound means no
+    // stage rows exist anywhere, so the list is honestly empty.
+    if (!store) return [];
+    return store.listByRun(runId);
   }
 
   /**
@@ -2362,14 +2364,14 @@ export class ScheduledAgent extends PortThink {
             : {}),
         }).then((landed) => {
           // Issue #6293 — a run whose record did not land is silent
-          // no-row: `recordJobRun` swallows a storage failure and the
-          // firing branches ignored the boolean, so the tick said
+          // no-row: `recordJobRun` returns false when the ledger
+          // write fails and the firing branches ignored the boolean, so the tick said
           // jobsCreated 1 with no error and no row anywhere. A failed
           // write is a tick error now, so the trigger route and the
           // ledger panel report it instead of a phantom success.
           if (!landed) {
             tick.errors.push(
-              `${goal.id}: run record did not land (ledger + legacy store both failed)`,
+              `${goal.id}: run record did not land (ledger write failed)`,
             );
           }
           return undefined;
@@ -3892,8 +3894,8 @@ export class ScheduledAgent extends PortThink {
     // no one-shot firing runs through a workflow, so workflowId is
     // null. The linkage resolves through the S1 resolver
     // (`buildLedgerLinkage`), never hand-built at this write site.
-    // Recording never breaks the firing: `recordJobRun` swallows
-    // storage failures, and a refused firing still records its
+    // Recording never breaks the firing: `recordJobRun` returns
+    // false on a failed ledger write, and a refused firing still records its
     // reason (a skip without a reason cannot be constructed).
     const runStarted = now.toISOString();
     const recordOneShotRun = (
@@ -4139,8 +4141,8 @@ export class ScheduledAgent extends PortThink {
    * Issue #3122 — the agent schedule capability bound to this DO's
    * stores. Goals adapter over getGoals/saveGoals/triggerGoal (the
    * mutation funnel, so goal lifecycle events still emit exactly
-   * once); ledger rows go to the DO-native jobRunRecords list
-   * (recordJobRun — the per-run view the Jobs UI reads); audit
+   * once); ledger rows go to the one physical ledger through
+   * recordJobRun (the per-run view the Jobs UI reads); audit
    * events post best-effort to the orchestrator audit channel (the
    * auditGoalLifecycle swallow rule: a failed post never fails the
    * action); pending approvals live under

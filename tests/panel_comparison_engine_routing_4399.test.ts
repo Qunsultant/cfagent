@@ -25,6 +25,7 @@ import type { ETradeOptionChain, ETradeOptionExpireDate } from "../src/types";
 import { DynamicOptionsScreener } from "../src/trading";
 import { handleEtradeOptionsRoutes } from "../src/agents/routes/etradeOptions";
 import { __resetTokenCache } from "../src/security/etradeTokenCache";
+import { MockD1Database } from "./mock-d1";
 import {
   comparisonJobId,
   optionsEngineStoresFromSql,
@@ -167,10 +168,12 @@ afterEach(() => {
   }
 });
 
-function makeRouteCtx(sql: SqliteTestStorage | null) {
+function makeRouteCtx(sql: SqliteTestStorage | null, d1?: MockD1Database) {
   const storage = sql ? { sql } : {};
   return {
-    env: {},
+    // #6101: the engine run-recorder fails closed without AGENT_DB;
+    // the route threads ctx.env into optionsEngineStoresFromSql.
+    env: d1 ? { AGENT_DB: d1 } : {},
     getOrm: () => ({} as never),
     agentCtx: { storage } as never,
     ensureTables: () => (sql ?? new SqliteTestStorage()) as unknown as SqlStorage,
@@ -201,7 +204,8 @@ async function postComparison(ctx: ReturnType<typeof makeRouteCtx>) {
 describe("panel comparison route engine threading (#4399)", () => {
   it("dispatches through the engine comparison job with a durable record, response shape unchanged", async () => {
     const sql = new SqliteTestStorage();
-    const response = await postComparison(makeRouteCtx(sql));
+    const d1 = new MockD1Database();
+    const response = await postComparison(makeRouteCtx(sql, d1));
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
     // The route's response shape, unchanged: the same envelope the
@@ -223,7 +227,7 @@ describe("panel comparison route engine threading (#4399)", () => {
     const coreArgs = mockRunProductionComparison.mock.calls[0][0] as { runId?: string };
     expect(coreArgs.runId).toBe(artifact.runId);
 
-    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage);
+    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage, { AGENT_DB: d1 });
     const definitions = await engineStores.stores.definitions.listDefinitions();
     const comparisonJobs = definitions.filter(
       (definition) => (definition.root as { kind?: string }).kind === "comparison",
@@ -255,12 +259,13 @@ describe("panel comparison route engine threading (#4399)", () => {
 
   it("the engine path preserves the comparison core's inputs (same inputs, same artifact modulo the run id)", async () => {
     const sql = new SqliteTestStorage();
+    const d1 = new MockD1Database();
     const directResponse = await postComparison(makeRouteCtx(null));
     expect(directResponse.status).toBe(200);
     const directArgs = mockRunProductionComparison.mock.calls[0][0] as Record<string, unknown>;
     const directBody = (await directResponse.json()) as Record<string, unknown>;
 
-    const engineResponse = await postComparison(makeRouteCtx(sql));
+    const engineResponse = await postComparison(makeRouteCtx(sql, d1));
     expect(engineResponse.status).toBe(200);
     const engineArgs = mockRunProductionComparison.mock.calls[1][0] as Record<string, unknown>;
     const engineBody = (await engineResponse.json()) as Record<string, unknown>;
@@ -274,10 +279,13 @@ describe("panel comparison route engine threading (#4399)", () => {
     // by reference. The pin is that the core's DATA inputs are
     // identical across the two paths.
     const normalize = (args: Record<string, unknown>) => {
-      const { buildFn, rankFn, screenFn, ...rest } = args;
+      const { buildFn, rankFn, screenFn, env: _env, ...rest } = args;
       expect(buildFn).toEqual(expect.any(Function));
       expect(rankFn).toEqual(expect.any(Function));
       expect(screenFn).toEqual(expect.any(Function));
+      // env is transport, not data: the engine path carries the
+      // #6101 AGENT_DB binding, the direct path carries {} — the pin
+      // is that the core's DATA inputs are identical.
       const snapshot = rest.snapshot as { screen?: Record<string, unknown> };
       return {
         ...rest,
@@ -302,13 +310,15 @@ describe("panel comparison route engine threading (#4399)", () => {
 
   it("control resolves the route's comparison run and refuses execution ops by name", async () => {
     const sql = new SqliteTestStorage();
-    const response = await postComparison(makeRouteCtx(sql));
+    const d1 = new MockD1Database();
+    const response = await postComparison(makeRouteCtx(sql, d1));
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
     const runId = (body.artifact as { runId: string }).runId;
     const refused = await expectControlError(
       controlOptionsStage({
         sql: sql as unknown as SqlStorage,
+        env: { AGENT_DB: d1 },
         storage: { ...memoryStageStorage(), sql: sql as unknown as SqlStorage },
         runId,
         stage: "screen",
@@ -323,12 +333,13 @@ describe("panel comparison route engine threading (#4399)", () => {
 
   it("a core failure on the engine path surfaces the original error verbatim and records a failed run", async () => {
     const sql = new SqliteTestStorage();
+    const d1 = new MockD1Database();
     mockRunProductionComparison.mockRejectedValue(new Error("core exploded"));
-    const response = await postComparison(makeRouteCtx(sql));
+    const response = await postComparison(makeRouteCtx(sql, d1));
     expect(response.status).toBe(502);
     const body = (await response.json()) as Record<string, unknown>;
     expect(body.error).toBe("core exploded");
-    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage);
+    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage, { AGENT_DB: d1 });
     const definitions = await engineStores.stores.definitions.listDefinitions();
     expect(definitions).toHaveLength(1);
     const latest = await engineStores.runRecorder.latestRun(definitions[0]!.jobId);

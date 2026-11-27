@@ -19,15 +19,19 @@
  * slice-0 halt seed route): unauthenticated → 401;
  * non-POST → 405; unwired session (no internalUserId) →
  * 403; wired non-admin → 403 with NO data; platform-admin
- * → run the seed and return its result. The seed never
- * auto-runs: no boot, deploy, or tick path calls it.
+ * → 410 Gone. Issue #6101 (step 8) RETIRED the seed: it
+ * copied the instance's DO mas_reports rows into D1
+ * agent_reports, which the replacement ruling forbids
+ * (existing DO data is never copied to D1; new writes go
+ * to D1, old DO rows stay as history drained by retention).
+ * The route stays as a named tombstone so an operator who
+ * still calls it learns why, instead of a 404. The seed
+ * never auto-ran: no boot, deploy, or tick path called it.
  */
 import type {
   AuditEventRow,
   CanonicalReportRow,
 } from "./auditReportPorts";
-import type { SeedCanonicalReportsResult } from "./auditReportProjection";
-import type { ReconcileRunLedgerResult } from "../agents/orchestrator/runLedgerReconcile";
 import type { ReconcileUsageEventsResult } from "../agents/orchestrator/usageEventsReconcile";
 
 export interface AuditHistoryRouteSession {
@@ -124,71 +128,6 @@ export interface SeedReportsRouteDeps {
   method: string;
   isPlatformAdmin: boolean;
   tenantId: string;
-  runSeed: (input: {
-    tenantId: string;
-    setBy: string;
-  }) => Promise<SeedCanonicalReportsResult>;
-}
-
-export interface ReconcileRunLedgerRouteDeps {
-  session: SeedReportsRouteSession | null;
-  method: string;
-  isPlatformAdmin: boolean;
-  tenantId: string;
-  runReconcile: (input: {
-    tenantId: string;
-    setBy: string;
-    limit?: number;
-  }) => Promise<ReconcileRunLedgerResult>;
-}
-
-/**
- * Issue #4116 — POST /api/ops/run-ledger-reconcile: the deliberate
- * operator invocation point for the one-off run-ledger backfill.
- * Gating mirrors the seed route exactly (requireAuth → wired
- * session → live platform-admin membership, fail-closed, no data
- * on 403). Never auto-run: no boot, deploy, or tick path calls
- * it. A refused sweep (carrier not configured) returns 200 with
- * the refusal named in the result — the operator sees why
- * nothing was reconciled instead of a silent zero-row pass.
- */
-export async function handleReconcileRunLedgerRoute(
-  deps: ReconcileRunLedgerRouteDeps,
-): Promise<Response> {
-  if (!deps.session) {
-    return Response.json({ error: "Unauthorized: Please log in." }, { status: 401 });
-  }
-  if (deps.method !== "POST") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
-  }
-  if (!deps.session.internalUserId) {
-    return Response.json(
-      { error: "Forbidden: run-ledger reconcile requires a wired session." },
-      { status: 403 },
-    );
-  }
-  if (!deps.isPlatformAdmin) {
-    return Response.json(
-      { error: "Forbidden: run-ledger reconcile requires platform-admin membership." },
-      { status: 403 },
-    );
-  }
-  try {
-    const result = await deps.runReconcile({
-      tenantId: deps.tenantId,
-      setBy: deps.session.githubLogin ?? deps.session.internalUserId,
-    });
-    return Response.json(result);
-  } catch {
-    // Generic error only: a failed invoke does not prove
-    // nothing happened, so the operator diagnoses projection
-    // state before retrying (the second invoke reports zero
-    // new rows when all rows are already current).
-    return Response.json(
-      { error: "Run-ledger reconcile unavailable." },
-      { status: 500 },
-    );
-  }
 }
 
 export interface ReconcileUsageEventsRouteDeps {
@@ -206,7 +145,7 @@ export interface ReconcileUsageEventsRouteDeps {
 /**
  * Issue #3185 (bridge slice) — POST /api/ops/usage-events-reconcile:
  * the deliberate operator invocation point for the one-off
- * usage-events backfill (mirror of handleReconcileRunLedgerRoute).
+ * usage-events backfill (the same gating shape the deleted run-ledger reconcile route used).
  * Gating mirrors the seed route exactly (requireAuth → wired
  * session → live platform-admin membership, fail-closed, no data
  * on 403). Never auto-run: no boot, deploy, or tick path calls
@@ -274,20 +213,18 @@ export async function handleSeedReportsRoute(
       { status: 403 },
     );
   }
-  try {
-    const result = await deps.runSeed({
-      tenantId: deps.tenantId,
-      setBy: deps.session.githubLogin ?? deps.session.internalUserId,
-    });
-    return Response.json(result);
-  } catch {
-    // Generic error only: a failed invoke does not prove
-    // nothing happened, so the operator diagnoses projection
-    // state before retrying (the second invoke reports
-    // seeded:false with zero new rows when all rows exist).
-    return Response.json(
-      { error: "Reports seed unavailable." },
-      { status: 500 },
-    );
-  }
+  // #6101 step 8 — RETIRED. The seed copied the instance's DO
+  // mas_reports rows into D1 agent_reports; the replacement
+  // ruling forbids copying existing DO data to D1. Reports
+  // written after the cutover already live in D1; pre-cutover
+  // rows stay in the frozen DO table as history. 410 (not 404)
+  // so the retirement is named, not silent.
+  return Response.json(
+    {
+      error:
+        "Gone: the canonical reports seed was retired by #6101 — it copied existing DO mas_reports rows into D1, which the replacement ruling forbids. Post-cutover reports already live in D1 agent_reports; pre-cutover rows stay in the frozen DO table as history.",
+      reason: "reports-seed-retired-6101",
+    },
+    { status: 410 },
+  );
 }

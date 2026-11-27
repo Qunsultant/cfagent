@@ -41,6 +41,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
+import { MockD1Database } from "./mock-d1";
 import type { SqlStorage } from "../src/orm";
 import type { JobPipelineStores } from "../src/data/jobPipelinePorts";
 import {
@@ -249,6 +250,7 @@ async function dispatchGoalOverSql(
   sql: SqlStorage,
   storage: OptionsStageStorage,
   runId: string,
+  d1?: MockD1Database,
 ) {
   const request = {
     assetClass: "options",
@@ -271,7 +273,7 @@ async function dispatchGoalOverSql(
       }),
       claims: memoryStageClaims(),
       queue: null,
-      engineStores: optionsEngineStoresFromSql(sql),
+      engineStores: optionsEngineStoresFromSql(sql, d1 ? { AGENT_DB: d1 } : undefined),
     },
   );
 }
@@ -481,7 +483,8 @@ describe("chat stage control over D1 stores (#4859)", () => {
       const { sql, storage } = makeDoStorage();
       const bundle = optionsEngineStoresInMemory();
       const runId = "d1-goal:5";
-      expect((await dispatchGoalOverSql(sql, storage, runId)).outcome).toBe("completed");
+      const d1 = new MockD1Database();
+      expect((await dispatchGoalOverSql(sql, storage, runId, d1)).outcome).toBe("completed");
       const error = await expectControlError(
         controlOptionsStage({
           sql,
@@ -668,6 +671,7 @@ describe("broker descriptor resolution + concurrency + #5194 non-reachability (#
       // out and the turn's default path stands.
       const { sql, storage } = makeDoStorage();
       const runId = "d1-goal:stringbroker";
+      const d1 = new MockD1Database();
       const target = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
       const template = {
         thesis: "bullish",
@@ -703,7 +707,7 @@ describe("broker descriptor resolution + concurrency + #5194 non-reachability (#
           }),
           claims: memoryStageClaims(),
           queue: null,
-          engineStores: optionsEngineStoresFromSql(sql),
+          engineStores: optionsEngineStoresFromSql(sql, { AGENT_DB: d1 }),
         },
       );
       expect(outcome.outcome).toBe("completed");
@@ -711,6 +715,7 @@ describe("broker descriptor resolution + concurrency + #5194 non-reachability (#
       const result = await controlOptionsStage({
         sql,
         storage,
+        env: { AGENT_DB: d1 },
         runId,
         stage: "screen",
         operation: "rerun",

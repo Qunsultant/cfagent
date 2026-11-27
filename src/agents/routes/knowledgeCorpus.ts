@@ -91,11 +91,9 @@ import { resolveScheduledJobAlertThreshold } from "../../config/scheduledJobAler
 import { postSlackText, resourceSlackPost } from "../resourceGoals";
 import type { SlackDeliveryEnv } from "../social/delivery";
 import type { Env } from "../../types";
-import {
-  recordJobOutcome,
-  type JobOutcomeTrigger,
-} from "../../services/jobOutcomes";
-import { projectJobOutcomeBestEffort } from "../../services/runLedgerProjectionHooks";
+import type { JobOutcomeTrigger } from "../../services/jobOutcomes";
+import { createJobRunRecordAdapter } from "../../data/createJobRunRecordPorts";
+import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
 import { resolveActorAttribution } from "../../security/backgroundAttribution";
 import { getServiceUserLogin } from "../../security/serviceIdentity";
 import {
@@ -281,28 +279,30 @@ async function recordCorpusSyncRun(
     const failed = !result.completed;
     const partial =
       !failed && (!result.integrity.ok || result.corpusIndex.failed > 0);
-    recordJobOutcome(sql, {
-      id: `corpus-sync:${result.ranAt}`,
-      kind: "corpus",
-      trigger: corpusSyncTrigger(ctx, request),
-      status: failed ? "failed" : partial ? "partial" : "completed",
-      scanned: result.integrity.entries.length,
-      matched: present,
-      codedError: failed ? CORPUS_SYNC_INCOMPLETE_CODE : undefined,
-      deliveryStates,
-      origin: "corpus-sync",
-      createdAt: result.ranAt,
-    });
-    // Issue #6006 — fold the outcome facts into the one run source
-    // (D1); best-effort, never fails the corpus sync. The mount
-    // passes the full env (narrow type here); the service login
-    // owns the queue route.
-    await projectJobOutcomeBestEffort({
-      env: ctx.env as unknown as Partial<Env>,
-      sql,
-      outcomeId: `corpus-sync:${result.ranAt}`,
-      userLogin: getServiceUserLogin(ctx.env as unknown as Parameters<typeof getServiceUserLogin>[0]),
-    });
+    // Issue #6101 — the outcome folds directly onto D1 (no DO
+    // row, no projection); best-effort, never fails the corpus
+    // sync. An unbound ledger is the named error, logged by the
+    // catch below.
+    const ledgerStore = createJobRunRecordAdapter(ctx.env as { AGENT_DB?: unknown });
+    if (!ledgerStore) {
+      throw new Error("[run-ledger] D1 run-ledger binding unbound (AGENT_DB) (#6101).");
+    }
+    await ledgerStore.foldJobOutcome(
+      {
+        id: `corpus-sync:${result.ranAt}`,
+        kind: "corpus",
+        trigger: corpusSyncTrigger(ctx, request),
+        status: failed ? "failed" : partial ? "partial" : "completed",
+        scanned: result.integrity.entries.length,
+        matched: present,
+        codedError: failed ? CORPUS_SYNC_INCOMPLETE_CODE : undefined,
+        deliveryStates,
+        origin: "corpus-sync",
+        createdAt: result.ranAt,
+      },
+      resolveIaaaTenant(ctx.env),
+      Date.now(),
+    );
   } catch (err) {
     structuredLog.warn("scheduled_job_outcome.run_record_failed", {
       message: "[knowledgeCorpus] corpus-sync run record failed",

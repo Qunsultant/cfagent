@@ -2,14 +2,16 @@
  * Regression & pinning tests for #5043 — Silent no-ops:
  *  - G-4: D1 audit-chain prune wired into /schedules/trigger-retention
  *  - G-8: Structured logger sink failures surface loudly (never silently lost)
- *  - G-10: Queue shared-instance fallback is strictly owner/tenant-scoped
+ *  - G-10: (retired by #6101) the run-ledger project queue transport is gone
+ *    with the projector; the owner-scoped dispatch + shared-instance
+ *    fallback it pinned has no surviving code path
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createStructuredLogger } from "../src/observability/structuredLogger";
 import type { ObservabilityEvent, ObservabilitySink } from "../src/observability/observabilityPorts";
-import { dispatchRunLedgerProjectQueueWork } from "../src/server/routes/queue";
+import * as queueRoutes from "../src/server/routes/queue";
 
 describe("#5043 silent no-ops", () => {
   afterEach(() => {
@@ -69,74 +71,29 @@ describe("#5043 silent no-ops", () => {
     expect((fields.droppedEvent as ObservabilityEvent).operation).toBe("test.sync_op");
   });
 
-  it("G-10: refuses blank userLogin or tenantId before trying shared-instance fallback", async () => {
-    const idFromName = vi.fn();
-    const env = {
-      ORCHESTRATOR_AGENT: { idFromName, get: vi.fn() },
-    } as never;
-
-    await expect(
-      dispatchRunLedgerProjectQueueWork({
-        env,
-        project: {
-          ledger: "reports",
-          naturalKey: "rep-1",
-          tenantId: "primary",
-          userLogin: "   ",
-        },
-      }),
-    ).rejects.toThrow(/non-empty owner scoping/);
-
-    await expect(
-      dispatchRunLedgerProjectQueueWork({
-        env,
-        project: {
-          ledger: "reports",
-          naturalKey: "rep-1",
-          tenantId: "",
-          userLogin: "alice",
-        },
-      }),
-    ).rejects.toThrow(/non-empty owner scoping/);
-
-    expect(idFromName).not.toHaveBeenCalled();
-  });
-
-  it("G-10: forwards owner-scoped input (userLogin + tenantId) to shared instance on per-user missing-row", async () => {
-    const calls: Array<{ instance: string; input: unknown }> = [];
-    const env = {
-      ORCHESTRATOR_AGENT: {
-        idFromName: (name: string) => name,
-        get: (name: string) => ({
-          projectQueuedRunLedger: async (input: unknown) => {
-            calls.push({ instance: name, input });
-            if (name === "alice") return { status: "missing-row" };
-            return { status: "projected" };
-          },
-        }),
-      },
-    } as never;
-
-    const status = await dispatchRunLedgerProjectQueueWork({
-      env,
-      project: {
-        ledger: "reports",
-        naturalKey: "rep-42",
-        tenantId: "tenant-a",
-        userLogin: "alice",
-      },
-    });
-
-    expect(status).toBe("projected");
-    expect(calls).toEqual([
-      {
-        instance: "alice",
-        input: { ledger: "reports", naturalKey: "rep-42", tenantId: "tenant-a", userLogin: "alice" },
-      },
-      {
-        instance: "shared_orchestrator",
-        input: { ledger: "reports", naturalKey: "rep-42", tenantId: "tenant-a", userLogin: "alice" },
-      },
-    ]);
+  it("G-10 (retired by #6101): the run-ledger project queue transport is gone — no dispatch entry point, no project routing", () => {
+    // Issue #6101 retires the #6099 projector by removing the DO write it
+    // copies from, and with it the projector's three carriers — ORM hooks,
+    // queue transport, sweep (RETHINK.md §(c)). The queue transport's entry
+    // point (dispatchRunLedgerProjectQueueWork) and its handleQueueBatch
+    // call site are deleted by design; the deletion of the projector
+    // family (projectQueuedRunLedger, reconcileRunLedgerProjection,
+    // runLedgerProjectionHooks/Posting/QueueTransport) is pinned in
+    // orchestrator_class_inventory.test.ts. The owner-scoped dispatch +
+    // shared-instance fallback these two tests pinned has no surviving
+    // code path to scope, so the tests become a pin of the retirement:
+    // re-introducing the transport fails here instead of silently
+    // reviving a DO-copy path.
+    const queueSrc = readFileSync(
+      resolve(process.cwd(), "src/server/routes/queue.ts"),
+      "utf8",
+    );
+    expect(queueSrc).not.toContain("dispatchRunLedgerProjectQueueWork");
+    expect(queueSrc).not.toContain("projectQueuedRunLedger");
+    // Namespace import (static, so the module loads at collection time):
+    // the entry point must not be exported at all.
+    expect(
+      (queueRoutes as unknown as Record<string, unknown>).dispatchRunLedgerProjectQueueWork,
+    ).toBeUndefined();
   });
 });

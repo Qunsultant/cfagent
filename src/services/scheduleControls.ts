@@ -145,7 +145,10 @@ import {
 } from "../config/staleAsyncJobReap";
 import { createSettingsPort } from "../data/createSettingsPorts";
 import type { SettingsSqlExecutor } from "../data/settingsReadPorts";
-import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
+import {
+  createJobRunRecordAdapter,
+  type D1JobRunRecordStore,
+} from "../data/createJobRunRecordPorts";
 
 /** Minimal SQL surface the controls read/write over (the SettingsPort seam). */
 export type ScheduleControlsSql = SettingsSqlExecutor;
@@ -1042,17 +1045,22 @@ export function evaluateScheduleFiringRate(input: {
 
 /**
  * Count schedule firings (ledger rows) whose start falls in the
- * trailing window. Best-effort: a store failure counts 0, never a
- * throw. The read is bounded (newest-first, capped) — a count at
- * the cap still proves "above threshold" for any threshold below it.
+ * trailing window. Best-effort: a missing store or a store failure
+ * counts 0, never a throw. The read is bounded (newest-first,
+ * capped) — a count at the cap still proves "above threshold" for
+ * any threshold below it.
+ *
+ * Issue #6101 — the count reads D1 (the store resolves from the
+ * caller's env; a null store counts 0 — no ledger exists to count).
  */
-export function countScheduleFiringsInWindow(
-  sql: ScheduleControlsSql,
+export async function countScheduleFiringsInWindow(
+  store: D1JobRunRecordStore | null,
   windowStartMs: number,
   limit = 500,
-): number {
+): Promise<number> {
+  if (!store) return 0;
   try {
-    const rows = new SqlJobRunRecordStore(sql as never).listRecent(limit);
+    const rows = await store.listRecent(limit);
     let count = 0;
     for (const row of rows) {
       const startedMs = Date.parse(row.started);
@@ -1083,12 +1091,12 @@ export interface ScheduleFiringRateCheck {
  * Best-effort throughout: a store or sink failure never breaks the
  * firing being recorded.
  */
-export function checkScheduleFiringRate(
+export async function checkScheduleFiringRate(
   sql: ScheduleControlsSql,
   env: unknown,
   nowMs: number,
   emit?: (type: string, payload: Record<string, unknown>) => void,
-): ScheduleFiringRateCheck {
+): Promise<ScheduleFiringRateCheck> {
   // Issue #6503 — the thresholds are managed settings: a managed
   // value wins over the env carrier, which wins over the default.
   const rate = resolveEffectiveScheduleFiringRateAlert(sql, env);
@@ -1098,7 +1106,14 @@ export function checkScheduleFiringRate(
   if (threshold <= 0) return { ...base, exceeded: false, count: 0 };
   try {
     const windowStartMs = nowMs - windowMinutes * 60_000;
-    const count = countScheduleFiringsInWindow(sql, windowStartMs);
+    // Issue #6101 — the count reads D1 (the store resolves from
+    // the same env the thresholds read); an unbound D1 counts 0.
+    const count = await countScheduleFiringsInWindow(
+      createJobRunRecordAdapter(
+        env as { AGENT_DB?: unknown } | null | undefined,
+      ),
+      windowStartMs,
+    );
     const { exceeded } = evaluateScheduleFiringRate({ firingsInWindow: count, threshold });
     if (!exceeded) return { ...base, exceeded: false, count };
     const lastAtRaw = readScheduleManagedSetting(sql, SCHEDULE_FIRING_RATE_ALERT_LAST_AT_KEY);
@@ -1214,12 +1229,12 @@ export interface ScheduleControlsView {
 }
 
 /** Resolve the controls view from the store, the env, and the unified list items. */
-export function resolveScheduleControlsView(
+export async function resolveScheduleControlsView(
   sql: ScheduleControlsSql,
   env: unknown,
   listItems: readonly ArmedScheduleInventoryInput[],
   nowMs: number = Date.now(),
-): ScheduleControlsView {
+): Promise<ScheduleControlsView> {
   const floor = resolveEffectiveScheduleFloor(sql, env);
   const firing = resolveEffectiveScheduleFiringEnabled(sql, env);
   const startPaused = resolveEffectiveScheduleStartPaused(sql, env);
@@ -1234,7 +1249,16 @@ export function resolveScheduleControlsView(
   const researchHour = resolveEffectiveResearchScheduleUtcHour(sql, env);
   const retention = resolveEffectiveGoalRunRetention(sql, env);
   const count =
-    rate.threshold > 0 ? countScheduleFiringsInWindow(sql, nowMs - rate.windowMinutes * 60_000) : 0;
+    rate.threshold > 0
+      ? await countScheduleFiringsInWindow(
+          // Issue #6101 — the count reads D1 (the store resolves
+          // from the same env the thresholds read); unbound counts 0.
+          createJobRunRecordAdapter(
+            env as { AGENT_DB?: unknown } | null | undefined,
+          ),
+          nowMs - rate.windowMinutes * 60_000,
+        )
+      : 0;
   const { exceeded } = evaluateScheduleFiringRate({ firingsInWindow: count, threshold: rate.threshold });
   return {
     minIntervalSeconds: floor.seconds,

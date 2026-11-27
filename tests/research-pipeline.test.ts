@@ -28,9 +28,11 @@ import {
   type ResearchConfig,
 } from "../src/services/researchConfig";
 import {
-  storeReportAtGeneration,
+  listScheduledReports,
+  resolveCanonicalReportBody,
+  storeReportAtGenerationWithR2,
 } from "../src/services/scheduledReports";
-import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 import { researchUniverseIds, ResearchUniverseRefusal } from "../src/trading";
 
 const NOW = Date.now();
@@ -243,7 +245,44 @@ describe("runResearchPipeline", () => {
       testConfig(),
       { trigger: "manual", userLogin: "tester", runId: "rsr_test2", now: NOW }
     );
-    const sql = new MockSqlStorage();
+    // #6101 step 8: the D1 seam caps an INLINE body at 8000 chars
+    // (capText, src/data/auditReportProjection.ts) — this research
+    // body is larger, so an inline store would truncate it
+    // mid-JSON and the snapshot read-back would not parse. The
+    // seam's designed path for a large body is the R2 write
+    // (storeReportAtGenerationWithR2): the full body lands in the
+    // bucket before the row insert and reads back whole via
+    // resolveCanonicalReportBody. The DO mas_reports table is
+    // frozen — no new writes land there; read the D1 list.
+    const mock = new MockD1Database();
+    const objects = new Map<string, string>();
+    const bucket = {
+      async put(key: string, value: string | Uint8Array) {
+        objects.set(
+          key,
+          typeof value === "string" ? value : new TextDecoder().decode(value),
+        );
+      },
+      async get(key: string) {
+        const text = objects.get(key);
+        if (text === undefined) return null;
+        return {
+          async text() {
+            return text;
+          },
+          async arrayBuffer() {
+            return new TextEncoder().encode(text).buffer as ArrayBuffer;
+          },
+        };
+      },
+      async delete(key: string) {
+        objects.delete(key);
+      },
+    };
+    const env = {
+      AGENT_DB: mock as unknown as never,
+      REPORTS_BUCKET: bucket as never,
+    };
     const input = {
       runId: report.runId,
       generationId: report.generationId,
@@ -253,20 +292,20 @@ describe("runResearchPipeline", () => {
       body: report as unknown as Record<string, unknown>,
       userLogin: "tester",
     };
-    const first = storeReportAtGeneration(sql, input);
-    const second = storeReportAtGeneration(sql, input);
+    const first = await storeReportAtGenerationWithR2(env, input);
+    const second = await storeReportAtGenerationWithR2(env, input);
     expect(first?.created).toBe(true);
     expect(second?.created).toBe(false);
     expect(first?.reportId).toBe(second?.reportId);
-    const rows = Array.from(
-      sql.exec("SELECT COUNT(*) AS count FROM mas_reports")
-    ) as Array<{ count: number }>;
-    expect(rows[0].count).toBe(1);
-    // The stored body embeds the config snapshot.
-    const bodies = Array.from(
-      sql.exec("SELECT body FROM mas_reports")
-    ) as Array<{ body: string }>;
-    const storedBody = JSON.parse(String(bodies[0].body));
+    // Dedupe: exactly one reportId in D1.
+    const hits = await listScheduledReports(env, { userLogin: "tester" });
+    expect(hits).toHaveLength(1);
+    expect(hits[0].id).toBe(first!.reportId);
+    // The stored body embeds the config snapshot (resolved whole
+    // from R2, where the full body lives).
+    const resolved = await resolveCanonicalReportBody(env, hits[0]);
+    expect(resolved).not.toBeNull();
+    const storedBody = JSON.parse(String(resolved));
     expect(storedBody.configSnapshot.marketCapMin).toBe(5_000_000_000);
     expect(storedBody.trigger).toBe("manual");
   });

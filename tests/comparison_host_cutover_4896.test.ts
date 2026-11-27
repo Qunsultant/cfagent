@@ -30,6 +30,7 @@
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { DatabaseSync } from "node:sqlite";
+import { MockD1Database } from "./mock-d1";
 import { createInMemoryJobPipelineStores } from "../src/data/inMemoryJobPipelineAdapter";
 import { InMemoryJobRunRecordStore } from "../src/data/inMemoryJobRunRecordAdapter";
 import type { JobPipelineStores } from "../src/data/jobPipelinePorts";
@@ -861,7 +862,7 @@ describe("panel comparison dispatch (#4896)", () => {
     } as StrategyRequest;
     const coreArgs = await panelCoreArgs(gatewayEnv, request);
     const result = await runPanelComparison({
-      env: gatewayEnv,
+      env: { ...gatewayEnv, AGENT_DB: new MockD1Database() },
       requestedEnv: "TEST",
       userLogin: "legs_tester",
       brokerId: "etrade",

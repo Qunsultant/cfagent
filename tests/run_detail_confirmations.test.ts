@@ -19,6 +19,8 @@
 import { describe, it, expect, vi } from "vitest";
 
 import { handleReportsRoutes, type ReportsRouteContext } from "../src/agents/routes/reports";
+import { MockD1Database } from "./mock-d1";
+import { storeReportAtGeneration } from "../src/services/scheduledReports";
 
 const makeSql = (tables: Record<string, any[]>) =>
   ({
@@ -67,10 +69,27 @@ const call = (ctx: ReportsRouteContext, path: string, query = "") =>
 
 describe("Issue #1326 — GET /trading/reports/confirmations", () => {
   it("returns the run's confirmations joined via its canonical row", async () => {
+    // #6101: the canonical half reads D1 now (getScheduledReportByRunId);
+    // seed the canonical row there. The confirmations half stays DO.
+    // The D1 reportId is a random UUID — the join still works because
+    // the fake matches rows by table name, ignoring the report_id param.
+    const d1 = new MockD1Database();
+    await storeReportAtGeneration(
+      {
+        runId: "screener:2026-10-25T10:00:00.000Z",
+        generationId: "screener:2026-10-25T10:00:00.000Z",
+        title: "Market screen — ALL",
+        source: "screener",
+        summary: "Scanned 10 symbols.",
+        body: {},
+        userLogin: "tester",
+      } as never,
+      { AGENT_DB: d1 },
+    );
     const ctx = baseCtx({
+      env: { AGENT_DB: d1 },
       ensureTables: () =>
         makeSql({
-          mas_reports: [{ id: "rep-9" }],
           mas_report_confirmations: [
             {
               id: "conf-1",

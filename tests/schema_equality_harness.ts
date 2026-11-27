@@ -93,8 +93,12 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  *  #5160 (migration 0088) re-seeds it: agent_user_profiles rebuilt
  *  with the (internal_user_id, tenant_id) key + the
  *  agent_identity_attribute_index table + 1 unique index. */
+/** #6101 re-seeds it: migration 0093 adds the job_run_records identity
+ *  columns (platform_id, user_id, session_id, correlation_id, trace_id)
+ *  and DROPs agent_tenant_projection_carriers (the #6101 fix round also
+ *  removes the dead carriers CREATE leg from the catalogue). */
 export const COMBINED_FIXTURE_SHA256 =
-  "347430d98b4fafb92368c185e64437ab0010c31667ffd9d7193207ce7f387607";
+  "198abb9bc1fc5dcfc3b97a873b0c02fffa98cdbccf2c6300a69a6ee74af45d05";
 /** All four planes' entries in plane order: D1, DO, ORM, remainder. */
 export const COMBINED_CATALOGUE_ENTRIES: CatalogueEntry[] = [
   ...D1_CATALOGUE_ENTRIES,

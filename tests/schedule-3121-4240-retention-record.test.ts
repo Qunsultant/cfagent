@@ -41,7 +41,10 @@ import {
 } from "../src/services/unifiedScheduleManagement";
 import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import { InMemoryUnifiedScheduleStore } from "../src/data/inMemoryUnifiedScheduleAdapter";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
 import { buildJobRunRecord, scheduleIdToLedgerJobId } from "../src/services/jobRunRecords";
 import { RETENTION_DISPATCH_CRON } from "../src/services/heartbeatDueChecks";
 import { classifyScheduleKind } from "../src/services/scheduleKinds";
@@ -501,6 +504,21 @@ describe("4240 entry point records the pass summary in the dispatch detail", () 
   });
 });
 
+/**
+ * Issue #6101 — the ledger-down double: a D1 binding whose
+ * job_run_records statements throw, while every other table still
+ * reads (the unified-schedule list the route renders alongside).
+ */
+function ledgerDownD1(d1: MockD1Database) {
+  return {
+    prepare(sql: string) {
+      if (sql.includes("job_run_records")) throw new Error("d1 down");
+      return d1.prepare(sql);
+    },
+    batch: (statements: any[]) => d1.batch(statements),
+  };
+}
+
 describe("4240 list route reads the stored retention row (no synthesis)", () => {
   let sql: SqliteTestStorage;
   let ctx: SchedulesRouteContext;
@@ -527,8 +545,12 @@ describe("4240 list route reads the stored retention row (no synthesis)", () => 
     } as unknown as SchedulesRouteContext;
   }
 
-  function seedRetentionRun() {
-    new SqlJobRunRecordStore(sql.sql as never).record(
+  async function seedRetentionRun() {
+    // Issue #6101 — the seed lands in D1, not the DO.
+    const store = new D1JobRunRecordStore(
+      createD1JobRunRecordDb(d1 as unknown as D1Database),
+    );
+    await store.record(
       buildJobRunRecord({
         system: "worker-cron",
         jobId: RETENTION_DISPATCH_CRON,
@@ -567,7 +589,7 @@ describe("4240 list route reads the stored retention row (no synthesis)", () => 
   }
 
   it("shows the stored retention row with its last pass when the ledger has a run", async () => {
-    seedRetentionRun();
+    await seedRetentionRun();
     const body = await list();
     const row = body.schedules.find((s) => s.id === "retention");
     expect(row).toBeDefined();
@@ -592,16 +614,10 @@ describe("4240 list route reads the stored retention row (no synthesis)", () => 
 
   it("keeps the stored row without a last run (list still 200) when the ledger read throws", async () => {
     // The ledger read fails but the unified-store list still works:
-    // only job_run_records queries throw. The stored row renders
+    // only job_run_records statements throw. The stored row renders
     // without its last run — a ledger failure never drops a row.
-    const ledgerDownSql = {
-      exec: (query: string, ...params: unknown[]) => {
-        if (query.includes("job_run_records")) throw new Error("sql down");
-        return sql.exec(query, ...params);
-      },
-    };
     const throwing = baseCtx({
-      agentCtx: { storage: { sql: ledgerDownSql as never } } as never,
+      env: { AGENT_DB: ledgerDownD1(d1) as never },
     });
     const req = new Request("https://example.test/api/schedules", { method: "GET" });
     const res = await handleSchedulesRoutes(req, new URL(req.url), "/api/schedules", "sess", throwing);
@@ -616,10 +632,12 @@ describe("4240 list route reads the stored retention row (no synthesis)", () => 
 describe("4240 runs routes join the retention record to its ledger rows", () => {
   let sql: SqliteTestStorage;
   let ctx: SchedulesRouteContext;
+  let d1: MockD1Database;
 
   function baseCtx(): SchedulesRouteContext {
     return {
-      env: {},
+      // Issue #6101 — the runs routes read the D1 ledger.
+      env: { AGENT_DB: d1 },
       agentCtx: { storage: { sql: sql.sql as never } } as never,
       audit: vi.fn(),
       listSchedules: vi.fn(async () => []),
@@ -637,10 +655,14 @@ describe("4240 runs routes join the retention record to its ledger rows", () => 
     } as unknown as SchedulesRouteContext;
   }
 
-  beforeEach(() => {
+  beforeEach(async () => {
     sql = new SqliteTestStorage();
+    d1 = new MockD1Database();
     ctx = baseCtx();
-    new SqlJobRunRecordStore(sql.sql as never).record(
+    const store = new D1JobRunRecordStore(
+      createD1JobRunRecordDb(d1 as unknown as D1Database),
+    );
+    await store.record(
       buildJobRunRecord({
         system: "worker-cron",
         jobId: RETENTION_DISPATCH_CRON,
