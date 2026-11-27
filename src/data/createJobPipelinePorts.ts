@@ -2,7 +2,8 @@
  * Issue #3534 (Pipeline J1) — composition roots for the
  * job-pipeline stores. Hosts construct the stores explicitly for
  * their residency: an agent host passes its own DO SQLite
- * (agent-hosted, mirroring how hosts build SqlJobRunRecordStore);
+ * (agent-hosted — the framework `job_pipeline_*` tables stay DO;
+ * only the run recorder is D1, see createJobRunRecordPorts.ts);
  * a workflow host passes the AGENT_DB D1 binding
  * (workflow-hosted). There is deliberately no env-only factory
  * that could silently fall back to in-memory storage in

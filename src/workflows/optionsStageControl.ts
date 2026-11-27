@@ -346,7 +346,7 @@ export async function controlOptionsStage(
   }> = [];
   if (input.sql !== undefined) {
     candidates.push({
-      stores: optionsEngineStoresFromSql(input.sql),
+      stores: optionsEngineStoresFromSql(input.sql, input.env),
       addressedOver: "do",
     });
   }

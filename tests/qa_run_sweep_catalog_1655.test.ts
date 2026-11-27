@@ -34,6 +34,7 @@ vi.mock("agents", () => ({
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
 import { OPERATION_CATALOG, createJob } from "../src/orchestrate";
 import { MockD1Database } from "./mock-d1";
+import { makeLedgerStub } from "./ledger-stub";
 
 function makeCtx() {
   const store = new Map<string, unknown>();
@@ -55,6 +56,7 @@ function makeEnv() {
     // 0092's seed plants daily-qa-sweep, so no fixture planting is
     // needed — binding D1 is enough.
     AGENT_DB: new MockD1Database(),
+    ORCHESTRATOR_AGENT: makeLedgerStub().namespace,
     PAYMENTS_AGENT: {
       idFromName: () => "payments-default",
       get: () => ({

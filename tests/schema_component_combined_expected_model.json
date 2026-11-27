@@ -4030,6 +4030,31 @@
           "name": "mode_source",
           "type": "TEXT",
           "pk": 0
+        },
+        {
+          "name": "platform_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "user_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "session_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "correlation_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "trace_id",
+          "type": "TEXT",
+          "pk": 0
         }
       ],
       "constraints": {}
@@ -5049,41 +5074,6 @@
       ],
       "constraints": {}
     },
-    "agent_tenant_projection_carriers": {
-      "columns": [
-        {
-          "name": "tenant_id",
-          "type": "TEXT",
-          "pk": 1
-        },
-        {
-          "name": "queues_enabled",
-          "type": "INTEGER",
-          "pk": 0
-        },
-        {
-          "name": "orm_enabled",
-          "type": "INTEGER",
-          "pk": 0
-        },
-        {
-          "name": "sweep_enabled",
-          "type": "INTEGER",
-          "pk": 0
-        },
-        {
-          "name": "read_mode",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "updated_at_ms",
-          "type": "INTEGER",
-          "pk": 0
-        }
-      ],
-      "constraints": {}
-    },
     "agent_offer_suppressions": {
       "columns": [
         {
@@ -5808,21 +5798,6 @@
       ],
       "constraints": {}
     },
-    "iaaa_audit_events": {
-      "columns": [
-        {
-          "name": "seq",
-          "type": "INTEGER",
-          "pk": 1
-        },
-        {
-          "name": "event_json",
-          "type": "TEXT",
-          "pk": 0
-        }
-      ],
-      "constraints": {}
-    },
     "job_stage_events": {
       "columns": [
         {
@@ -6069,6 +6044,201 @@
         },
         {
           "name": "updated_by",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "agent_identity_attribute_index": {
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "attribute_name",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "attribute_value_normalized",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "internal_user_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "updated_at_ms",
+          "type": "INTEGER",
+          "pk": 0
+        }
+      ],
+      "constraints": {
+        "primary_key": {
+          "kind": "primaryKey",
+          "columns": [
+            "tenant_id",
+            "attribute_name",
+            "attribute_value_normalized",
+            "internal_user_id"
+          ]
+        }
+      }
+    },
+    "mas_events": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "session_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "type",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "agent",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "payload",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "previous_event_hash",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "event_hash",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "platform_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "principal_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "correlation_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "trace_id",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "unified_schedules": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "callback",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "operation",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "definition_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "owner_login",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "provenance_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "alarm_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "paused_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "iaaa_audit_events": {
+      "columns": [
+        {
+          "name": "seq",
+          "type": "INTEGER",
+          "pk": 1
+        },
+        {
+          "name": "event_json",
           "type": "TEXT",
           "pk": 0
         }
@@ -8643,71 +8813,6 @@
       ],
       "constraints": {}
     },
-    "unified_schedules": {
-      "columns": [
-        {
-          "name": "id",
-          "type": "TEXT",
-          "pk": 1
-        },
-        {
-          "name": "kind",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "state",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "callback",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "operation",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "definition_json",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "owner_login",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "provenance_json",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "alarm_id",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "paused_at",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "created_at",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "updated_at",
-          "type": "TEXT",
-          "pk": 0
-        }
-      ],
-      "constraints": {}
-    },
     "usage_events": {
       "columns": [
         {
@@ -8883,76 +8988,6 @@
         },
         {
           "name": "created_at",
-          "type": "TEXT",
-          "pk": 0
-        }
-      ],
-      "constraints": {}
-    },
-    "mas_events": {
-      "columns": [
-        {
-          "name": "id",
-          "type": "TEXT",
-          "pk": 1
-        },
-        {
-          "name": "session_id",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "type",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "agent",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "payload",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "created_at",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "previous_event_hash",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "event_hash",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "platform_id",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "tenant_id",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "principal_id",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "correlation_id",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "trace_id",
           "type": "TEXT",
           "pk": 0
         }
@@ -9818,51 +9853,6 @@
         }
       ],
       "constraints": {}
-    },
-    "agent_identity_attribute_index": {
-      "columns": [
-        {
-          "name": "tenant_id",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "attribute_name",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "attribute_value_normalized",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "internal_user_id",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "source",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "updated_at_ms",
-          "type": "INTEGER",
-          "pk": 0
-        }
-      ],
-      "constraints": {
-        "primary_key": {
-          "kind": "primaryKey",
-          "columns": [
-            "tenant_id",
-            "attribute_name",
-            "attribute_value_normalized",
-            "internal_user_id"
-          ]
-        }
-      }
     }
   },
   "indexes": {
@@ -10392,6 +10382,128 @@
       ],
       "unique": false
     },
+    "job_stage_events_run_stage_idx": {
+      "table": "job_stage_events",
+      "columns": [
+        "run_id",
+        "stage_id"
+      ],
+      "unique": true
+    },
+    "job_run_records_binding_idx": {
+      "table": "job_run_records",
+      "columns": [
+        "account_id",
+        "started DESC",
+        "id DESC"
+      ],
+      "unique": false
+    },
+    "agent_nav_presets_user_name_idx": {
+      "table": "agent_nav_presets",
+      "columns": [
+        "user_id",
+        "name"
+      ],
+      "unique": true
+    },
+    "agent_nav_presets_user_idx": {
+      "table": "agent_nav_presets",
+      "columns": [
+        "user_id",
+        "updated_at_ms DESC"
+      ],
+      "unique": false
+    },
+    "agent_nav_user_allowlists_tenant_idx": {
+      "table": "agent_nav_user_allowlists",
+      "columns": [
+        "tenant_id"
+      ],
+      "unique": false
+    },
+    "agent_user_profiles_login_tenant_idx": {
+      "table": "agent_user_profiles",
+      "columns": [
+        "user_login",
+        "tenant_id"
+      ],
+      "unique": true
+    },
+    "idx_mas_events_created": {
+      "table": "mas_events",
+      "columns": [
+        "created_at",
+        "id"
+      ],
+      "unique": false
+    },
+    "idx_mas_events_session_type": {
+      "table": "mas_events",
+      "columns": [
+        "session_id",
+        "type",
+        "created_at DESC"
+      ],
+      "unique": false
+    },
+    "idx_mas_events_tenant_created": {
+      "table": "mas_events",
+      "columns": [
+        "tenant_id",
+        "created_at DESC"
+      ],
+      "unique": false
+    },
+    "idx_mas_events_principal_created": {
+      "table": "mas_events",
+      "columns": [
+        "principal_id",
+        "created_at DESC"
+      ],
+      "unique": false
+    },
+    "idx_mas_events_type_created": {
+      "table": "mas_events",
+      "columns": [
+        "type",
+        "created_at DESC"
+      ],
+      "unique": false
+    },
+    "idx_mas_events_correlation": {
+      "table": "mas_events",
+      "columns": [
+        "correlation_id"
+      ],
+      "unique": false
+    },
+    "unified_schedules_kind_idx": {
+      "table": "unified_schedules",
+      "columns": [
+        "kind",
+        "created_at ASC",
+        "id ASC"
+      ],
+      "unique": false
+    },
+    "unified_schedules_state_idx": {
+      "table": "unified_schedules",
+      "columns": [
+        "state",
+        "created_at ASC",
+        "id ASC"
+      ],
+      "unique": false
+    },
+    "unified_schedules_created_idx": {
+      "table": "unified_schedules",
+      "columns": [
+        "created_at ASC",
+        "id ASC"
+      ],
+      "unique": false
+    },
     "idx_job_stage_events_run": {
       "table": "job_stage_events",
       "columns": [
@@ -10612,24 +10724,6 @@
       ],
       "unique": false
     },
-    "unified_schedules_kind_idx": {
-      "table": "unified_schedules",
-      "columns": [
-        "kind",
-        "created_at ASC",
-        "id ASC"
-      ],
-      "unique": false
-    },
-    "unified_schedules_state_idx": {
-      "table": "unified_schedules",
-      "columns": [
-        "state",
-        "created_at ASC",
-        "id ASC"
-      ],
-      "unique": false
-    },
     "idx_usage_events_tenant": {
       "table": "usage_events",
       "columns": [
@@ -10643,14 +10737,6 @@
       "columns": [
         "user_login",
         "created_at DESC"
-      ],
-      "unique": false
-    },
-    "unified_schedules_created_idx": {
-      "table": "unified_schedules",
-      "columns": [
-        "created_at ASC",
-        "id ASC"
       ],
       "unique": false
     },
@@ -10687,54 +10773,6 @@
       ],
       "unique": false
     },
-    "idx_mas_events_created": {
-      "table": "mas_events",
-      "columns": [
-        "created_at",
-        "id"
-      ],
-      "unique": false
-    },
-    "idx_mas_events_session_type": {
-      "table": "mas_events",
-      "columns": [
-        "session_id",
-        "type",
-        "created_at DESC"
-      ],
-      "unique": false
-    },
-    "idx_mas_events_tenant_created": {
-      "table": "mas_events",
-      "columns": [
-        "tenant_id",
-        "created_at DESC"
-      ],
-      "unique": false
-    },
-    "idx_mas_events_principal_created": {
-      "table": "mas_events",
-      "columns": [
-        "principal_id",
-        "created_at DESC"
-      ],
-      "unique": false
-    },
-    "idx_mas_events_type_created": {
-      "table": "mas_events",
-      "columns": [
-        "type",
-        "created_at DESC"
-      ],
-      "unique": false
-    },
-    "idx_mas_events_correlation": {
-      "table": "mas_events",
-      "columns": [
-        "correlation_id"
-      ],
-      "unique": false
-    },
     "idx_promotions_candidate": {
       "table": "mas_promotions",
       "columns": [
@@ -10763,54 +10801,6 @@
         "superseded_by"
       ],
       "unique": false
-    },
-    "job_stage_events_run_stage_idx": {
-      "table": "job_stage_events",
-      "columns": [
-        "run_id",
-        "stage_id"
-      ],
-      "unique": true
-    },
-    "agent_nav_presets_user_name_idx": {
-      "table": "agent_nav_presets",
-      "columns": [
-        "user_id",
-        "name"
-      ],
-      "unique": true
-    },
-    "agent_nav_presets_user_idx": {
-      "table": "agent_nav_presets",
-      "columns": [
-        "user_id",
-        "updated_at_ms DESC"
-      ],
-      "unique": false
-    },
-    "agent_nav_user_allowlists_tenant_idx": {
-      "table": "agent_nav_user_allowlists",
-      "columns": [
-        "tenant_id"
-      ],
-      "unique": false
-    },
-    "job_run_records_binding_idx": {
-      "table": "job_run_records",
-      "columns": [
-        "account_id",
-        "started DESC",
-        "id DESC"
-      ],
-      "unique": false
-    },
-    "agent_user_profiles_login_tenant_idx": {
-      "table": "agent_user_profiles",
-      "columns": [
-        "user_login",
-        "tenant_id"
-      ],
-      "unique": true
     }
   }
 }

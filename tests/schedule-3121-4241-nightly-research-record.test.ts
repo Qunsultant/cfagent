@@ -49,7 +49,10 @@ import {
 } from "../src/services/unifiedScheduleManagement";
 import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import { InMemoryUnifiedScheduleStore } from "../src/data/inMemoryUnifiedScheduleAdapter";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
 import { scheduleIdToLedgerJobId } from "../src/services/jobRunRecords";
 import { nightlyResearchDispatchCron } from "../src/services/researchScheduleGuard";
 import { DEFAULT_RESEARCH_JOB_CONFIG } from "../src/config/researchJobConfig";
@@ -384,12 +387,12 @@ describe("4241 management works on the stored nightly research record (no derive
 });
 
 describe("4241 fired run writes one ledger row (jobId = record id)", () => {
-  it("records the run with the record id as jobId and scheduleId", () => {
-    const sql = new SqliteTestStorage();
-    recordNightlyResearchLedgerRun(sql.sql as never, RUN_STARTED, RUN_FINISHED);
-    const latest = new SqlJobRunRecordStore(sql.sql as never).latestByJob(
-      NIGHTLY_RESEARCH_RECORD_ID,
-    );
+  it("records the run with the record id as jobId and scheduleId", async () => {
+    // Issue #6101 — the row lands in D1, not the DO.
+    const d1 = new MockD1Database();
+    const store = new D1JobRunRecordStore(createD1JobRunRecordDb(d1 as unknown as D1Database));
+    await recordNightlyResearchLedgerRun(store, RUN_STARTED, RUN_FINISHED);
+    const latest = await store.latestByJob(NIGHTLY_RESEARCH_RECORD_ID);
     expect(latest).not.toBeNull();
     expect(latest?.jobId).toBe("nightly-research");
     expect(latest?.scheduleId).toBe("nightly-research");
@@ -401,21 +404,21 @@ describe("4241 fired run writes one ledger row (jobId = record id)", () => {
     expect(latest?.finished).toBe(RUN_FINISHED);
   });
 
-  it("is a no-op without a store and never throws on a broken store", () => {
-    expect(() =>
+  it("is a no-op without a store and never throws on a broken store", async () => {
+    await expect(
       recordNightlyResearchLedgerRun(null, RUN_STARTED, RUN_FINISHED),
-    ).not.toThrow();
-    expect(() =>
+    ).resolves.toBeUndefined();
+    await expect(
       recordNightlyResearchLedgerRun(undefined, RUN_STARTED, RUN_FINISHED),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
     const broken = {
-      exec: () => {
-        throw new Error("sql down");
+      record: async () => {
+        throw new Error("d1 down");
       },
     };
-    expect(() =>
+    await expect(
       recordNightlyResearchLedgerRun(broken as never, RUN_STARTED, RUN_FINISHED),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
   });
 });
 
@@ -445,8 +448,10 @@ describe("4241 list route reads the stored nightly research row (no synthesis)",
     } as unknown as SchedulesRouteContext;
   }
 
-  function seedNightlyResearchRun() {
-    recordNightlyResearchLedgerRun(sql.sql as never, RUN_STARTED, RUN_FINISHED);
+  async function seedNightlyResearchRun() {
+    // Issue #6101 — the seed lands in D1 (the describe's mock binding).
+    const store = new D1JobRunRecordStore(createD1JobRunRecordDb(d1 as unknown as D1Database));
+    await recordNightlyResearchLedgerRun(store, RUN_STARTED, RUN_FINISHED);
   }
 
   /** The stored research row the list renders (D1 only, #6503 fail-closed). */
@@ -473,7 +478,7 @@ describe("4241 list route reads the stored nightly research row (no synthesis)",
   }
 
   it("shows the stored nightly research row with its last run when the ledger has a run", async () => {
-    seedNightlyResearchRun();
+    await seedNightlyResearchRun();
     const body = await list();
     const row = body.schedules.find((s) => s.id === "nightly-research");
     expect(row).toBeDefined();
@@ -497,14 +502,17 @@ describe("4241 list route reads the stored nightly research row (no synthesis)",
     // The ledger read fails but the unified-store list still works:
     // only job_run_records queries throw. The stored row renders
     // without its last run — a ledger failure never drops a row.
-    const ledgerDownSql = {
-      exec: (query: string, ...params: unknown[]) => {
-        if (query.includes("job_run_records")) throw new Error("sql down");
-        return sql.exec(query, ...params);
+    // Issue #6101 — the ledger read is a D1 read now, so the
+    // failure is injected on the D1 binding, not the DO sql.
+    const throwingD1 = {
+      prepare: (sqlText: string) => {
+        if (sqlText.includes("job_run_records")) throw new Error("d1 down");
+        return d1.prepare(sqlText);
       },
+      batch: (stmts: never[]) => d1.batch(stmts),
     };
     const throwing = baseCtx({
-      agentCtx: { storage: { sql: ledgerDownSql as never } } as never,
+      env: { AGENT_DB: throwingD1 },
     });
     const req = new Request("https://example.test/api/schedules", { method: "GET" });
     const res = await handleSchedulesRoutes(req, new URL(req.url), "/api/schedules", "sess", throwing);
@@ -519,10 +527,12 @@ describe("4241 list route reads the stored nightly research row (no synthesis)",
 describe("4241 runs routes join the nightly research record to its ledger rows", () => {
   let sql: SqliteTestStorage;
   let ctx: SchedulesRouteContext;
+  let d1: MockD1Database;
 
   function baseCtx(): SchedulesRouteContext {
     return {
-      env: {},
+      // Issue #6101 — the runs routes read the D1 ledger.
+      env: { AGENT_DB: d1 },
       agentCtx: { storage: { sql: sql.sql as never } } as never,
       audit: vi.fn(),
       listSchedules: vi.fn(async () => []),
@@ -540,10 +550,12 @@ describe("4241 runs routes join the nightly research record to its ledger rows",
     } as unknown as SchedulesRouteContext;
   }
 
-  beforeEach(() => {
+  beforeEach(async () => {
     sql = new SqliteTestStorage();
+    d1 = new MockD1Database();
     ctx = baseCtx();
-    recordNightlyResearchLedgerRun(sql.sql as never, RUN_STARTED, RUN_FINISHED);
+    const store = new D1JobRunRecordStore(createD1JobRunRecordDb(d1 as unknown as D1Database));
+    await recordNightlyResearchLedgerRun(store, RUN_STARTED, RUN_FINISHED);
   });
 
   async function call(path: string, url = `https://agent.internal${path}`) {

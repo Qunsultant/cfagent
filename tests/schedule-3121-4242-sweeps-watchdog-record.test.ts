@@ -59,9 +59,12 @@ import {
 } from "../src/services/unifiedScheduleManagement";
 import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import { InMemoryUnifiedScheduleStore } from "../src/data/inMemoryUnifiedScheduleAdapter";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
+import { recordLedgerRunD1 } from "../src/data/createJobRunRecordPorts";
 import { scheduleIdToLedgerJobId } from "../src/services/jobRunRecords";
-import { recordLedgerRun } from "../src/services/unifiedLedger";
 import { classifyScheduleKind } from "../src/services/scheduleKinds";
 import { scheduleTitle } from "../src/client/scheduledOptionsManager/scheduleDetail";
 import { recordScheduleCallbackRun } from "../src/agents/orchestrator/scheduleCallbackRunRecords";
@@ -163,6 +166,30 @@ class MockD1Database {
   }
 }
 
+/** Issue #6101 — the D1 run ledger over a fresh in-memory mock binding. */
+function ledgerD1() {
+  const d1 = new MockD1Database();
+  const store = new D1JobRunRecordStore(
+    createD1JobRunRecordDb(d1 as unknown as D1Database),
+  );
+  return { d1, store };
+}
+
+/**
+ * Issue #6101 — the ledger-down double: a D1 binding whose
+ * job_run_records statements throw, while every other table still
+ * reads (the unified-schedule list the route renders alongside).
+ */
+function ledgerDownD1(d1: MockD1Database) {
+  return {
+    prepare(sql: string) {
+      if (sql.includes("job_run_records")) throw new Error("d1 down");
+      return d1.prepare(sql);
+    },
+    batch: (statements: any[]) => d1.batch(statements),
+  };
+}
+
 /** A stored sweep/watchdog row, as the seed creates it (state set by the test). */
 function storedDutyRecord(
   id: (typeof STORED_IDS)[number],
@@ -198,8 +225,12 @@ function alarmsStub(overrides: Record<string, unknown> = {}): any {
   };
 }
 
-function seedRun(sql: SqliteTestStorage, jobId: string, detail: string): void {
-  recordLedgerRun(new SqlJobRunRecordStore(sql.sql as never), {
+async function seedRun(d1: MockD1Database, jobId: string, detail: string): Promise<void> {
+  // Issue #6101 — the seed lands in D1, not the DO.
+  const store = new D1JobRunRecordStore(
+    createD1JobRunRecordDb(d1 as unknown as D1Database),
+  );
+  await recordLedgerRunD1(store, {
     system: "orchestrator-schedule",
     jobId,
     operation: jobId,
@@ -537,6 +568,7 @@ describe("4242 management works on the stored sweep + watchdog records (no deriv
 describe("4242 the #3394 wrapper records a sweep run under the record id", () => {
   it("records one row per sweep run: jobId + scheduleId are the record id, counts in detail", async () => {
     const sql = new SqliteTestStorage();
+    const { d1, store } = ledgerD1();
     const result = {
       userLogin: "owner",
       researchSwept: 2,
@@ -550,11 +582,10 @@ describe("4242 the #3394 wrapper records a sweep run under the record id", () =>
       {},
       { id: STALE_LEDGER_SWEEP_RECORD_ID },
       async () => staleLedgerSweepOutcome(result),
-      { audit: () => {} },
+      // Issue #6101 — the recorder resolves the D1 store from env.
+      { audit: () => {}, env: { AGENT_DB: d1 } },
     );
-    const rows = new SqlJobRunRecordStore(sql.sql as never).listByJob(
-      STALE_LEDGER_SWEEP_RECORD_ID,
-    );
+    const rows = await store.listByJob(STALE_LEDGER_SWEEP_RECORD_ID);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.jobId).toBe("sweep-stale-ledger-tasks");
     expect(rows[0]?.scheduleId).toBe("sweep-stale-ledger-tasks");
@@ -568,17 +599,17 @@ describe("4242 the #3394 wrapper records a sweep run under the record id", () =>
 
   it("records the async-job sweep run the same way", async () => {
     const sql = new SqliteTestStorage();
+    const { d1, store } = ledgerD1();
     await recordScheduleCallbackRun(
       sql.sql as never,
       "sweepStaleAsyncJobs",
       {},
       { id: STALE_ASYNC_JOB_SWEEP_RECORD_ID },
       async () => staleAsyncJobSweepOutcome({ examined: 10, alerted: 1, reaped: 2 }),
-      { audit: () => {} },
+      // Issue #6101 — the recorder resolves the D1 store from env.
+      { audit: () => {}, env: { AGENT_DB: d1 } },
     );
-    const rows = new SqlJobRunRecordStore(sql.sql as never).listByJob(
-      STALE_ASYNC_JOB_SWEEP_RECORD_ID,
-    );
+    const rows = await store.listByJob(STALE_ASYNC_JOB_SWEEP_RECORD_ID);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.detail).toBe("examined=10 alerted=1 reaped=2");
   });
@@ -587,8 +618,10 @@ describe("4242 the #3394 wrapper records a sweep run under the record id", () =>
 describe("4242 the watchdog heartbeat IS its run row (no second recorder)", () => {
   it("writes exactly one heartbeat row per sweep with examined/missed/skipped counts", async () => {
     const sql = new SqliteTestStorage();
+    const { d1, store } = ledgerD1();
     const ctx: ScheduleWatchdogContext = {
-      env: {},
+      // Issue #6101 — the heartbeat lands in D1 via ctx.env.AGENT_DB.
+      env: { AGENT_DB: d1 },
       sql: sql.sql as never,
       storage: {
         get: async () => undefined,
@@ -601,9 +634,7 @@ describe("4242 the watchdog heartbeat IS its run row (no second recorder)", () =
       recordedCallbacks: RECORDED_SCHEDULE_CALLBACKS,
     });
     expect(result).toEqual({ examined: 0, alerted: 0, missed: 0, skippedUnrecorded: 0 });
-    const rows = new SqlJobRunRecordStore(sql.sql as never).listByJob(
-      SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID,
-    );
+    const rows = await store.listByJob(SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.jobId).toBe("schedule-watchdog-heartbeat");
     expect(rows[0]?.operation).toBe("schedule.watchdog_sweep");
@@ -695,10 +726,10 @@ describe("4242 list route reads the three stored rows (no synthesis)", () => {
     } as unknown as SchedulesRouteContext;
   }
 
-  function seedRuns() {
-    seedRun(sql, STALE_LEDGER_SWEEP_RECORD_ID, "research swept=2 pruned=3; screener swept=1 pruned=0");
-    seedRun(sql, STALE_ASYNC_JOB_SWEEP_RECORD_ID, "examined=10 alerted=1 reaped=2");
-    seedRun(sql, SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID, "examined=0 missed=0 skippedUnrecorded=3");
+  async function seedRuns() {
+    await seedRun(d1, STALE_LEDGER_SWEEP_RECORD_ID, "research swept=2 pruned=3; screener swept=1 pruned=0");
+    await seedRun(d1, STALE_ASYNC_JOB_SWEEP_RECORD_ID, "examined=10 alerted=1 reaped=2");
+    await seedRun(d1, SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID, "examined=0 missed=0 skippedUnrecorded=3");
   }
 
   /** The three stored rows the list renders (D1 only, #6503 fail-closed). */
@@ -725,7 +756,7 @@ describe("4242 list route reads the three stored rows (no synthesis)", () => {
   }
 
   it("shows all three stored rows with their last runs when the ledger has runs", async () => {
-    seedRuns();
+    await seedRuns();
     const body = await list();
     const ledger = body.schedules.find((s) => s.id === "sweep-stale-ledger-tasks");
     expect(ledger).toBeDefined();
@@ -762,16 +793,10 @@ describe("4242 list route reads the three stored rows (no synthesis)", () => {
 
   it("keeps the stored rows without a last run (list still 200) when the ledger read throws", async () => {
     // The ledger read fails but the unified-store list still works:
-    // only job_run_records queries throw. The stored rows render
+    // only job_run_records statements throw. The stored rows render
     // without their last runs — a ledger failure never drops a row.
-    const ledgerDownSql = {
-      exec: (query: string, ...params: unknown[]) => {
-        if (query.includes("job_run_records")) throw new Error("sql down");
-        return sql.exec(query, ...params);
-      },
-    };
     const throwing = baseCtx({
-      agentCtx: { storage: { sql: ledgerDownSql as never } } as never,
+      env: { AGENT_DB: ledgerDownD1(d1) as never },
     });
     const req = new Request("https://example.test/api/schedules", { method: "GET" });
     const res = await handleSchedulesRoutes(req, new URL(req.url), "/api/schedules", "sess", throwing);
@@ -788,10 +813,12 @@ describe("4242 list route reads the three stored rows (no synthesis)", () => {
 describe("4242 runs routes join the three records to their ledger rows", () => {
   let sql: SqliteTestStorage;
   let ctx: SchedulesRouteContext;
+  let d1: MockD1Database;
 
   function baseCtx(): SchedulesRouteContext {
     return {
-      env: {},
+      // Issue #6101 — the runs routes read the D1 ledger.
+      env: { AGENT_DB: d1 },
       agentCtx: { storage: { sql: sql.sql as never } } as never,
       audit: vi.fn(),
       listSchedules: vi.fn(async () => []),
@@ -809,12 +836,13 @@ describe("4242 runs routes join the three records to their ledger rows", () => {
     } as unknown as SchedulesRouteContext;
   }
 
-  beforeEach(() => {
+  beforeEach(async () => {
     sql = new SqliteTestStorage();
+    d1 = new MockD1Database();
     ctx = baseCtx();
-    seedRun(sql, STALE_LEDGER_SWEEP_RECORD_ID, "research swept=2 pruned=3; screener swept=1 pruned=0");
-    seedRun(sql, STALE_ASYNC_JOB_SWEEP_RECORD_ID, "examined=10 alerted=1 reaped=2");
-    seedRun(sql, SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID, "examined=0 missed=0 skippedUnrecorded=3");
+    await seedRun(d1, STALE_LEDGER_SWEEP_RECORD_ID, "research swept=2 pruned=3; screener swept=1 pruned=0");
+    await seedRun(d1, STALE_ASYNC_JOB_SWEEP_RECORD_ID, "examined=10 alerted=1 reaped=2");
+    await seedRun(d1, SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID, "examined=0 missed=0 skippedUnrecorded=3");
   });
 
   async function call(path: string, url = `https://agent.internal${path}`) {

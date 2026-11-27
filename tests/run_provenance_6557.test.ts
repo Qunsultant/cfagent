@@ -245,11 +245,18 @@ describe("6557-P07 both record residencies carry the four facts", () => {
     expect(source).toContain("MIGRATION_0091_JOB_RUN_RECORD_PROVENANCE");
   });
 
-  it("the DO adapter keeps its columns and the instance probe", () => {
-    const record = read("src/data/doSqliteJobRunRecordAdapter.ts");
-    for (const column of ["broker_id", "data_provider_id", "mode", "mode_source"]) {
-      expect(record).toContain(`remainderAlterSql("job_run_records", "${column}")`);
-      expect(record).toContain(`row.${column}`);
+  it("the D1 adapter keeps its columns and the instance probe", () => {
+    // Issue #6101 — the DO adapter is deleted; the provenance
+    // columns live on the D1 writer now (migration 0091).
+    const record = read("src/data/d1JobRunRecordAdapter.ts");
+    expect(record).toContain("MIGRATION_0091_JOB_RUN_RECORD_PROVENANCE");
+    for (const mapping of [
+      "brokerId: record.brokerId ?? null",
+      "dataProviderId: record.dataProviderId ?? null",
+      "mode: record.mode ?? null",
+      "modeSource: record.modeSource ?? null",
+    ]) {
+      expect(record).toContain(mapping);
     }
     const pipeline = read("src/data/doSqliteJobPipelineAdapter.ts");
     expect(pipeline).toContain(

@@ -24,9 +24,14 @@
  *    built — never a silent degradation, never a thrown
  *    ensure for the duplicate case; an unreconcilable schema
  *    throws a named error instead.
- *  - the seam end-to-end over a pre-#2398 instance and over
- *    the R2 seam: both tenants' reports land, retrievable by
- *    their owners, with stored fan-out outcomes recorded.
+ *  - the seam end-to-end over D1 (#6101 step 8): both tenants'
+ *    reports land, retrievable by their owners. The pre-#2398
+ *    DO-instance premise is gone — DO rows are not visible to
+ *    the D1 seam (replacement ruling: history restarts at
+ *    cutover) — so the seam pins land on D1 rows, and the
+ *    recorded fan-out outcome is null on every D1 read (the
+ *    #2347 recorded-outcome contract ends with the DO row;
+ *    the store result still carries the outcome).
  *
  * Port-level conformance over BOTH adapters (insert-or-throw
  * within a tenant, land across tenants) lives in the inverted
@@ -37,15 +42,28 @@
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { MockD1Database } from "./mock-d1";
 import { DoSqliteCanonicalReportStore } from "../src/data/doSqliteCanonicalReportStoreAdapter";
 import type { InsertCanonicalReportRow } from "../src/data/canonicalReportStorePorts";
 import {
   getCanonicalReport,
-  getCanonicalReportFanoutOutcome,
   listScheduledReports,
   storeReportAtGeneration,
   storeReportAtGenerationWithR2,
 } from "../src/services/scheduledReports";
+
+type D1Database = any;
+
+/** Fresh D1 env per test (#6101 step 8: the seam reads/writes D1). */
+function d1Env(extra: Record<string, unknown> = {}) {
+  const mock = new MockD1Database();
+  const env = {
+    AGENT_DB: mock as unknown as D1Database,
+    IAAA_TENANT_ID: "tenant-2398",
+    ...extra,
+  };
+  return { mock, env };
+}
 
 /** SqlStorage-shaped executor over node:sqlite (real semantics). */
 class SqliteTestStorage {
@@ -260,31 +278,33 @@ describe("#2398 [seam]: cross-tenant stores land", () => {
     ...over,
   });
 
-  async function settledFanout(sql: SqliteTestStorage, reportId: string) {
-    for (let i = 0; i < 50; i++) {
-      const outcome = getCanonicalReportFanoutOutcome(sql as never, reportId);
-      if (outcome && outcome.aiSearch !== "pending") return outcome;
-      await new Promise((r) => setTimeout(r, 10));
-    }
-    return getCanonicalReportFanoutOutcome(sql as never, reportId);
-  }
-
-  it("over a pre-#2398 instance: bob's store lands beside alice's raw-stored row", async () => {
-    const sql = preFixStorage();
-    const bob = storeReportAtGeneration(sql as never, input({ userLogin: "bob", title: "Bob screen" }));
+  it("both tenants store the same generation id; each lands, retrievable by its owner", async () => {
+    const { env } = d1Env();
+    const alice = await storeReportAtGeneration(input(), env as never);
+    expect(alice?.created).toBe(true);
+    expect(alice?.fanout.outcome).toBe("stored_inline");
+    const bob = await storeReportAtGeneration(
+      input({ userLogin: "bob", title: "Bob screen" }),
+      env as never,
+    );
     expect(bob?.created).toBe(true);
     expect(bob?.fanout.outcome).toBe("stored_inline");
-    const outcome = await settledFanout(sql, bob!.reportId);
-    expect(outcome?.outcome).toBe("stored_inline");
-    // Alice's pre-existing row is untouched and still hers alone.
-    expect(getCanonicalReport(sql as never, "rep-alice")?.title).toBe("Alice report");
-    expect(listScheduledReports(sql as never, { userLogin: "alice" }).map((h) => h.id)).toEqual(["rep-alice"]);
-    expect(listScheduledReports(sql as never, { userLogin: "bob" }).map((h) => h.id)).toEqual([bob!.reportId]);
-    expect(generationIndexColumns(sql)).toEqual(["user_login", "generation_id"]);
+    expect(bob?.reportId).not.toBe(alice?.reportId);
+    // Each tenant's report is retrievable by its owner alone.
+    expect((await getCanonicalReport(env as never, alice!.reportId))?.title).toBe("Daily screen");
+    expect((await getCanonicalReport(env as never, bob!.reportId))?.title).toBe("Bob screen");
+    expect((await listScheduledReports(env as never, { userLogin: "alice" })).map((h) => h.id)).toEqual([
+      alice!.reportId,
+    ]);
+    expect((await listScheduledReports(env as never, { userLogin: "bob" })).map((h) => h.id)).toEqual([
+      bob!.reportId,
+    ]);
+    // #6101 step 8 (named loss): no fan-out outcome is recorded on D1 rows.
+    expect((await getCanonicalReport(env as never, alice!.reportId))?.fanoutOutcome).toBeNull();
+    expect((await getCanonicalReport(env as never, bob!.reportId))?.fanoutOutcome).toBeNull();
   });
 
   it("over the R2 seam: both tenants store the same generation id, each with its own object", async () => {
-    const sql = new SqliteTestStorage();
     const objects = new Map<string, string>();
     const bucket = {
       put: async (key: string, value: string) => {
@@ -298,10 +318,10 @@ describe("#2398 [seam]: cross-tenant stores land", () => {
         objects.delete(key);
       },
     };
-    const alice = await storeReportAtGenerationWithR2(sql as never, { REPORTS_BUCKET: bucket as never }, input());
+    const { env } = d1Env({ REPORTS_BUCKET: bucket as never });
+    const alice = await storeReportAtGenerationWithR2(env as never, input());
     const bob = await storeReportAtGenerationWithR2(
-      sql as never,
-      { REPORTS_BUCKET: bucket as never },
+      env as never,
       input({ userLogin: "bob", runId: "run-2", title: "Bob screen" })
     );
     expect(alice?.created).toBe(true);
@@ -310,7 +330,7 @@ describe("#2398 [seam]: cross-tenant stores land", () => {
     expect(bob?.fanout.outcome).toBe("stored_r2");
     expect(bob?.reportId).not.toBe(alice?.reportId);
     expect(objects.size).toBe(2);
-    expect(getCanonicalReport(sql as never, alice!.reportId)?.bodyR2Key).toBe(`reports/${alice!.reportId}.json`);
-    expect(getCanonicalReport(sql as never, bob!.reportId)?.bodyR2Key).toBe(`reports/${bob!.reportId}.json`);
+    expect((await getCanonicalReport(env as never, alice!.reportId))?.bodyR2Key).toBe(`reports/${alice!.reportId}.json`);
+    expect((await getCanonicalReport(env as never, bob!.reportId))?.bodyR2Key).toBe(`reports/${bob!.reportId}.json`);
   });
 });

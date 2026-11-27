@@ -271,14 +271,14 @@ describe("unified schema (#2600)", () => {
 });
 
 describe("run record carries all four controls, read identically by Run Details", () => {
-  it("stores mode, resolved ids, candidateLimit 'all', farDated, bands, horizon-limited", () => {
+  it("stores mode, resolved ids, candidateLimit 'all', farDated, bands, horizon-limited", async () => {
     const sql = new MockSqlStorage();
     const orm = {
-      storeCanonicalReport: vi.fn(() => ({ reportId: "strategy-nvda", created: true })),
+      storeCanonicalReport: vi.fn(async () => ({ reportId: "strategy-nvda", created: true })),
       getSql: () => sql,
     };
     const createdAt = "2026-11-01T12:00:00.000Z";
-    recordStrategyScreenRun(orm as any, {
+    await recordStrategyScreenRun(orm as any, {
       userLogin: "OpenAIMP",
       symbol: "NVDA",
       trigger: "manual",

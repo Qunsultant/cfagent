@@ -23,13 +23,14 @@ import { InMemoryAnalyzedDatasetStore } from "../src/data/inMemoryAnalyzedDatase
 import { InMemoryGeneratedDatasetStore } from "../src/data/inMemoryGeneratedDatasetAdapter";
 import type { AnalyzedDatasetStoreInput } from "../src/data/analyzedDatasetPorts";
 import {
+  listScheduledReports,
   storeReportAtGeneration,
   type CanonicalStoreResult,
   type ScheduledReportInput,
 } from "../src/services/scheduledReports";
-import { createCanonicalReportStorePorts } from "../src/data/createCanonicalReportStorePorts";
 import type { DataProviderId, IndexId } from "../src/trading";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 
 const T0 = Date.parse("2026-11-07T12:00:00.000Z");
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -130,26 +131,29 @@ async function seededStores() {
 /** A door-bound seam whose record call writes through the REAL
  *  canonical seam (storeReportAtGeneration) over in-memory sql —
  *  the door's own storage, as the orchestrator door provides it. */
-function doorSeam(sql: MockSqlStorage, ownerLogin?: string) {
+// #6101 step 8: the seam writes D1 agent_reports now.
+function doorSeam(_sql: MockSqlStorage, ownerLogin?: string) {
+  const mock = new MockD1Database();
+  const env = { AGENT_DB: mock as unknown as never };
   const calls: ScheduledReportInput[] = [];
   const record = async (
     input: ScheduledReportInput,
   ): Promise<CanonicalStoreResult | null> => {
     calls.push(input);
-    return storeReportAtGeneration(sql as never, input);
+    return storeReportAtGeneration(input, env);
   };
   const seam = createTenantAwareCanonicalReportStore({
     ...(ownerLogin !== undefined ? { ownerLogin } : {}),
     record,
   });
-  return { calls, seam };
+  return { calls, seam, env };
 }
 
 describe("the tenant-aware canonical leg (#3940)", () => {
   it("stores under the job's configured owner through the door", async () => {
     const sql = new MockSqlStorage();
     const { analyzedStore, generatedStore } = await seededStores();
-    const { calls, seam } = doorSeam(sql);
+    const { calls, seam, env } = doorSeam(sql);
     const result = await runGenerateJob(
       registryWith(def({ reportOwnerLogin: "octocat" })),
       { analyzedStore, generatedStore, canonicalReportStore: seam },
@@ -164,13 +168,12 @@ describe("the tenant-aware canonical leg (#3940)", () => {
     expect(calls[0]?.generationId).toMatch(
       /^pipeline-generate:yahoo-nasdaq100-quotes-enrich-analyze-generate:/,
     );
-    // The canonical row lands in mas_reports under the job's
-    // owner, and the Reports-surface read sees it there.
-    const ports = createCanonicalReportStorePorts(sql as never);
-    const rows = ports.read.listRows("octocat", undefined, 10);
+    // The canonical row lands in D1 agent_reports under the
+    // job's owner, and the Reports-surface read sees it there.
+    const rows = await listScheduledReports(env, { userLogin: "octocat" });
     expect(rows).toHaveLength(1);
     expect(rows[0]?.source).toBe("pipeline_generate");
-    expect(ports.read.listRows("someone-else", undefined, 10)).toHaveLength(0);
+    expect(await listScheduledReports(env, { userLogin: "someone-else" })).toHaveLength(0);
     const artifact = await generatedStore.latestUsable(JOB);
     expect(artifact?.reports[0]?.canonical).toMatchObject({
       status: "stored",
@@ -231,7 +234,7 @@ describe("the tenant-aware canonical leg (#3940)", () => {
   it("a re-run over the same persisted input dedupes through the door", async () => {
     const sql = new MockSqlStorage();
     const { analyzedStore, generatedStore } = await seededStores();
-    const { seam } = doorSeam(sql, "octocat");
+    const { seam, env } = doorSeam(sql, "octocat");
     const first = await runGenerateJob(
       registryWith(def()),
       { analyzedStore, generatedStore, canonicalReportStore: seam },
@@ -246,8 +249,7 @@ describe("the tenant-aware canonical leg (#3940)", () => {
       { runId: "gen-2", nowMs: T0 + 120_000 },
     );
     expect(second.canonical).toEqual({ analysis: "deduped" });
-    const ports = createCanonicalReportStorePorts(sql as never);
-    expect(ports.read.listRows("octocat", undefined, 10)).toHaveLength(1);
+    expect(await listScheduledReports(env, { userLogin: "octocat" })).toHaveLength(1);
   });
 
   it("the registry resolves the owner from the per-job knob", () => {

@@ -47,6 +47,7 @@
  * suites.
  */
 import { DatabaseSync } from "node:sqlite";
+import { MockD1Database } from "./mock-d1";
 import { describe, expect, it } from "vitest";
 import {
   DatabaseORM,
@@ -257,18 +258,35 @@ describe("characterization: aggregate helpers as found", () => {
     expect(orm.optionsChainCache.findById("AAPL")?.symbol).toBe("AAPL");
   });
 
-  it("canonical report door is idempotent on generationId; reports repo reads the AS-FOUND stale map", () => {
+  it("canonical report door is idempotent on generationId; reports repo reads the AS-FOUND stale map", async () => {
     const { orm } = freshOrm();
     const input = {
       runId: "run-1", generationId: "gen-1", userLogin: "alice",
       title: "T", source: "scheduler", summary: "S", body: "B",
       createdAt: "2026-01-01T00:00:00.000Z",
     };
-    const first = orm.storeCanonicalReport(input);
-    const second = orm.storeCanonicalReport(input);
+    // #6101: the door is async now and lands in D1 (idempotent on
+    // generation id via the D1 dedupe), so the door assertions
+    // bind AGENT_DB and await.
+    const d1 = new MockD1Database();
+    const first = await orm.storeCanonicalReport(input as any, { AGENT_DB: d1 } as any);
+    const second = await orm.storeCanonicalReport(input as any, { AGENT_DB: d1 } as any);
     expect(first?.created).toBe(true);
     expect(second?.created).toBe(false);
     expect(second?.reportId).toBe(first?.reportId);
+    // The repo half still pins the DO repo's completed column map —
+    // seeded through the repo itself (the door no longer writes DO).
+    orm.reports.create({
+      id: "rep-1",
+      runId: "run-1",
+      generationId: "gen-1",
+      title: "T",
+      source: "scheduler",
+      summary: "S",
+      body: "B",
+      userLogin: "alice",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
     const rows = orm.reports.findMany();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ runId: "run-1", title: "T", generationId: "gen-1" });

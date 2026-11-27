@@ -34,10 +34,52 @@ import {
 } from "../src/data/createStockCopilotStorePorts";
 import { StockCopilotPositionStore } from "../src/services/stockCopilotStore";
 import { COPILOT_SESSIONS } from "../src/services/stockCopilotSessions";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
 import { buildJobRunRecord } from "../src/services/jobRunRecords";
 import { STOCK_COPILOT_TASK_ID } from "../src/agents/orchestrator/scheduledTasksCopilot";
 import { upsertAccountBinding } from "../src/services/accountBindings";
+
+/** Minimal D1Database stand-in over node:sqlite (the #6101 double). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: { changes: info.changes, last_row_id: info.lastInsertRowid },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+}
+
+/** The D1 run-ledger store over one mock binding (#6101). */
+function ledgerD1(d1: MockD1Database) {
+  return new D1JobRunRecordStore(createD1JobRunRecordDb(d1 as unknown as D1Database));
+}
 
 /** The #5112 in-memory DO-namespace stub, for seeding bindings. */
 function makeMemoryDoNamespace() {
@@ -67,7 +109,7 @@ function makeMemoryDoNamespace() {
 
 /** A ctx whose env carries a binding store seeded for the owner. */
 async function boundCtx() {
-  const { ctx, sql } = await makeCtx({
+  const { ctx, sql, d1 } = await makeCtx({
     env: {
       STOCK_COPILOT_PAPER_ENABLED: "1",
       SESSION_STORE: makeMemoryDoNamespace(),
@@ -80,7 +122,7 @@ async function boundCtx() {
     scope: "tenant",
     accountId: "PA-900",
   });
-  return { ctx, sql };
+  return { ctx, sql, d1 };
 }
 
 /** Minimal SqlStorage shim over node:sqlite (same shape as #2528's harness). */
@@ -116,6 +158,11 @@ async function alpacaCommercial(): Promise<InMemoryCommercialAdapter> {
 
 async function makeCtx(overrides: Partial<StockCopilotRouteContext> = {}) {
   const sql = new SqliteTestStorage();
+  // Issue #6101 — the status route reads the D1 ledger: every ctx
+  // carries a bound mock AGENT_DB, added on top of whatever env the
+  // caller supplied — so the flag-off test's `env: {}` still unsets
+  // the flag while keeping the ledger binding.
+  const d1 = new MockD1Database();
   const ctx: StockCopilotRouteContext = {
     env: { STOCK_COPILOT_PAPER_ENABLED: "1" } as StockCopilotRouteContext["env"],
     sql: sql as never,
@@ -126,7 +173,8 @@ async function makeCtx(overrides: Partial<StockCopilotRouteContext> = {}) {
     audit: vi.fn(),
     ...overrides,
   };
-  return { ctx, sql };
+  (ctx.env as unknown as Record<string, unknown>).AGENT_DB = d1;
+  return { ctx, sql, d1 };
 }
 
 const req = (method: string, path: string, body?: unknown) =>
@@ -141,7 +189,7 @@ const call = (ctx: StockCopilotRouteContext, request: Request) => {
   return handleStockCopilotRoutes(request, url, url.pathname, "session-1", ctx);
 };
 
-async function seed(sql: SqliteTestStorage) {
+async function seed(sql: SqliteTestStorage, d1: MockD1Database) {
   const positions = createStockCopilotPositionPort(sql as never);
   const store = new StockCopilotPositionStore(positions);
   const open = await store.openPosition({
@@ -186,8 +234,9 @@ async function seed(sql: SqliteTestStorage) {
   // Issue #5085 (S6): the Loop status reads the runs ledger, so
   // the live lastCycle comes from a cycle ledger row, not the
   // activity record above (the activity feed stays as detail).
-  const ledger = new SqlJobRunRecordStore(sql as never);
-  ledger.record(
+  // Issue #6101 — the row is seeded in D1, the only ledger now.
+  const ledger = ledgerD1(d1);
+  await ledger.record(
     buildJobRunRecord({
       system: "orchestrator-schedule",
       jobId: STOCK_COPILOT_TASK_ID,
@@ -229,8 +278,8 @@ describe("stock copilot routes (#3422)", () => {
   });
 
   it("status composes flag, pause, market, positions with exit plans, closed, activity", async () => {
-    const { ctx, sql } = await makeCtx();
-    await seed(sql);
+    const { ctx, sql, d1 } = await makeCtx();
+    await seed(sql, d1);
     const res = await call(ctx, req("GET", STATUS_PATH));
     expect(res?.status).toBe(200);
     const body = (await res!.json()) as any;
@@ -270,8 +319,8 @@ describe("stock copilot routes (#3422)", () => {
   });
 
   it("status carries the masked active binding when bound (#5100)", async () => {
-    const { ctx, sql } = await boundCtx();
-    await seed(sql);
+    const { ctx, sql, d1 } = await boundCtx();
+    await seed(sql, d1);
     const res = await call(ctx, req("GET", STATUS_PATH));
     expect(res?.status).toBe(200);
     const body = (await res!.json()) as any;
@@ -283,8 +332,8 @@ describe("stock copilot routes (#3422)", () => {
   });
 
   it("status carries a null active binding when unbound (#5100)", async () => {
-    const { ctx, sql } = await makeCtx();
-    await seed(sql);
+    const { ctx, sql, d1 } = await makeCtx();
+    await seed(sql, d1);
     const res = await call(ctx, req("GET", STATUS_PATH));
     expect(res?.status).toBe(200);
     const body = (await res!.json()) as any;

@@ -31,8 +31,11 @@
  *   ALTERs all four missing columns; the legacy row reads NULLs.
  * - 3314-P04: joinability — a scan saved with linkage joins its
  *   ledger row (same scheduleId, generated_at inside the ledger
- *   row's window) in one SQL JOIN; a scan under another schedule
- *   joins nothing.
+ *   row's window); a scan under another schedule joins nothing.
+ *   Issue #6101 — the ledger is D1 and the scan row stays in DO
+ *   SQLite, so no single SQL JOIN can span the two stores: the
+ *   join is the two-store read (scan row by id, ledger rows by
+ *   scheduleId) matched on the same keys in the test.
  * - 3314-P05: backfill — updateLedgerLinkage stamps the linkage
  *   after save; unknown id / invisible row → false; a poisoned
  *   "undefined"/"null" literal stamps as null (#3650).
@@ -45,11 +48,15 @@
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
+import { MockD1Database } from "./mock-d1";
+import { recordLedgerRunD1 } from "../src/data/createJobRunRecordPorts";
 import { InMemoryScanRunStore } from "../src/data/inMemoryScanRunAdapter";
 import { SqlScanRunStore } from "../src/data/doSqliteScanRunAdapter";
 import type { ScanRunStore } from "../src/data/scanRunPorts";
-import { recordLedgerRun } from "../src/services/unifiedLedger";
 
 /**
  * Real in-memory SQLite executor (the options_discovery_ports_
@@ -173,11 +180,17 @@ describe("3314-P03 legacy table gains the columns by probe; legacy rows read NUL
   });
 });
 
-describe("3314-P04 joinability: scan row joins its ledger row in one SQL JOIN", () => {
+describe("3314-P04 joinability: scan row joins its ledger row", () => {
   it("same scheduleId + generated_at inside the ledger window joins; another schedule joins nothing", async () => {
     const sql = new SqliteTestStorage();
     const scans = new SqlScanRunStore(sql as never);
-    const ledger = new SqlJobRunRecordStore(sql as never);
+    // Issue #6101 — the ledger row lands in D1; the scan row stays
+    // in DO SQLite. The join below reads both stores and matches
+    // on the same keys the old single-SQL JOIN matched on.
+    const d1 = new MockD1Database();
+    const ledger = new D1JobRunRecordStore(
+      createD1JobRunRecordDb(d1 as unknown as D1Database),
+    );
     await scans.save(scanResult("2026-11-12T00:00:30.000Z"), {
       id: "scan-3314-join",
       userLogin: "alice",
@@ -190,7 +203,7 @@ describe("3314-P04 joinability: scan row joins its ledger row in one SQL JOIN", 
       trigger: "scheduled",
       linkage: { scheduleId: "sched-other", asyncJobId: null, workflowId: null },
     });
-    recordLedgerRun(ledger, {
+    await recordLedgerRunD1(ledger, {
       system: "orchestrator-schedule",
       jobId: "sched-3314",
       operation: "autonomousOptionsAnalysis",
@@ -200,19 +213,29 @@ describe("3314-P04 joinability: scan row joins its ledger row in one SQL JOIN", 
       triggeredBy: "scheduled",
       scheduleId: "sched-3314",
     });
-    const join = (scanId: string): Array<Record<string, unknown>> =>
-      sql.exec(
-        "SELECT s.id AS scan_id, l.job_id AS ledger_job_id, l.schedule_id AS ledger_schedule_id " +
-          "FROM mas_opportunity_scans s " +
-          "JOIN job_run_records l ON s.schedule_id = l.schedule_id " +
-          "AND s.generated_at >= l.started AND s.generated_at <= l.finished " +
-          "WHERE s.id = ?",
+    const join = async (scanId: string): Promise<Array<Record<string, unknown>>> => {
+      const scans = sql.exec(
+        "SELECT id, schedule_id, generated_at FROM mas_opportunity_scans WHERE id = ?",
         scanId,
-      ) as Array<Record<string, unknown>>;
-    expect(join("scan-3314-join")).toEqual([
+      ) as Array<{ id: string; schedule_id: string; generated_at: string }>;
+      const out: Array<Record<string, unknown>> = [];
+      for (const scan of scans) {
+        for (const row of await ledger.listByJob(scan.schedule_id)) {
+          if (scan.generated_at >= row.started && scan.generated_at <= row.finished) {
+            out.push({
+              scan_id: scan.id,
+              ledger_job_id: row.jobId,
+              ledger_schedule_id: row.scheduleId,
+            });
+          }
+        }
+      }
+      return out;
+    };
+    expect(await join("scan-3314-join")).toEqual([
       { scan_id: "scan-3314-join", ledger_job_id: "sched-3314", ledger_schedule_id: "sched-3314" },
     ]);
-    expect(join("scan-3314-other")).toEqual([]);
+    expect(await join("scan-3314-other")).toEqual([]);
   });
 });
 

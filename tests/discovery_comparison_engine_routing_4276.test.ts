@@ -18,6 +18,7 @@
  * core's semantics.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { MockD1Database } from "./mock-d1";
 import { DatabaseSync } from "node:sqlite";
 import type { SqlStorage } from "../src/orm";
 import type { ETradeOptionChain, ETradeOptionExpireDate } from "../src/types";
@@ -322,7 +323,8 @@ describe("discovery leg engine threading (#4276)", () => {
   it("a discovery run over real engine stores defines a strategy job with a durable run record, addressable by control", async () => {
     DynamicOptionsScreener.setTestChainsFixture({ TREND: makeChain("TREND", 130) });
     const sql = new SqliteTestStorage();
-    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage);
+    const d1 = new MockD1Database();
+    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage, { AGENT_DB: d1 });
     const store = new InMemoryDiscoverySetupStore({ idFactory: () => "run-real" });
     const { run, errors } = await runDiscovery(
       makeFakeDeps(store, (request, options) =>
@@ -356,6 +358,7 @@ describe("discovery leg engine threading (#4276)", () => {
     const refused = await expectControlError(
       controlOptionsStage({
         sql: sql as unknown as SqlStorage,
+        env: { AGENT_DB: d1 },
         storage: { ...memoryStageStorage(), sql: sql as unknown as SqlStorage },
         runId,
         stage: "screen",
@@ -452,7 +455,8 @@ describe("comparison runner engine threading (#4276)", () => {
 
   it("a comparison run with engine stores creates a comparison engine job with a durable record", async () => {
     const sql = new SqliteTestStorage();
-    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage);
+    const d1 = new MockD1Database();
+    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage, { AGENT_DB: d1 });
     const runner = createComparisonRunner({
       client: undefined,
       env: {},
@@ -509,7 +513,8 @@ describe("comparison runner engine threading (#4276)", () => {
 
   it("the engine path preserves the comparison core's inputs (same inputs, same artifact modulo the run id)", async () => {
     const sql = new SqliteTestStorage();
-    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage);
+    const d1 = new MockD1Database();
+    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage, { AGENT_DB: d1 });
     const runner = createComparisonRunner({ client: undefined, env: {} });
     const direct = await runner.run({ request: COMPARISON_REQUEST, riskProfile: "balanced" });
     const directArgs = mockRunProductionComparison.mock.calls[0][0] as Record<string, unknown>;
@@ -601,7 +606,8 @@ describe("comparison engine dispatch (#4276)", () => {
 
   it("dispatches the thunk as a single-step comparison job and returns its result verbatim", async () => {
     const sql = new SqliteTestStorage();
-    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage);
+    const d1 = new MockD1Database();
+    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage, { AGENT_DB: d1 });
     const canned = cannedComparisonResult("cmp-wrapper-1");
     const execute = vi.fn(async () => canned);
     const result = await runComparisonViaEngine(
@@ -629,7 +635,8 @@ describe("comparison engine dispatch (#4276)", () => {
 
   it("a thunk failure rethrows the original error and records a failed run", async () => {
     const sql = new SqliteTestStorage();
-    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage);
+    const d1 = new MockD1Database();
+    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage, { AGENT_DB: d1 });
     const boom = new Error("core exploded");
     const execute = vi.fn(async () => {
       throw boom;
@@ -668,7 +675,8 @@ describe("comparison engine dispatch (#4276)", () => {
 describe("comparison control (#4276)", () => {
   it("an execution op on a comparison run refuses stage_port_unavailable by name", async () => {
     const sql = new SqliteTestStorage();
-    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage);
+    const d1 = new MockD1Database();
+    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage, { AGENT_DB: d1 });
     await runComparisonViaEngine(
       {
         runId: "cmp-control-1",
@@ -685,6 +693,7 @@ describe("comparison control (#4276)", () => {
     const refused = await expectControlError(
       controlOptionsStage({
         sql: sql as unknown as SqlStorage,
+        env: { AGENT_DB: d1 },
         storage: { ...memoryStageStorage(), sql: sql as unknown as SqlStorage },
         runId: "cmp-control-1",
         stage: "screen",
@@ -699,7 +708,8 @@ describe("comparison control (#4276)", () => {
 
   it("stop on a comparison run refuses stage_vocabulary_unknown (no stage node in a single-step job)", async () => {
     const sql = new SqliteTestStorage();
-    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage);
+    const d1 = new MockD1Database();
+    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage, { AGENT_DB: d1 });
     await runComparisonViaEngine(
       {
         runId: "cmp-control-2",
@@ -716,6 +726,7 @@ describe("comparison control (#4276)", () => {
     const refused = await expectControlError(
       controlOptionsStage({
         sql: sql as unknown as SqlStorage,
+        env: { AGENT_DB: d1 },
         storage: { ...memoryStageStorage(), sql: sql as unknown as SqlStorage },
         runId: "cmp-control-2",
         stage: "screen",
