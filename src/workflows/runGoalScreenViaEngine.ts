@@ -185,8 +185,7 @@ async function readOutcome(
       `Goal screen workflow ${jobId} completed without storing a canonical report (lifecycle "${collation.lifecycle}"${collation.error ? `: ${collation.error}` : ""}); no goal result is readable.`,
     );
   }
-  const sql = input.getSql();
-  const hit = getCanonicalReport(sql, reportId);
+  const hit = await getCanonicalReport(input.env, reportId);
   if (!hit) {
     throw new Error(
       `Goal screen workflow ${jobId} stored canonical report ${reportId}, but the row is not readable.`,

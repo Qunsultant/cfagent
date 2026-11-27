@@ -61,6 +61,7 @@ import type { PaidScreenStorePorts } from "../src/services/paidScreenSubmission"
 import { workflowTenantId } from "../src/workflows/screenerWorkflowRoutes";
 import type { Env } from "../src/types";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 
 /* ------------------------------------------------------------------ */
 /* Fakes                                                               */
@@ -146,6 +147,7 @@ function subscribedStores(): PaidScreenStorePorts {
 
 function makeHarness(opts: PaidHarnessOptions = {}): Harness {
   const sql = new MockSqlStorage();
+  const d1 = new MockD1Database();
   const shardStore = new InMemoryShardJobAdapter();
   const screenerStarts: WorkflowJobCommand[] = [];
   const budgetCalls: Harness["budgetCalls"] = [];
@@ -157,8 +159,11 @@ function makeHarness(opts: PaidHarnessOptions = {}): Harness {
   const agentCalls: Array<Record<string, unknown>> = [];
 
   /* ---- the real screener workflow, behind its adapter (S8) ---- */
+  // #6101: the canonical write + read both need the D1 binding — one
+  // shared MockD1Database for the write side (reportCtx) and the read
+  // side (ctx.env).
   const reportCtx = {
-    env: {},
+    env: { AGENT_DB: d1 },
     ensureTables: () => sql,
   } as unknown as ReportDispatchContext;
   const deps: ScreenerWorkflowDeps = {
@@ -317,7 +322,7 @@ function makeHarness(opts: PaidHarnessOptions = {}): Harness {
       } as never;
     },
     getSocialBriefStore: () => null,
-    env: {} as NlqPortsContext["env"],
+    env: { AGENT_DB: d1 } as NlqPortsContext["env"],
     ensureTables: () => sql as never,
     workflowPort: recordingScreenerPort,
     readWorkflowJobHistory: (tenantId, chainId) =>

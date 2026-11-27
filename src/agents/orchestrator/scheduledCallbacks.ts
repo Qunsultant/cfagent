@@ -548,7 +548,7 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
       // canonical row per generation (generationId = run id).
       // Skipped for queued sharded chains (see above).
       if (!res.data?.sharded && userLogin) {
-      const stored = orm.storeCanonicalReport({
+      const stored = await orm.storeCanonicalReport({
         runId: `screener:${res.timestamp}`,
         generationId: `screener:${res.timestamp}`,
         title: `Autonomous market screen — ${res.data?.universe || payload?.universe || defaultUniverseId()}`,

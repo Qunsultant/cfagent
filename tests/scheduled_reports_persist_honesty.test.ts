@@ -7,19 +7,30 @@
  * legacy shapes can lack columns the INSERTs name).
  *
  * Pins (Red on pristine main, noted per test):
- *  - duplicate non-null generation_id rows: persist succeeds, the index
- *    failure is logged (naming the index), nothing throws [RED: null];
+ *  - duplicate non-null generation_id rows: the frozen DO ensure still
+ *    self-heals (the index failure is logged, nothing throws);
  *  - legacy-shaped table missing a column the INSERT needs (body):
- *    persist succeeds after additive reconciliation [RED: null];
- *  - store throwing on INSERT: persist returns null AND console.error
- *    carries the error's message [RED: nothing logged]; same for
- *    storeReportAtGeneration [RED: nothing logged];
+ *    the frozen DO ensure still reconciles additively;
+ *  - D1 store throwing on INSERT: storeReportAtGeneration returns null
+ *    AND console.error carries the error's message;
  *  - recordUsageEvent (the module's other write seam) also logs [RED];
- *  - source pin: the persist seams contain logging and no bare catch.
+ *  - source pin: the D1 store seam contains logging and no bare catch.
  *
  * Characterization (passes both sides, disclosed): the healthy-store
  * test — persist returns the id, the row reads back, store dedupes on
  * generation id, and NO error is logged.
+ *
+ * Issue #6101 (step 8): the persist seam moved to D1 agent_reports.
+ * `persistScheduledReportSql` is DELETED — its honesty contract now
+ * lives on storeReportAtGeneration (D1). The two DO tests keep ONLY
+ * their ensure halves: the frozen mas_reports table's ensure still
+ * runs (maintenance), but no seam writes it anymore. The "generation
+ * UNIQUE INDEX creation sits inside a guarded try" source pin is
+ * DELETED: D1 agent_reports carries PK (tenant_id, report_id,
+ * version) and no generation UNIQUE index — dedupe is SELECT-then-
+ * INSERT, so there is no runtime index creation to guard; the
+ * no-second-live-row invariant is pinned by the dedupe tests
+ * (tests/reports_d1_6101.test.ts + the healthy-store test here).
  *
  * The double below extends MockSqlStorage with the strict SQLite
  * semantics plain MockSqlStorage does not model (pattern of
@@ -32,15 +43,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 import type { SqlStorage } from "../src/orm";
 import {
   ensureScheduledReportsTable,
-  persistScheduledReportSql,
   storeReportAtGeneration,
   getCanonicalReport,
   recordUsageEvent,
   type ScheduledReportInput,
 } from "../src/services/scheduledReports";
+
+type D1Database = any;
 
 interface ColMeta {
   name: string;
@@ -279,7 +292,7 @@ afterEach(() => {
 });
 
 describe("issue #876 — persist seams surface the real error", () => {
-  it("duplicate generation_id rows: persist succeeds, index failure is logged, nothing throws", () => {
+  it("duplicate generation_id rows: the frozen DO ensure still self-heals (index failure logged, nothing throws)", () => {
     const sql = new StrictMasReportsSql();
     sql.seedTable(FULL_COLS, [
       seedRow({ id: "rep_a", generation_id: "gen-dup" }),
@@ -296,14 +309,12 @@ describe("issue #876 — persist seams surface the real error", () => {
     expect(failed).toHaveLength(1);
     expect(failed[0]?.level).toBe("error");
     expect(String(failed[0]?.fields.message ?? "")).toContain("idx_mas_reports_generation");
-
-    const id = persistScheduledReportSql(sql, input());
-    expect(id).toBeTruthy();
-    const stored = getCanonicalReport(sql, id as string);
-    expect(stored?.title).toBe("Autonomous market screen — Technology");
+    // #6101 step 8: the DO table is frozen — no seam writes it anymore,
+    // so there is no persist half to this test; the ensure half above
+    // is the whole pin.
   });
 
-  it("legacy-shaped table missing `body`: persist succeeds after additive reconciliation", () => {
+  it("legacy-shaped table missing `body`: the frozen DO ensure still reconciles additively", () => {
     const sql = new StrictMasReportsSql();
     const legacyCols = FULL_COLS.filter(
       (c) => !["body", "generation_id", "user_login"].includes(c.name)
@@ -314,8 +325,7 @@ describe("issue #876 — persist seams surface the real error", () => {
     delete legacyRow.user_login;
     sql.seedTable(legacyCols, [legacyRow]);
 
-    const id = persistScheduledReportSql(sql, input());
-    expect(id).toBeTruthy();
+    expect(() => ensureScheduledReportsTable(sql)).not.toThrow();
 
     const cols = Array.from(sql.exec("PRAGMA table_info(mas_reports)")) as Array<{
       name?: unknown;
@@ -324,38 +334,58 @@ describe("issue #876 — persist seams surface the real error", () => {
     for (const expected of ["body", "generation_id", "user_login"]) {
       expect(names).toContain(expected);
     }
-    expect(getCanonicalReport(sql, id as string)?.runId).toBe(input().runId);
+    // #6101 step 8: the persist half (persistScheduledReportSql) died
+    // with the DO seam — the D1 store is pinned by the healthy-store
+    // test below instead.
   });
 
-  it("store throwing on INSERT: persist returns null AND the error is logged with its message", () => {
-    const sql = new StrictMasReportsSql();
-    sql.failInsertsWith = new Error("simulated store failure: SQLITE_FULL");
-    expect(persistScheduledReportSql(sql, input())).toBeNull();
-    // #3515 S3: the failure now travels as structured events on the
-    // console-info JSON fallback. The inner seam logs the underlying
-    // error; the outer seam logs that it returned null (attributable
-    // to this door, pointing at the inner line for the cause).
+  it("D1 store throwing on INSERT: storeReportAtGeneration returns null AND the error is logged with its message", async () => {
+    // Fail at the agent_reports INSERT (after the migrations run):
+    // the seam must still return null and log the failure. Drizzle
+    // wraps the underlying error (the log carries the failing
+    // statement, not the raw cause), so the pin asserts what
+    // survives the wrap — the seam name, the REPORT_FANOUT_FAILED
+    // code, and the failing statement or the raw cause.
+    class FailingInsertD1 extends MockD1Database {
+      override prepare(sql: string) {
+        const stmt = super.prepare(sql) as {
+          bind(...params: unknown[]): {
+            run(): Promise<unknown>;
+            all(): Promise<unknown>;
+            first(): Promise<unknown>;
+            raw(): Promise<unknown>;
+          };
+        };
+        if (/INSERT\s+INTO\s+["`]?agent_reports["`]?/i.test(sql)) {
+          return {
+            bind(...params: unknown[]) {
+              const bound = stmt.bind(...params);
+              return {
+                ...bound,
+                async run() {
+                  throw new Error("simulated store failure: SQLITE_FULL");
+                },
+              };
+            },
+          };
+        }
+        return stmt;
+      }
+    }
+    const brokenEnv = {
+      AGENT_DB: new FailingInsertD1() as unknown as D1Database,
+    };
+    expect(await storeReportAtGeneration(input(), brokenEnv)).toBeNull();
+    // #3515 S3: the failure travels as structured events on the
+    // console-info JSON fallback. The seam logs the underlying error
+    // before returning null (never a silent null).
     const events = structuredEvents();
-    const inner = events.find((e) => e.operation === "storeReportAtGeneration.failed");
-    expect(inner).toBeDefined();
-    expect(inner?.level).toBe("error");
-    expect(String(inner?.fields.error ?? "")).toContain("SQLITE_FULL");
-    expect(String(inner?.fields.message ?? "")).toContain("storeReportAtGeneration");
-    const outer = events.find((e) => e.operation === "persistScheduledReportSql.seam_returned_null");
-    expect(outer).toBeDefined();
-    expect(outer?.level).toBe("error");
-    expect(String(outer?.fields.message ?? "")).toContain("persistScheduledReportSql");
-  });
-
-  it("storeReportAtGeneration failure also logs (never a silent null)", () => {
-    const sql = new StrictMasReportsSql();
-    sql.failInsertsWith = new Error("simulated store failure: SQLITE_FULL");
-    expect(storeReportAtGeneration(sql, input({ generationId: "gen-x" }))).toBeNull();
-    const failed = structuredEvents().find((e) => e.operation === "storeReportAtGeneration.failed");
+    const failed = events.find((e) => e.operation === "storeReportAtGeneration.failed");
     expect(failed).toBeDefined();
     expect(failed?.level).toBe("error");
-    expect(String(failed?.fields.message ?? "")).toContain("storeReportAtGeneration");
-    expect(String(failed?.fields.error ?? "")).toContain("SQLITE_FULL");
+    expect(String(failed?.fields.message ?? "")).toContain("storeReportAtGeneration failed");
+    expect(String(failed?.fields.message ?? "")).toContain("REPORT_FANOUT_FAILED");
+    expect(String(failed?.fields.error ?? "")).toMatch(/agent_reports|SQLITE_FULL/);
   });
 
   it("recordUsageEvent failure is logged before returning null", () => {
@@ -381,17 +411,22 @@ describe("issue #876 — persist seams surface the real error", () => {
     expect(String(failed?.fields.error ?? "")).toContain("SQLITE_BUSY");
   });
 
-  it("healthy store: persist returns the id, row reads back, store dedupes, NO error logged (characterization)", () => {
-    const sql = new StrictMasReportsSql();
-    const id = persistScheduledReportSql(sql, input());
-    expect(id).toBeTruthy();
-    expect(getCanonicalReport(sql, id as string)?.title).toBe(input().title);
+  it("healthy D1 store: persist returns the id, row reads back, store dedupes, NO error logged (characterization)", async () => {
+    const mock = new MockD1Database();
+    const env = { AGENT_DB: mock as unknown as D1Database };
 
-    const first = storeReportAtGeneration(sql, input({ generationId: "gen-h" }));
+    const first = await storeReportAtGeneration(input(), env);
+    expect(first?.reportId).toBeTruthy();
     expect(first?.created).toBe(true);
-    const second = storeReportAtGeneration(sql, input({ generationId: "gen-h" }));
-    expect(second?.created).toBe(false);
-    expect(second?.reportId).toBe(first?.reportId);
+    expect(await getCanonicalReport(env, first!.reportId))?.toMatchObject({
+      title: input().title,
+    });
+
+    const second = await storeReportAtGeneration(input({ generationId: "gen-h" }), env);
+    expect(second?.created).toBe(true);
+    const third = await storeReportAtGeneration(input({ generationId: "gen-h" }), env);
+    expect(third?.created).toBe(false);
+    expect(third?.reportId).toBe(second?.reportId);
 
     expect(errSpy).not.toHaveBeenCalled();
   });
@@ -410,90 +445,33 @@ describe("issue #876 — source pin", () => {
     return src.slice(start, end);
   };
 
-  it("persist seams log and contain no bare catch", () => {
-    const persistSrc = slice(
-      "export function persistScheduledReportSql",
-      "export interface ScheduledReportHit"
+  it("the D1 store seam logs and contains no bare catch", () => {
+    // #6101 step 8: the seam's body lives in the D1 writer core
+    // (storeReportAtGenerationD1); the exported seam is a thin
+    // delegate. The pin slices exactly the core function.
+    const storeSrc = slice(
+      "async function storeReportAtGenerationD1",
+      "export async function storeReportAtGeneration"
     );
-    // #3515 S3: the seam now logs via the structured logger — the
+    // #3515 S3: the seam logs via the structured logger — the
     // structuredLog.error call with the same message content, not a
     // console.error line. The pin keeps the same strength: the seam
     // must log the failure (named operation + message) and must not
     // swallow it in a bare catch.
-    expect(persistSrc).toContain('structuredLog.error("persistScheduledReportSql.failed"');
-    expect(persistSrc).toContain("[scheduledReports] persistScheduledReportSql failed");
-    expect(persistSrc).not.toMatch(/catch\s*\{/);
-
-    const storeSrc = slice(
-      "export function storeReportAtGeneration",
-      "/** Read back the canonical stored copy"
-    );
-    expect(storeSrc).toContain('structuredLog.error("storeReportAtGeneration.failed"');
-    expect(storeSrc).toContain("[scheduledReports] storeReportAtGeneration failed");
+    // #6101 step 8: the persistScheduledReportSql half died with the
+    // deleted wrapper — the D1 seam is the only persist seam left.
+    // The operation is dynamic (`${seam}.failed`, seam =
+    // "storeReportAtGeneration" / "storeReportAtGenerationWithR2").
+    expect(storeSrc).toContain("structuredLog.error(`${seam}.failed`");
+    expect(storeSrc).toContain("[scheduledReports] ${seam} failed");
     expect(storeSrc).not.toMatch(/catch\s*\{/);
   });
 
-  it("the generation UNIQUE INDEX creation sits inside a guarded try with logging", () => {
-    // ADAPTED for #2359 (#1976 step 4d, §7 — in-file
-    // justification): the ensure DDL moved behind the
-    // canonical-report write port; the seam's
-    // ensureScheduledReportsTable is now a delegate. The pin's
-    // invariant is unchanged — the UNIQUE INDEX creation sits
-    // inside a guarded try with the same log line — asserted
-    // at its new home, the write port's DO adapter.
-    // ADAPTED for #4282 P2b: the CREATE UNIQUE INDEX text
-    // moved from the adapter into the DO catalogue
-    // (src/data/schemaComponent/doCatalogue.ts). The pin's
-    // invariant is unchanged — the creation still sits inside
-    // the same guarded try with the same log line, now as a
-    // catalogue call; the statement text is asserted at its
-    // new home, the catalogue entry.
-    const adapterSrc = readFileSync(
-      fileURLToPath(
-        new URL("../src/data/doSqliteCanonicalReportStoreAdapter.ts", import.meta.url)
-      ),
-      "utf-8"
-    );
-    const start = adapterSrc.indexOf("ensureSchema(): void");
-    expect(start).toBeGreaterThan(-1);
-    const ensureSrc = adapterSrc.slice(start, adapterSrc.indexOf("findIdByGeneration", start));
-    const idxPos = ensureSrc.indexOf(
-      'doStatementSql("schema.index.mas_reports.create_unique_index_idx_mas_reports_generation"',
-    );
-    expect(idxPos).toBeGreaterThan(-1);
-    expect(ensureSrc.lastIndexOf("try {", idxPos)).toBeGreaterThan(-1);
-    expect(ensureSrc.indexOf("catch (err)", idxPos)).toBeGreaterThan(idxPos);
-    // #3515 S3 batch 7: the catch now logs via the S2 structured
-    // logger — the same guard, the same index name, the same message
-    // content, as the
-    // doSqliteCanonicalReportStore.unique_index_creation_failed error event.
-    expect(ensureSrc).toContain(
-      'this.log.error("doSqliteCanonicalReportStore.unique_index_creation_failed"',
-    );
-    expect(ensureSrc).toContain("idx_mas_reports_generation");
-    const catalogueSrc = readFileSync(
-      fileURLToPath(
-        new URL("../src/data/schemaComponent/doCatalogue.ts", import.meta.url)
-      ),
-      "utf-8"
-    );
-    const entryStart = catalogueSrc.indexOf(
-      "schema.index.mas_reports.create_unique_index_idx_mas_reports_generation",
-    );
-    expect(entryStart).toBeGreaterThan(-1);
-    const stmtStart = catalogueSrc.indexOf("statement: `", entryStart);
-    const stmtEnd = catalogueSrc.indexOf("`,", stmtStart);
-    const stmt = catalogueSrc.slice(stmtStart, stmtEnd);
-    expect(stmt).toContain("CREATE UNIQUE INDEX");
-    expect(stmt).toContain("idx_mas_reports_generation");
-    // Parameterized on ${TABLE} (the mas_reports entry): the
-    // ON clause names the parameter (escaped as \${TABLE} in
-    // the catalogue source, so the stored text holds the
-    // literal), and the entry's `table` field resolves it to
-    // mas_reports.
-    expect(stmt).toContain("ON \\${TABLE}");
-    expect(catalogueSrc.slice(entryStart, stmtEnd)).toContain('table: "mas_reports"');
-    // The seam keeps its public ensure door as the delegate.
-    expect(src).toContain("storePorts(sql).write.ensureSchema()");
-  });
+  // DELETED #6101 step 8: "the generation UNIQUE INDEX creation sits
+  // inside a guarded try with logging" — D1 agent_reports carries PK
+  // (tenant_id, report_id, version) and no generation UNIQUE index;
+  // dedupe is SELECT-then-INSERT, so there is no runtime index
+  // creation to guard. The no-second-live-row invariant is pinned by
+  // the dedupe tests (tests/reports_d1_6101.test.ts + the
+  // healthy-store test above).
 });

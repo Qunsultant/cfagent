@@ -61,8 +61,12 @@ describe("#5025 schemaComponent barrel & membership store naming", () => {
     // Issue #6557 adds 5 D1 entries (the instance provenance ALTER +
     // the four record provenance ALTERs): 290 → 295.
     // #6503 adds migration 0092 (D1 unified_schedules table + 3 indexes + 6 seeds): D1 295 → 305.
-    // Union: 305.
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(305);
+    // #6101 adds migration 0093 (job_run_records identity columns: 5
+    // ALTERs + the carriers DROP): D1 305 → 311; the #6101 fix round
+    // removes the dead carriers CREATE leg from the catalogue:
+    // 311 → 310.
+    // Union: 310.
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(310);
     expect(ORM_CATALOGUE_ENTRIES.length).toBe(35);
     // Issue #6167 adds 1 remainder entry (mas_async_jobs.host_version):
     // 64 → 65. Issue #5100 (F3 of #5094) adds 13 remainder entries (4

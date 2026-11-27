@@ -23,6 +23,7 @@ import {
   resolveCopilotTradingSelection,
 } from "../agents/copilotTradingMode";
 import { createAsyncJobPorts } from "../data/createAsyncJobPorts";
+import { createJobRunRecordAdapter } from "../data/createJobRunRecordPorts";
 import { SqlIndexListStore } from "../data/doSqliteIndexListAdapter";
 import type { CommercialStore } from "../data/commercialPorts";
 import type {
@@ -459,9 +460,9 @@ export async function introspectStockCopilot(
   // copilot cycle ledger row, never the activity table. The
   // activity feed stays as the detail for recentCyclesCount and
   // refusals (feed stats, not the liveness proof). A context
-  // without SQL keeps today's read.
-  const lastCycle = deps.sql
-    ? (latestCopilotCycleLedgerRow(deps.sql as never) ?? null)
+  // without a bound D1 ledger keeps today's read (#6101).
+  const lastCycle = env?.AGENT_DB
+    ? (await latestCopilotCycleLedgerRow(createJobRunRecordAdapter(env))) ?? null
     : null;
   const lastCycleStatus = lastCycle
     ? parseCopilotCycleOutcome(lastCycle)

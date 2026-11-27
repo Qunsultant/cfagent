@@ -2,12 +2,17 @@
  * Issue #5085 (S6, observability program #5080) — one runs ledger,
  * one source of truth for "did the run happen".
  *
- * The runs ledger (the one physical ledger: the OrchestratorAgent
- * Durable Object SQLite `job_run_records` table, written through the
- * one entry `recordLedgerRun`) is the source of truth for whether a
- * run happened. The Stock Copilot Loop status reads it — never the
- * activity table. The activity table stays as the "Cycle activity"
- * detail feed; it is not the liveness proof.
+ * The runs ledger (the one physical ledger: the D1 `job_run_records`
+ * table, written through the one entry `recordLedgerRunD1`) is the
+ * source of truth for whether a run happened. The Stock Copilot Loop
+ * status reads it — never the activity table. The activity table
+ * stays as the "Cycle activity" detail feed; it is not the liveness
+ * proof.
+ *
+ * Issue #6101 — the ledger moved from the OrchestratorAgent Durable
+ * Object SQLite `job_run_records` table to D1; the read below moved
+ * with it. Pre-cutover rows stay in the DO, unreadable through the
+ * app; the status reads post-cutover rows only.
  *
  * Why this module exists: the Loop status used to read
  * `activity.listActivity` for lastCycle and used the ledger only as
@@ -30,8 +35,7 @@
  * outcome-class descriptor.
  */
 import type { JobRunRecord } from "../data/jobRunRecordPorts";
-import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
-import type { SqlStorage } from "../orm";
+import type { D1JobRunRecordStore } from "../data/createJobRunRecordPorts";
 import type { StockCopilotActivityRecord } from "../client/stockCopilotApi";
 import { STOCK_COPILOT_TASK_ID } from "../agents/orchestrator/scheduledTasksCopilot";
 
@@ -48,14 +52,14 @@ const COPILOT_CYCLE_JOB_IDS = [
  * ledger row"), never throws — the status read must not fail
  * because the ledger read did.
  */
-export function latestCopilotCycleLedgerRow(
-  sql: SqlStorage,
-): JobRunRecord | undefined {
+export async function latestCopilotCycleLedgerRow(
+  store: D1JobRunRecordStore | null | undefined,
+): Promise<JobRunRecord | undefined> {
   try {
-    const store = new SqlJobRunRecordStore(sql);
+    if (!store) return undefined;
     let latest: JobRunRecord | undefined;
     for (const jobId of COPILOT_CYCLE_JOB_IDS) {
-      const row = store.latestByJob(jobId);
+      const row = await store.latestByJob(jobId);
       if (!row) continue;
       if (!latest || row.started >= latest.started) latest = row;
     }

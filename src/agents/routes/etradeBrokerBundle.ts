@@ -126,7 +126,7 @@ export async function completeBundleRoute(
   // (never throws; null reported verbatim, never fails the build).
   const reportPersistenceRequested = body.persistReport === true;
   const reportPersistence = reportPersistenceRequested
-    ? persistBundleReport(ctx.getOrm(), bundle, primarySymbol, userLogin)
+    ? await persistBundleReport(ctx.getOrm(), bundle, primarySymbol, userLogin)
     : null;
   let delivery: ScreeningChannelResult[] | null = null;
   if (Array.isArray(body.deliver?.channels) && body.deliver.channels.length > 0) {

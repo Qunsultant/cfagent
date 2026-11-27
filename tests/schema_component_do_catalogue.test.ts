@@ -58,6 +58,7 @@ import {
   doStatementSql,
   doTableSql,
 } from "../src/data/schemaComponent/doCatalogue";
+import { remainderAlterSql } from "../src/data/schemaComponent/remainderCatalogue";
 import { ormIndexSql, ORM_CATALOGUE_ENTRIES } from "../src/data/schemaComponent/ormCatalogue";
 import { validateCatalogueEntry } from "../src/data/schemaComponent/catalogue";
 import { resolveStatementText } from "../src/data/schemaComponent/executor";
@@ -114,8 +115,6 @@ import {
   JOB_PIPELINE_SCHEMA_MIGRATION,
   DoSqliteJobPipelineStores,
 } from "../src/data/doSqliteJobPipelineAdapter";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
-import { createDoSqliteJobStageEventStore } from "../src/data/doSqliteJobStageEventAdapter";
 import {
   MAS_SETTINGS_DDL,
   DoSqliteSettingsAdapter,
@@ -329,6 +328,75 @@ function callEnsure(store: AnyStore, method: string): void {
 }
 
 /**
+ * Issue #6101 — the frozen DO job_run_records ensure + listRecent
+ * statement list, replayed from the catalogues that own each
+ * statement (the deleted SqlJobRunRecordStore executed exactly
+ * this list: CREATE TABLE, the PRAGMA probe, the 15 reconciliation
+ * ALTERs in base order, the two indexes, the list SELECT).
+ * Byte-identical to the base capture by construction — the
+ * executed-list pin below asserts it against the fixture.
+ */
+function replayJobRunRecordList(rec: RecordingSqlStorage): void {
+  rec.exec(doTableSql("job_run_records"));
+  rec.exec("PRAGMA table_info(job_run_records)");
+  for (const column of [
+    "trigger_text",
+    "schedule_id",
+    "async_job_id",
+    "workflow_id",
+    "broker_id",
+    "data_provider_id",
+    "mode",
+    "mode_source",
+    "account_type",
+    "account_id",
+    "binding_scope",
+    "binding_source",
+    "kind",
+    "origin_run_id",
+    "definition_version",
+  ]) {
+    rec.exec(remainderAlterSql("job_run_records", column));
+  }
+  rec.exec(doIndexSql("job_run_records_job_idx"));
+  rec.exec(ormIndexSql("job_run_records_recent_idx"));
+  rec.exec(
+    "SELECT * FROM job_run_records\n        ORDER BY started DESC, id DESC\n        LIMIT ?",
+    10,
+  );
+}
+
+/**
+ * Issue #6101 (step 7) — the frozen DO job_stage_events ensure +
+ * listByRun statement list, replayed from the catalogues that own
+ * each statement (the deleted DoSqliteJobStageEventStore executed
+ * exactly this list: CREATE TABLE, the PRAGMA probe, the 7
+ * reconciliation ALTERs in base order, the run index, the list
+ * SELECT). Byte-identical to the base capture by construction —
+ * the executed-list pin below asserts it against the fixture.
+ */
+function replayJobStageEventList(rec: RecordingSqlStorage): void {
+  rec.exec(doTableSql("job_stage_events"));
+  rec.exec("PRAGMA table_info(job_stage_events)");
+  for (const column of [
+    "stage_status",
+    "duration_ms",
+    "unit_count",
+    "failed_unit_count",
+    "result_ref",
+    "definition_version",
+    "tenant_id",
+  ]) {
+    rec.exec(remainderAlterSql("job_stage_events", column));
+  }
+  rec.exec(doIndexSql("idx_job_stage_events_run"));
+  rec.exec(
+    "SELECT event_key, claim_key, run_id, job_id, stage_id, unit_id, action, at, started_at, ended_at, detail, stage_status, duration_ms, unit_count, failed_unit_count, result_ref, definition_version\n             FROM job_stage_events WHERE run_id = ? ORDER BY id ASC",
+    "probe-run",
+  );
+}
+
+/**
  * Drive every adapter's ensure path on a fresh recorder, in the same
  * order as the base capture. This is the same driver the generator
  * used on the base tree — the executed-list pin below asserts the
@@ -398,10 +466,24 @@ async function driveAll(): Promise<BaseCapture[]> {
     new DoSqliteJobOutcomeStore(rec as never).maybePrune(0));
   cap("DoSqliteJobPipelineStores", "doSqliteJobPipelineAdapter.ts", "ensureSchema() [private, legacy]", (rec) =>
     callEnsure(new DoSqliteJobPipelineStores(rec as never) as unknown as AnyStore, "ensureSchema"));
+  // Issue #6101 — the DO adapter is deleted; the frozen DO
+  // statements its listRecent(10) executed are replayed from the
+  // catalogues that own them (DO table + index, remainder ALTERs,
+  // ORM recent index), so the executed-list pin still proves the
+  // bytes. The adapter/file/trigger labels stay the base pin's.
   cap("SqlJobRunRecordStore", "doSqliteJobRunRecordAdapter.ts", "listRecent(10)", (rec) =>
-    new SqlJobRunRecordStore(rec as never).listRecent(10));
-  cap("JobStageEventStore", "doSqliteJobStageEventAdapter.ts", "listByRun()", (rec) =>
-    createDoSqliteJobStageEventStore(rec as never).listByRun("probe-run"));
+    replayJobRunRecordList(rec));
+  // Issue #6101 (step 7) — the DO adapter is deleted; the frozen DO
+  // statements its listByRun() executed are replayed from the
+  // catalogues that own them (DO table + index, remainder ALTERs),
+  // so the executed-list pin still proves the bytes. The
+  // adapter/file/trigger labels stay the base pin's. The replay is
+  // async on purpose: the deleted listByRun() was async, so its
+  // capture landed last in the base fixture (index 56 of 57) via
+  // the pending path — a sync replay would land at position 22.
+  cap("JobStageEventStore", "doSqliteJobStageEventAdapter.ts", "listByRun()", async (rec) => {
+    replayJobStageEventList(rec);
+  });
   cap("DoSqliteSettingsAdapter", "doSqliteOrmAdapters.ts", "ensureSchema()", (rec) =>
     new DoSqliteSettingsAdapter(rec as never).ensureSchema());
   cap("DoSqliteOutcomeTrackingStore", "doSqliteOutcomeTrackingAdapter.ts", "ensureTable()", (rec) =>
@@ -515,8 +597,11 @@ const DO_DELEGATED_FILES: string[] = [
   "data/doSqliteIvHistoryAdapter.ts",
   "data/doSqliteJobOutcomeAdapter.ts",
   "data/doSqliteJobPipelineAdapter.ts",
-  "data/doSqliteJobRunRecordAdapter.ts",
-  "data/doSqliteJobStageEventAdapter.ts",
+  // Issue #6101 — data/doSqliteJobRunRecordAdapter.ts is deleted
+  // (the DO run ledger is gone); the no-inline-DDL scan below
+  // must not read a file that no longer exists.
+  // Issue #6101 (step 7) — data/doSqliteJobStageEventAdapter.ts is
+  // deleted likewise (the DO stage-event leg is gone); same rule.
   "data/doSqliteOrmAdapters.ts",
   "data/doSqliteOutcomeTrackingAdapter.ts",
   "data/doSqlitePausedScheduleAdapter.deprecated.ts",

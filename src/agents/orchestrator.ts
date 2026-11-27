@@ -16,7 +16,6 @@ import { copilotRegistrationForSourceTab } from "../services/copilotChannels";
 import { runBizCopilotTenantBranch } from "../services/bizCopilotTenants";
 import { runBizCopilotAccountBranch } from "../services/bizCopilotAccounts";
 import { runBizCopilotChannelBranch } from "../services/bizCopilotChannels";
-import { JOB_OUTCOMES_KEEP_ROWS, listJobOutcomes, recordJobOutcome } from "../services/jobOutcomes";
 import type { JobOutcomeInput } from "../data/jobOutcomePorts";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import {
@@ -180,8 +179,6 @@ import {
 } from "./orchestrator/idpProfileConfig";
 import type { IdpProfileConfigShape } from "../config/idpProfile";
 import { runShardJobReconcile, type ReconcileShardJobsReport } from "./orchestrator/shardJobReconcile";
-import { runCanonicalReportSeed, type SeedCanonicalReportsResult } from "./orchestrator/canonicalReportSeed";
-import { reconcileRunLedgerProjection, type ReconcileRunLedgerResult } from "./orchestrator/runLedgerReconcile";
 import { countUsageEvents, eraseUsageEvents, pruneUsageEvents, pruneUsageEventsMaintenance, reconcileUsageEvents, type UsageEventsDoorsContext } from "./orchestrator/usageEventsDoors";
 import {
   deliverWorkflowGoalScreenOutcome as deliverGoalScreenOutcome,
@@ -206,27 +203,19 @@ import { ScheduledTasksService, type AutonomousOptionsAnalysisOptions, type Auto
 import {
   canonicalResearchEmailBody,
   canonicalResearchWebhookBody,
-  getScheduledReportById,
-  storeReportAtGeneration,
   type CanonicalStoreResult,
   type ScheduledReportInput,
 } from "../services/scheduledReports";
 import { createAsyncJobPorts } from "../data/createAsyncJobPorts";
-import {
-  projectAsyncJobBestEffort,
-  projectCanonicalReportBestEffort,
-  projectJobOutcomeBestEffort,
-  projectJobRunRecordBestEffort,
-} from "../services/runLedgerProjectionHooks";
-import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
 import { createJobPipelineStoresFromSql } from "../data/createJobPipelinePorts";
 import { createJobPipelineControl } from "../services/jobPipelineControlFactory";
 import {
-  jobRunRecorderFromStore,
   type JobPipelineControl,
 } from "../services/jobPipelineEngine";
 import { createAsyncCapabilityStepRegistry } from "../services/asyncCapabilitySteps";
-import { parseJobRunRecordNaturalKey } from "../workflows/runLedgerQueueTransport";
+import { createJobRunRecordAdapter } from "../data/createJobRunRecordPorts";
+import { jobRunRecorderFromEnv } from "../data/createJobRunRecordPorts";
+import { resolveIaaaTenant } from "../security/iaaaGithubEndToEnd";
 // Issue #359-01: reports + HITL routes live in src/agents/routes/reports.ts;
 // routeRequest delegates to handleReportsRoutes at the original position.
 import { handleReportsRoutes } from "./routes/reports";
@@ -776,13 +765,13 @@ export class OrchestratorAgent extends PortThink {
 
   /**
    * Issue #6554 (F1) — the orchestrator's async-capability engine:
-   * one DO-backed control per instance, over the same DO SQLite
-   * the queue lives in, built through the one factory so the OTel
-   * run-settled observers wire exactly once (#6250). Its run
-   * records are the engine's record of async units; the
-   * mas_async_jobs row stays the durable truth until the F5 ledger
-   * unification (#6101). Construction does no I/O — the stores
-   * ensure their schema on first use.
+   * one control per instance: its working stores live on the same DO
+   * SQLite the queue lives in, while its run recorder is D1 (#6101),
+   * built through the one factory so the OTel run-settled observers
+   * wire exactly once (#6250). Its run records are the engine's
+   * record of async units; the mas_async_jobs row stays the durable
+   * truth until the F5 ledger unification (#6101). Construction does
+   * no I/O — the stores ensure their schema on first use.
    */
   private asyncCapabilityEngineControl?: JobPipelineControl;
 
@@ -792,7 +781,7 @@ export class OrchestratorAgent extends PortThink {
     const control = createJobPipelineControl(
       {
         stores: createJobPipelineStoresFromSql(sql as never),
-        runRecorder: jobRunRecorderFromStore(new SqlJobRunRecordStore(sql as never)),
+        runRecorder: jobRunRecorderFromEnv(this.env),
         publisher: null,
         steps: createAsyncCapabilityStepRegistry(ASYNC_CAPABILITY_HANDLERS),
       },
@@ -807,7 +796,7 @@ export class OrchestratorAgent extends PortThink {
       env: this.env,
       agentCtx: this.ctx,
       // Issue #6554 (F1) — the engine the async capability executes
-      // through (DO-backed; see asyncCapabilityEngine above).
+      // through (D1 run recorder; see asyncCapabilityEngine above).
       engine: this.asyncCapabilityEngine(),
       // Issue #3922: the instance's settings reader, forwarded
       // into mcp.tool executions (the ND gate's stored layer).
@@ -1152,156 +1141,11 @@ export class OrchestratorAgent extends PortThink {
     return runShardJobReconcile({ env: this.env, listRailsJobs: () => this.listAsyncJobs(100), tenantId, nowMs: Date.now() });
   }
 
-  /** Issue #1688 — thin wrapper for the operator route's one-time canonical report seed (execution in ./orchestrator/canonicalReportSeed.ts). Reads this instance's mas_reports (the canonical copy); never writes the DO table; a second run is a no-op. */
-  async seedCanonicalReports(setBy: string, tenantId: string): Promise<SeedCanonicalReportsResult> {
-    this.ensureTables();
-    const orm = new DatabaseORM(this.ctx.storage.sql);
-    return runCanonicalReportSeed({
-      env: this.env,
-      listCanonicalReports: () => orm.reports.findMany({ orderBy: "created_at ASC" }),
-      tenantId,
-      setBy,
-      nowMs: Date.now(),
-    });
-  }
-
-  /**
-   * Issue #4116 — the sweep carrier's DO door: a one-off
-   * backfill + repair pass projecting THIS instance's
-   * mas_reports and mas_async_jobs rows into D1. Thin wrapper
-   * over reconcileRunLedgerProjection (./orchestrator/
-   * runLedgerReconcile). Invoked by the admin-gated POST
-   * /api/ops/run-ledger-reconcile route; never auto-run (no
-   * boot, deploy, or tick path calls it). A second call
-   * reconciles zero rows when everything is already current.
-   */
-  async reconcileRunLedgerProjection(args?: {
-    limit?: number;
-  }): Promise<ReconcileRunLedgerResult> {
-    this.ensureTables();
-    return reconcileRunLedgerProjection({
-      env: this.env,
-      sql: this.ctx.storage.sql as never,
-      sessionId: this.sessionKey(),
-      limit: args?.limit,
-      nowMs: Date.now(),
-    });
-  }
-
   private usageEventsCtx(): UsageEventsDoorsContext { return { env: this.env, sql: this.ctx.storage.sql, sessionKey: () => this.sessionKey(), getResearchAgent: (login) => this.getResearchAgent(login), ensureTables: () => this.ensureTables() }; }
   async reconcileUsageEventsProjection(args?: { limit?: number }) { return reconcileUsageEvents(this.usageEventsCtx(), args); }
   async pruneUsageEvents(args?: { nowMs?: number }) { return pruneUsageEvents(this.usageEventsCtx(), args); }
   async eraseUsageEventsData(userLogin: string) { return eraseUsageEvents(this.usageEventsCtx(), userLogin); }
   async countUsageEventsData(userLogin: string) { return countUsageEvents(this.usageEventsCtx(), userLogin); }
-  /**
-   * Issue #4116 — the queue carrier's DO door: re-read one DO
-   * row named by a run-ledger.project claim-check message and
-   * project it into D1 through the shared projector. Called by
-   * the screener-events queue branch (per-user instance first,
-   * shared fallback). The hook runs with skipQueue: the caller
-   * IS the queue carrier's delivery, so publishing again would
-   * loop the message back onto the queue with a fresh id.
-   *
-   * Returns "missing-row" when this instance does not hold the
-   * row (the caller tries the shared instance); THROWS when the
-   * row exists but the projection cannot land (the queue core
-   * turns the throw into a retry, then the DLQ — the carrier's
-   * no-silent-loss landing). "already-current" is a success:
-   * the row is already projected, so there is nothing to do.
-   */
-  async projectQueuedRunLedger(input: {
-    ledger: "reports" | "async_jobs" | "job_run_records" | "job_outcomes";
-    naturalKey: string;
-    tenantId: string;
-    userLogin: string;
-  }): Promise<{ status: "projected" | "already-current" | "missing-row" }> {
-    this.ensureTables();
-    const sql = this.ctx.storage.sql as never;
-    if (input.ledger === "job_outcomes") {
-      // Issue #6006 — the claim-check re-read: the natural key IS
-      // the outcome id; the sink has no get-by-id, so list the
-      // capped sink (500 rows max) and find it. A missing row
-      // returns "missing-row" so the caller tries the shared
-      // instance; a present row projects with skipQueue (this IS
-      // the queue delivery). Same throw discipline as the other
-      // ledgers: a failed projection retries into the DLQ, never a
-      // silent drop.
-      const row = listJobOutcomes(sql, JOB_OUTCOMES_KEEP_ROWS).find((r) => r.id === input.naturalKey);
-      if (!row) return { status: "missing-row" };
-      const posted = await projectJobOutcomeBestEffort({
-        env: this.env,
-        sql,
-        outcomeId: row.id,
-        userLogin: input.userLogin,
-        skipQueue: true,
-      });
-      if (!posted) {
-        throw new Error(`run-ledger projection skipped for job outcome ${input.naturalKey} (no carrier configured or store unavailable)`);
-      }
-      if (!posted.posted) {
-        throw new Error(`run-ledger projection failed for job outcome ${input.naturalKey}: ${posted.skipped ?? "unknown"}`);
-      }
-      return { status: posted.projected ? "projected" : "already-current" };
-    }
-    if (input.ledger === "reports") {
-      const hit = getScheduledReportById(sql, input.naturalKey, { userLogin: input.userLogin });
-      if (!hit) return { status: "missing-row" };
-      const posted = await projectCanonicalReportBestEffort({
-        env: this.env,
-        sql,
-        reportId: hit.id,
-        generationId: hit.generationId,
-        userLogin: input.userLogin,
-        skipQueue: true,
-      });
-      if (!posted) {
-        throw new Error(`run-ledger projection skipped for report ${input.naturalKey} (no carrier configured or store unavailable)`);
-      }
-      if (!posted.posted) {
-        throw new Error(`run-ledger projection failed for report ${input.naturalKey}: ${posted.skipped ?? "unknown"}`);
-      }
-      return { status: posted.projected ? "projected" : "already-current" };
-    }
-    if (input.ledger === "job_run_records") {
-      // Issue #6099 — the claim-check re-read: parse the natural
-      // key, find the row in this instance's DO ledger, project it
-      // with skipQueue (this IS the queue delivery). A malformed
-      // key throws — the queue core retries it into the DLQ, never
-      // a silent drop; a missing row returns "missing-row" so the
-      // caller tries the shared instance.
-      const { jobId, started, finished } = parseJobRunRecordNaturalKey(input.naturalKey);
-      const rows = new SqlJobRunRecordStore(sql).listByJob(jobId);
-      const row = rows.find((r) => r.started === started && r.finished === finished);
-      if (!row) return { status: "missing-row" };
-      const posted = await projectJobRunRecordBestEffort({
-        env: this.env,
-        row,
-        userLogin: input.userLogin,
-        skipQueue: true,
-      });
-      if (!posted) {
-        throw new Error(`run-ledger projection skipped for job run record ${input.naturalKey} (no carrier configured or store unavailable)`);
-      }
-      if (!posted.posted) {
-        throw new Error(`run-ledger projection failed for job run record ${input.naturalKey}: ${posted.skipped ?? "unknown"}`);
-      }
-      return { status: posted.projected ? "projected" : "already-current" };
-    }
-    const row = createAsyncJobPorts(sql).read.getRow(input.naturalKey, this.sessionKey());
-    if (!row) return { status: "missing-row" };
-    const posted = await projectAsyncJobBestEffort({
-      env: this.env,
-      row,
-      skipQueue: true,
-    });
-    if (!posted) {
-      throw new Error(`run-ledger projection skipped for async job ${input.naturalKey} (no carrier configured or store unavailable)`);
-    }
-    if (!posted.posted) {
-      throw new Error(`run-ledger projection failed for async job ${input.naturalKey}: ${posted.skipped ?? "unknown"}`);
-    }
-    return { status: posted.projected ? "projected" : "already-current" };
-  }
   /**
    * Issue #2223 (slice 1): A2A door, cfpay signature — the edge
    * dispatcher (src/a2a) resolves the orchestrator-family names to
@@ -2430,7 +2274,7 @@ export class OrchestratorAgent extends PortThink {
       // never turn a completed analysis into a failed one.
       const { recordOptionsOrchestratorRun } = await import("../services/optionsServeRecord");
       await recordOptionsOrchestratorRun(
-        { orm: this.getOrm() as never, storage: this.ctx.storage },
+        { orm: this.getOrm() as never, storage: this.ctx.storage, env: this.env },
         {
           timestamp: res.timestamp,
           success: res.success,
@@ -2634,25 +2478,22 @@ export class OrchestratorAgent extends PortThink {
 
   /**
    * Issue #3530 slice B: the feed-outcome door. The ScheduledAgent
-   * host's settled feed runs land in THIS instance's job-outcome
-   * sink — the store the Autopilot Control Center's job feed reads
-   * (GET /autopilot/jobs) — recorded through the one
-   * recordJobOutcome mechanism (#3527/#1976), keys + outcome codes
-   * only. Never throws: a sink failure is logged, and the feed run
-   * stands on its own records (run record + dataset artifact).
+   * host's settled feed runs fold directly onto the D1 run ledger
+   * (#6101) — the store the Autopilot Control Center's job feed
+   * reads (GET /autopilot/jobs) — keys + outcome codes only. Never
+   * throws: a sink failure is logged, and the feed run stands on
+   * its own records (run record + dataset artifact).
    */
   async recordFeedJobOutcome(input: JobOutcomeInput): Promise<void> {
     try {
-      const sql = this.ensureTables();
-      recordJobOutcome(sql, input);
-      // Issue #6006 — fold the outcome facts into the one run source
-      // (D1); best-effort, never fails the feed run.
-      await projectJobOutcomeBestEffort({
-        env: this.env,
-        sql,
-        outcomeId: input.id,
-        userLogin: this.sessionKey(),
-      });
+      // Issue #6101 — the outcome folds directly onto D1 (no DO
+      // row, no projection); an unbound ledger is the named error,
+      // logged by the catch below.
+      const ledgerStore = createJobRunRecordAdapter(this.env);
+      if (!ledgerStore) {
+        throw new Error("[run-ledger] D1 run-ledger binding unbound (AGENT_DB) (#6101).");
+      }
+      await ledgerStore.foldJobOutcome(input, resolveIaaaTenant(this.env), Date.now());
     } catch (err) {
       structuredLog.warn("orchestrator.feed_job_outcome_record_failed", {
         message:

@@ -935,7 +935,7 @@ export class UnifiedOptionsService {
             // per-stage control action can address them. The guard
             // above refuses when the seam is absent, so the handle
             // is present here; an unwired host never reaches this.
-            engineStores: optionsEngineStoresFromSql(this.discoverySql),
+            engineStores: optionsEngineStoresFromSql(this.discoverySql, this.env),
             // Issue #18: a resolved profile biases pick selection
             // by its allowed strategy types (ranking only — the
             // "all" sentinel prefers nothing in particular).

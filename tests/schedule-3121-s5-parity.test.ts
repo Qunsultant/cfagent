@@ -28,7 +28,7 @@
  *   → POST with background headers + success row; a non-2xx
  *   response is logged, not thrown.
  * - S5-P06 `buildCronDispatchRecord` is pure and exact; the row
- *   round-trips through `SqlJobRunRecordStore` unchanged.
+ *   round-trips through `D1JobRunRecordStore` unchanged (#6101).
  * - S5-P07 `parseCronDispatchRecordPayload` rejects every malformed
  *   shape and accepts a valid payload per entry point; the route
  *   enforces background attribution (401), payload validity (400),
@@ -61,7 +61,20 @@ import {
 } from "../src/services/consolidatedScheduling";
 import { handleCronDispatchRecordRoute } from "../src/agents/routes/cronDispatchRecord";
 import { recordCronDispatchRun } from "../src/agents/orchestrator/scheduleCallbackRunRecords";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
+import { MockD1Database } from "./mock-d1";
+
+/** Issue #6101 — the D1 run ledger over a fresh in-memory mock binding. */
+function ledgerD1() {
+  const d1 = new MockD1Database();
+  const store = new D1JobRunRecordStore(
+    createD1JobRunRecordDb(d1 as unknown as D1Database),
+  );
+  return { d1, store };
+}
 import { InMemoryObservabilityAdapter } from "../src/observability/inMemoryObservabilityAdapter";
 import type { Env } from "../src/types";
 
@@ -517,17 +530,17 @@ describe("S5-P06 cron dispatch record shape and store round-trip", () => {
     expect(skipped.detail).toMatch(/not provisioned/);
   });
 
-  it("recordCronDispatchRun writes one row readable back with those fields", () => {
-    const storage = new SqliteTestStorage();
-    recordCronDispatchRun(storage.sql, {
+  it("recordCronDispatchRun writes one row readable back with those fields", async () => {
+    // Issue #6101 — the dispatch row lands in D1 through the D1 store.
+    const { store } = ledgerD1();
+    await recordCronDispatchRun(store, {
       cron: TICK_CRON,
       entryPoint: "tick",
       outcome: "success",
       started: STARTED,
       finished: FINISHED,
     });
-    const store = new SqlJobRunRecordStore(storage.sql);
-    const rows = store.listByJob(TICK_CRON);
+    const rows = await store.listByJob(TICK_CRON);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       jobId: TICK_CRON,
@@ -634,9 +647,11 @@ describe("S5-P07 payload validation and the record route", () => {
     );
   }
 
-  function routeCtx(storage: SqliteTestStorage) {
+  function routeCtx(storage: SqliteTestStorage, d1?: MockD1Database) {
     return {
-      env: { SERVICE_USER_LOGIN: SERVICE_LOGIN } as unknown as Env,
+      // Issue #6101 — the record route resolves the D1 store from
+      // ctx.env.AGENT_DB; without it the write fails closed.
+      env: { SERVICE_USER_LOGIN: SERVICE_LOGIN, ...(d1 ? { AGENT_DB: d1 } : {}) } as unknown as Env,
       sql: storage.sql,
     };
   }
@@ -648,9 +663,10 @@ describe("S5-P07 payload validation and the record route", () => {
 
   it("non-background caller → 401", async () => {
     const storage = new SqliteTestStorage();
+    const { d1, store } = ledgerD1();
     const noHeaders = await handleCronDispatchRecordRoute(
       routeRequest(validTick),
-      routeCtx(storage),
+      routeCtx(storage, d1),
     );
     expect(noHeaders.status).toBe(401);
     expect(await noHeaders.json()).toMatchObject({
@@ -662,27 +678,29 @@ describe("S5-P07 payload validation and the record route", () => {
         "x-user-login": "someone-else",
         "x-actor-kind": "background",
       }),
-      routeCtx(storage),
+      routeCtx(storage, d1),
     );
     expect(wrongLogin.status).toBe(401);
-    expect(new SqlJobRunRecordStore(storage.sql).listByJob(TICK_CRON)).toHaveLength(0);
+    expect(await store.listByJob(TICK_CRON)).toHaveLength(0);
   });
 
   it("background caller + invalid payload → 400", async () => {
     const storage = new SqliteTestStorage();
+    const { d1, store } = ledgerD1();
     const res = await handleCronDispatchRecordRoute(
       routeRequest({ ...validTick, entryPoint: "retention" }, backgroundHeaders),
-      routeCtx(storage),
+      routeCtx(storage, d1),
     );
     expect(res.status).toBe(400);
-    expect(new SqlJobRunRecordStore(storage.sql).listByJob(TICK_CRON)).toHaveLength(0);
+    expect(await store.listByJob(TICK_CRON)).toHaveLength(0);
   });
 
   it("background caller + valid payload → 200 and the row is stored", async () => {
     const storage = new SqliteTestStorage();
+    const { d1, store } = ledgerD1();
     const res = await handleCronDispatchRecordRoute(
       routeRequest(validTick, backgroundHeaders),
-      routeCtx(storage),
+      routeCtx(storage, d1),
     );
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
@@ -690,7 +708,7 @@ describe("S5-P07 payload validation and the record route", () => {
       jobId: TICK_CRON,
       scheduleId: TICK_CRON,
     });
-    const rows = new SqlJobRunRecordStore(storage.sql).listByJob(TICK_CRON);
+    const rows = await store.listByJob(TICK_CRON);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       operation: "tick",

@@ -25,8 +25,8 @@
  *    recorded under tenant A must not read back under tenant B.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DatabaseSync } from "node:sqlite";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 import {
   ensureScheduledReportsTable,
   storeReportAtGeneration,
@@ -63,11 +63,17 @@ const SCREENER_BODY = {
   pdfKey: "reports/a.pdf",
 };
 
-function seedReports() {
+// #6101 step 8: the replay API reads D1 agent_reports through
+// ctx.env, so the seed stores through the async D1 seam into a
+// fresh MockD1Database (the DO mas_reports table is frozen and
+// receives no new writes). The DO sql handle stays for the route
+// context's ensureTables (confirmations etc.).
+async function seedReports() {
   const sql = new MockSqlStorage();
   ensureScheduledReportsTable(sql as any);
-  const aliceId = storeReportAtGeneration(
-    sql as any,
+  const mock = new MockD1Database();
+  const env = { AGENT_DB: mock as unknown as never };
+  const aliceStored = await storeReportAtGeneration(
     {
       runId: "screener:alice-1",
       title: "Alice screen",
@@ -77,9 +83,10 @@ function seedReports() {
       userLogin: "alice",
       createdAt: "2026-10-30T09:30:00.000Z",
     } as any,
-  )!.reportId;
-  const bobId = storeReportAtGeneration(
-    sql as any,
+    env,
+  );
+  const aliceId = aliceStored!.reportId;
+  const bobStored = await storeReportAtGeneration(
     {
       runId: "screener:bob-1",
       title: "Bob screen",
@@ -89,9 +96,10 @@ function seedReports() {
       userLogin: "bob",
       createdAt: "2026-10-30T09:31:00.000Z",
     } as any,
-  )!.reportId;
-  const bobResearchId = storeReportAtGeneration(
-    sql as any,
+    env,
+  );
+  const bobId = bobStored!.reportId;
+  const bobResearchStored = await storeReportAtGeneration(
     {
       runId: "research:bob-1",
       title: "Bob research",
@@ -101,14 +109,16 @@ function seedReports() {
       userLogin: "bob",
       createdAt: "2026-10-30T09:32:00.000Z",
     } as any,
-  )!.reportId;
-  return { sql, aliceId, bobId, bobResearchId };
+    env,
+  );
+  const bobResearchId = bobResearchStored!.reportId;
+  return { sql, env, aliceId, bobId, bobResearchId };
 }
 
-function replayCtx(sql: MockSqlStorage): ReportsRouteContext {
+function replayCtx(sql: MockSqlStorage, env: unknown): ReportsRouteContext {
   return {
     ensureTables: () => sql as any,
-    env: {},
+    env: env as any,
     getScreenerAgent: () => ({ getHistory: async () => [] }) as any,
     getScreenerExecutionContext: async () => undefined,
     getReportDispatchHitl: () => false,
@@ -138,43 +148,43 @@ function replayReq(login: string | null, body: unknown) {
   });
 }
 
-async function postReplay(sql: MockSqlStorage, login: string | null, body: unknown) {
+async function postReplay(sql: MockSqlStorage, env: unknown, login: string | null, body: unknown) {
   const res = (await handleReportsRoutes(
     replayReq(login, body),
     new URL("https://agent.internal/api/reports/replay"),
     "/api/reports/replay",
     "sess",
-    replayCtx(sql),
+    replayCtx(sql, env),
   ))!;
   return { status: res.status, json: (await res.json()) as Record<string, any> };
 }
 
 describe("cross-owner replay refused on the replay API (#2860 Factor 15)", () => {
   it("refuses another owner's report by reportId (404, never the envelope)", async () => {
-    const { sql, bobId } = seedReports();
-    const { status, json } = await postReplay(sql, "alice", { reportId: bobId });
+    const { sql, env, bobId } = await seedReports();
+    const { status, json } = await postReplay(sql, env, "alice", { reportId: bobId });
     expect(status).toBe(404);
     expect(json.error).toMatch(/not owned|not found/i);
     expect(json).not.toHaveProperty("replay");
   });
 
   it("refuses another owner's run by runId (404)", async () => {
-    const { sql } = seedReports();
-    const { status, json } = await postReplay(sql, "alice", { runId: "screener:bob-1" });
+    const { sql, env } = await seedReports();
+    const { status, json } = await postReplay(sql, env, "alice", { runId: "screener:bob-1" });
     expect(status).toBe(404);
     expect(json).not.toHaveProperty("replay");
   });
 
   it("refuses another owner's research report by symbol (404)", async () => {
-    const { sql } = seedReports();
-    const { status, json } = await postReplay(sql, "alice", { symbol: "MSFT" });
+    const { sql, env } = await seedReports();
+    const { status, json } = await postReplay(sql, env, "alice", { symbol: "MSFT" });
     expect(status).toBe(404);
     expect(json).not.toHaveProperty("replay");
   });
 
   it("replays the caller's own report by reportId (200, replay provenance)", async () => {
-    const { sql, aliceId } = seedReports();
-    const { status, json } = await postReplay(sql, "alice", { reportId: aliceId });
+    const { sql, env, aliceId } = await seedReports();
+    const { status, json } = await postReplay(sql, env, "alice", { reportId: aliceId });
     expect(status).toBe(200);
     expect(json.replay.kind).toBe("replay");
     expect(json.replay.originalRunId).toBe("screener:alice-1");
@@ -183,15 +193,15 @@ describe("cross-owner replay refused on the replay API (#2860 Factor 15)", () =>
   });
 
   it("replays the caller's own run by runId (200)", async () => {
-    const { sql } = seedReports();
-    const { status, json } = await postReplay(sql, "alice", { runId: "screener:alice-1" });
+    const { sql, env } = await seedReports();
+    const { status, json } = await postReplay(sql, env, "alice", { runId: "screener:alice-1" });
     expect(status).toBe(200);
     expect(json.replay.originalRunId).toBe("screener:alice-1");
   });
 
   it("refuses an unauthenticated replay (401) — no anonymous owner to scope by", async () => {
-    const { sql, aliceId } = seedReports();
-    const { status } = await postReplay(sql, null, { reportId: aliceId });
+    const { sql, env, aliceId } = await seedReports();
+    const { status } = await postReplay(sql, env, null, { reportId: aliceId });
     expect(status).toBe(401);
   });
 });
@@ -294,33 +304,6 @@ describe("cross-owner replay refused on the MCP replay path (#2860 Factor 15)", 
 // ---------------------------------------------------------------------------
 // Workflow-tenant mismatch: the workflow read-back surface
 // ---------------------------------------------------------------------------
-
-/** Minimal D1Database stand-in over node:sqlite (test-only, mirrors slice0). */
-class MockD1Database {
-  readonly sqlite = new DatabaseSync(":memory:");
-  prepare(sql: string) {
-    const db = this.sqlite;
-    return {
-      bind(...params: unknown[]) {
-        return {
-          async run() {
-            const info = db.prepare(sql).run(...(params as any[]));
-            return { success: true, meta: { changes: info.changes, last_row_id: info.lastInsertRowid }, results: [] };
-          },
-          async all() {
-            return { results: db.prepare(sql).all(...(params as any[])) };
-          },
-          async first() {
-            return db.prepare(sql).get(...(params as any[])) ?? null;
-          },
-          async raw() {
-            return db.prepare(sql).all(...(params as any[])).map((row: any) => Object.values(row));
-          },
-        };
-      },
-    };
-  }
-}
 
 describe("workflow-tenant mismatch refused on the workflow read-back (#2860 Factor 15)", () => {
   it("a chain recorded under tenant A does not read back under tenant B", async () => {
