@@ -13,7 +13,7 @@
  * primary key, so replayed writes are no-ops even under
  * at-least-once delivery.
  */
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, like, or } from "drizzle-orm";
 import { createDrizzleD1Db } from "./d1QueryLogger";
 import { agentChainAudit, agentReports } from "./drizzleSchema";
 import type {
@@ -218,11 +218,14 @@ export class D1AuditReportAdapter implements AuditReportStore {
 
   async listReports(
     tenantId: string,
-    opts?: { userLogin?: string; limit?: number },
+    opts?: { userLogin?: string; limit?: number; source?: string },
   ): Promise<CanonicalReportRow[]> {
     const conditions = [eq(agentReports.tenantId, tenantId)];
     if (opts?.userLogin) {
       conditions.push(eq(agentReports.userLogin, opts.userLogin));
+    }
+    if (opts?.source) {
+      conditions.push(eq(agentReports.source, opts.source));
     }
     const rows = await this.db
       .select()
@@ -231,6 +234,89 @@ export class D1AuditReportAdapter implements AuditReportStore {
       .orderBy(desc(agentReports.createdAtMs), desc(agentReports.reportId))
       .limit(Math.max(1, opts?.limit ?? 100));
     return latestPerReport(rows.map(toReportRow));
+  }
+
+  /**
+   * Issue #6101 (step 8) — token LIKE search over title/summary/body.
+   * One LIKE group per token, OR-joined, exactly like the DO
+   * searchRows it replaces (SQLite LIKE is ASCII case-insensitive,
+   * so no LOWER() wrap is needed for the same match set).
+   */
+  async searchReports(
+    tenantId: string,
+    tokens: string[],
+    opts?: { userLogin?: string; limit?: number },
+  ): Promise<CanonicalReportRow[]> {
+    if (tokens.length === 0) return [];
+    const conditions = [eq(agentReports.tenantId, tenantId)];
+    if (opts?.userLogin) {
+      conditions.push(eq(agentReports.userLogin, opts.userLogin));
+    }
+    const likeGroups = tokens.map((token) => {
+      const pattern = `%${token}%`;
+      return or(
+        like(agentReports.title, pattern),
+        like(agentReports.summary, pattern),
+        like(agentReports.body, pattern),
+      );
+    });
+    const rows = await this.db
+      .select()
+      .from(agentReports)
+      .where(and(...conditions, or(...likeGroups)))
+      .orderBy(desc(agentReports.createdAtMs), desc(agentReports.reportId))
+      .limit(Math.max(1, opts?.limit ?? 100));
+    return latestPerReport(rows.map(toReportRow));
+  }
+
+  /**
+   * Issue #6101 (step 8) — newest version for a generation id, or
+   * null. The writer dedupe: one canonical row per generation id.
+   */
+  async latestReportByGeneration(
+    tenantId: string,
+    generationId: string,
+    userLogin?: string,
+  ): Promise<CanonicalReportRow | null> {
+    const conditions = [
+      eq(agentReports.tenantId, tenantId),
+      eq(agentReports.generationId, generationId),
+    ];
+    if (userLogin) {
+      conditions.push(eq(agentReports.userLogin, userLogin));
+    }
+    const rows = await this.db
+      .select()
+      .from(agentReports)
+      .where(and(...conditions))
+      .orderBy(desc(agentReports.version))
+      .limit(1);
+    return rows.length === 0 ? null : toReportRow(rows[0]);
+  }
+
+  /**
+   * Issue #6101 (step 8) — newest row for a run id (a duplicated run
+   * id resolves to the latest canonical copy), or null.
+   */
+  async latestReportByRunId(
+    tenantId: string,
+    runId: string,
+    userLogin?: string,
+  ): Promise<CanonicalReportRow | null> {
+    const conditions = [
+      eq(agentReports.tenantId, tenantId),
+      eq(agentReports.runId, runId),
+    ];
+    if (userLogin) {
+      conditions.push(eq(agentReports.userLogin, userLogin));
+    }
+    const rows = await this.db
+      .select()
+      .from(agentReports)
+      .where(and(...conditions))
+      .orderBy(desc(agentReports.createdAtMs), desc(agentReports.version))
+      .limit(1);
+    return rows.length === 0 ? null : toReportRow(rows[0]);
   }
 
   async deleteReport(tenantId: string, reportId: string): Promise<void> {

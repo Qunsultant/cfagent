@@ -1,56 +1,33 @@
 /**
  * Issue #278: tests for durable scheduled-run report persistence and
- * retrieval (src/services/scheduledReports.ts + the mas_reports ORM
- * table). The service module is SDK-free; SQL runs against a minimal
- * in-test fake for full OR-semantics, plus one integration round trip
- * through the real DatabaseORM + MockSqlStorage.
+ * retrieval (src/services/scheduledReports.ts + the D1 agent_reports
+ * table, #6101 step 8 — the DO mas_reports table is frozen at cutover
+ * and receives no new writes; the seam reads/writes D1 directly).
+ * Search semantics run against the real D1 adapter over the shared
+ * MockD1Database (node:sqlite), plus one integration check that the
+ * frozen mas_reports table still exists in the ORM schema.
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { DatabaseORM, type SqlStorage } from "../src/orm";
+import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import { createD1AuditReportDb, ensureAuditReportSchema } from "../src/data/d1AuditReportAdapter";
 import {
   ensureScheduledReportsTable,
-  persistScheduledReportSql,
+  storeReportAtGeneration,
   searchScheduledReports,
   toScheduledReportRecord,
   SCHEDULED_REPORT_MAX_BODY_CHARS,
 } from "../src/services/scheduledReports";
+import type { SqlStorage } from "../src/orm";
 
-/** Minimal fake SQL with true OR/LIKE semantics for matcher tests. */
-function createFakeSql() {
-  const rows: Array<Record<string, unknown>> = [];
-  const exec = (query: string, ...args: unknown[]): Iterable<unknown> => {
-    const q = query.trim().toUpperCase();
-    if (q.startsWith("CREATE")) return [];
-    if (q.startsWith("INSERT")) {
-      const cols = query.match(/\(([^)]+)\)\s*VALUES/i)![1]
-        .split(",")
-        .map((c) => c.trim());
-      const rec: Record<string, unknown> = {};
-      cols.forEach((c, i) => {
-        rec[c] = args[i];
-      });
-      rows.push(rec);
-      return [];
-    }
-    if (q.startsWith("SELECT")) {
-      const limit = Number(args[args.length - 1]);
-      const likes = (args.slice(0, -1) as string[]).map((s) =>
-        String(s).replace(/%/g, "").toLowerCase()
-      );
-      const matched = rows.filter((r) => {
-        const hay =
-          `${r.title} ${r.summary} ${r.body}`.toLowerCase();
-        return likes.some((t) => t.length > 0 && hay.includes(t));
-      });
-      matched.sort((a, b) =>
-        String(b.created_at).localeCompare(String(a.created_at))
-      );
-      return matched.slice(0, limit);
-    }
-    return [];
-  };
-  return { exec: exec as SqlStorage["exec"], rows };
+type D1Database = any;
+
+function d1() {
+  const mock = new MockD1Database();
+  const db = createD1AuditReportDb(mock as unknown as D1Database);
+  const env = { AGENT_DB: mock as unknown as D1Database };
+  return { mock, db, env };
 }
 
 const report = (over: Partial<Parameters<typeof toScheduledReportRecord>[0]> = {}) => ({
@@ -87,78 +64,87 @@ describe("toScheduledReportRecord", () => {
   });
 });
 
-describe("persist + search round trip (fake SQL)", () => {
-  let sql: ReturnType<typeof createFakeSql>;
+describe("persist + search round trip (D1)", () => {
+  let env: { AGENT_DB: D1Database };
 
   beforeEach(() => {
-    sql = createFakeSql();
+    env = d1().env;
   });
 
-  it("persists and retrieves by title token", () => {
-    const id = persistScheduledReportSql(sql, report());
-    expect(id).toBeTruthy();
-    const hits = searchScheduledReports(sql, "technology");
+  it("persists and retrieves by title token", async () => {
+    const stored = await storeReportAtGeneration(report(), env);
+    expect(stored?.reportId).toBeTruthy();
+    const hits = await searchScheduledReports(env, "technology");
     expect(hits).toHaveLength(1);
-    expect(hits[0].id).toBe(id);
+    expect(hits[0].id).toBe(stored!.reportId);
     expect(hits[0].title).toContain("Technology");
   });
 
-  it("matches summary and body tokens, not only titles", () => {
-    persistScheduledReportSql(sql, report());
-    expect(searchScheduledReports(sql, "opportunities")).toHaveLength(1);
-    expect(searchScheduledReports(sql, "nvda")).toHaveLength(1);
+  it("matches summary and body tokens, not only titles", async () => {
+    await storeReportAtGeneration(report(), env);
+    expect(await searchScheduledReports(env, "opportunities")).toHaveLength(1);
+    expect(await searchScheduledReports(env, "nvda")).toHaveLength(1);
   });
 
-  it("returns newest first and honors the limit", () => {
-    persistScheduledReportSql(sql, report({ createdAt: "2026-10-18T09:00:00.000Z" }));
-    persistScheduledReportSql(sql, report({ createdAt: "2026-10-18T11:00:00.000Z" }));
-    const hits = searchScheduledReports(sql, "screen", 1);
+  it("returns newest first and honors the limit", async () => {
+    await storeReportAtGeneration(report({ createdAt: "2026-10-18T09:00:00.000Z" }), env);
+    await storeReportAtGeneration(report({ createdAt: "2026-10-18T11:00:00.000Z" }), env);
+    const hits = await searchScheduledReports(env, "screen", 1);
     expect(hits).toHaveLength(1);
     expect(hits[0].createdAt).toBe("2026-10-18T11:00:00.000Z");
   });
 
-  it("returns [] for empty or noise queries", () => {
-    persistScheduledReportSql(sql, report());
-    expect(searchScheduledReports(sql, "")).toEqual([]);
-    expect(searchScheduledReports(sql, "a an")).toEqual([]);
-    expect(searchScheduledReports(sql, "zzz-no-such-thing")).toEqual([]);
+  it("returns [] for empty or noise queries", async () => {
+    await storeReportAtGeneration(report(), env);
+    expect(await searchScheduledReports(env, "")).toEqual([]);
+    expect(await searchScheduledReports(env, "a an")).toEqual([]);
+    expect(await searchScheduledReports(env, "zzz-no-such-thing")).toEqual([]);
   });
 
-  it("never throws on a broken store", () => {
-    const broken: SqlStorage = {
+  it("never throws on a broken store", async () => {
+    const broken = {
+      AGENT_DB: {
+        prepare() {
+          throw new Error("boom");
+        },
+      } as unknown as D1Database,
+    };
+    expect(await storeReportAtGeneration(report(), broken)).toBeNull();
+    expect(await searchScheduledReports(broken, "screen")).toEqual([]);
+    // ensure* intentionally lets DDL errors propagate — both public
+    // entry points above catch it. Callers must not use it raw.
+    // (The frozen DO ensure keeps this contract.)
+    const brokenSql: SqlStorage = {
       exec: () => {
         throw new Error("boom");
       },
     };
-    expect(persistScheduledReportSql(broken, report())).toBeNull();
-    expect(searchScheduledReports(broken, "screen")).toEqual([]);
-    // ensure* intentionally lets DDL errors propagate — both public
-    // entry points above catch it. Callers must not use it raw.
-    expect(() => ensureScheduledReportsTable(broken)).toThrow("boom");
+    expect(() => ensureScheduledReportsTable(brokenSql)).toThrow("boom");
   });
 
-  it("ensureScheduledReportsTable is idempotent", () => {
-    ensureScheduledReportsTable(sql);
-    ensureScheduledReportsTable(sql);
-    persistScheduledReportSql(sql, report());
-    expect(searchScheduledReports(sql, "screen")).toHaveLength(1);
+  it("ensureAuditReportSchema is idempotent", async () => {
+    const { db } = d1();
+    await ensureAuditReportSchema(db);
+    await ensureAuditReportSchema(db);
+    await storeReportAtGeneration(report(), env);
+    expect(await searchScheduledReports(env, "screen")).toHaveLength(1);
   });
 });
 
-describe("ORM integration (real DatabaseORM + MockSqlStorage)", () => {
-  it("mas_reports table exists after initializeSchema and round-trips via the reports repository", () => {
+describe("ORM integration (frozen DO table still in schema; D1 round-trips via the seam)", () => {
+  it("mas_reports table still exists after initializeSchema; the seam round-trips through D1", async () => {
     const sql = new MockSqlStorage();
     const orm = new DatabaseORM(sql);
     orm.initializeSchema("test_session_user");
 
-    const rec = toScheduledReportRecord(report());
-    orm.reports.create(rec);
-
-    const hits = searchScheduledReports(sql, "technology");
-    expect(hits.length).toBeGreaterThanOrEqual(1);
-    expect(hits[0].title).toContain("Technology");
-
     const tables = orm.listTables().map((t) => t.name);
     expect(tables).toContain("mas_reports");
+
+    const { env } = d1();
+    const stored = await storeReportAtGeneration(report(), env);
+    expect(stored?.reportId).toBeTruthy();
+    const hits = await searchScheduledReports(env, "technology");
+    expect(hits.length).toBeGreaterThanOrEqual(1);
+    expect(hits[0].title).toContain("Technology");
   });
 });

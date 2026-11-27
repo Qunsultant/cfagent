@@ -59,6 +59,7 @@ import { BudgetGuard } from "../src/payments/budget-guard";
 import { GUARD_ALLOWLIST } from "../src/agents/payments-agent";
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
 import { MockD1Database } from "./mock-d1";
+import { makeLedgerStub } from "./ledger-stub";
 import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 
@@ -109,6 +110,7 @@ function makeCtx(initialGoals?: any[]) {
 
 function makeEnv(overrides: Record<string, unknown> = {}) {
   return {
+    ORCHESTRATOR_AGENT: makeLedgerStub().namespace,
     PAYMENTS_AGENT: {
       idFromName: () => "default",
       get: () => ({ budgetCheck: async () => ({ allowed: true }) }),
@@ -292,6 +294,11 @@ describe("monthly Autopilot evaluation schedule (#4411)", () => {
     await plantGoals(mockD1, [monthlyGoal()]);
     const ctx = makeCtx();
     const env = makeEnv({ SERVICE_USER_LOGIN: "service-user", AGENT_DB: mockD1 });
+    // This test pins the unbound-ORCHESTRATOR_AGENT skip: the
+    // shared makeEnv binds the ledger stub (recordJobRun needs it
+    // to land), so remove it here — the goal must skip visibly
+    // when the binding is absent.
+    delete (env as Record<string, unknown>).ORCHESTRATOR_AGENT;
     const agent = new ScheduledAgent(ctx as never, env as never);
     const tick = await agent.onCron(env as never, { halted: false } as never);
     expect(tick.errors.join(" ")).toMatch(/ORCHESTRATOR_AGENT/);

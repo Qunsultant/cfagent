@@ -15,7 +15,7 @@
  *  - migration 0084 applies cleanly on a pre-F5 D1 database
  *    (0047 + 0072 + 0073 + 0076 + 0081) and the legacy row reads
  *    unbound afterwards; a bound row round-trips through the D1
- *    and DO-SQLite stores with the full tuple;
+ *    store with the full tuple;
  *  - a non-broker goal firing still records, with explicit nulls
  *    (the scheduled-agent funnel stamps `?? null`, never a fresh
  *    ambient read at fire time — F3's rule);
@@ -99,7 +99,6 @@ import {
   type JobRunRecord,
 } from "../src/services/jobRunRecords";
 import { InMemoryJobRunRecordStore } from "../src/data/inMemoryJobRunRecordAdapter";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
 import {
   createD1JobRunRecordDb,
   D1JobRunRecordStore,
@@ -135,22 +134,7 @@ import {
   runDeliverJob,
   type DeliverChannelSenders,
 } from "../src/services/deliverJobs";
-
-/** node:sqlite double for the SqlStorage seam (same shape as #2337). */
-class SqliteTestStorage {
-  readonly sqlite = new DatabaseSync(":memory:");
-  get sql(): SqliteTestStorage {
-    return this;
-  }
-  exec(query: string, ...params: unknown[]): unknown[] {
-    const stmt = this.sqlite.prepare(query);
-    if (/^\s*(SELECT|PRAGMA)/i.test(query)) {
-      return stmt.all(...(params as never[])) as unknown[];
-    }
-    stmt.run(...(params as never[]));
-    return [];
-  }
-}
+import { makeLedgerStub } from "./ledger-stub";
 
 /** Minimal D1Database stand-in over node:sqlite (the foundation tests' double). */
 class MockD1Database {
@@ -217,6 +201,11 @@ function makeEnv() {
     // without AGENT_DB). This file's own node:sqlite MockD1Database
     // (above) is the store; the tick resolves it from the env.
     AGENT_DB: new MockD1Database(),
+    // #6101 step 9 — the KV "jobRunRecords" key is retired: the
+    // fired goal's run lands via the ledger post on
+    // ORCHESTRATOR_AGENT (the shared stub), and listJobRuns reads
+    // it back from there.
+    ORCHESTRATOR_AGENT: makeLedgerStub().namespace,
     PAYMENTS_AGENT: {
       idFromName: () => "default",
       get: () => ({ budgetCheck: async () => ({ allowed: true }) }),
@@ -441,11 +430,12 @@ describe("migration 0084 + adapters (#5102)", () => {
     expect(runs[0].bindingSource).toBe("binding");
   });
 
-  it("DO-SQLite store round-trips bound and unbound rows", () => {
-    const storage = new SqliteTestStorage();
-    const store = new SqlJobRunRecordStore(storage.sql as never);
-    store.record(boundRecord());
-    store.record(
+  it("D1 store round-trips bound and unbound rows", async () => {
+    const mock = new MockD1Database();
+    const db = createD1JobRunRecordDb(mock as never);
+    const store = new D1JobRunRecordStore(db);
+    await store.record(boundRecord());
+    await store.record(
       buildJobRunRecord({
         system: "scheduled-agent-goal",
         jobId: "test-goal",
@@ -460,10 +450,10 @@ describe("migration 0084 + adapters (#5102)", () => {
         bindingSource: null,
       }),
     );
-    const bound = store.latestByJob("sched-5102");
+    const bound = await store.latestByJob("sched-5102");
     expect(bound?.accountId).toBe("PA-9001234");
     expect(bound?.bindingScope).toBe("schedule");
-    const unbound = store.latestByJob("test-goal");
+    const unbound = await store.latestByJob("test-goal");
     expect(unbound?.accountType).toBeNull();
     expect(unbound?.accountId).toBeNull();
     expect(unbound?.bindingScope).toBeNull();

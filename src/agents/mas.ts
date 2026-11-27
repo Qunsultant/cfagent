@@ -63,8 +63,8 @@ export function createMAS({ env, sessionId, requestId, sql, audit }: MASOptions)
         return cached;
       }
       // Issue #278: durable scheduled-run reports first — local,
-      // from this store's mas_reports table.
-      const reports = searchScheduledReports(sql, query, 5);
+      // from this store's D1 agent_reports table (#6101 step 8).
+      const reports = await searchScheduledReports(env, query, 5);
       const reportChunks = reports.map((r) => ({
         title: r.title,
         snippet: r.summary,

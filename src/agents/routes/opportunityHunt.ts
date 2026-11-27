@@ -292,7 +292,7 @@ export async function handleOpportunityHuntRoutes(
         );
       }
       const generationId = pipelineResult.generationId;
-      const stored = storeReportStage(ctx.getOrm() as never, {
+      const stored = await storeReportStage(ctx.getOrm() as never, {
         runId: `opportunity-hunt:manual:${result.asOf}`,
         generationId,
         title: `Opportunity Hunt report — ${result.asOf.slice(0, 10)}`,

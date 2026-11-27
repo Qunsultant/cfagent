@@ -24,6 +24,7 @@ import {
   projectCopilotLedgerRowToLastCycle,
 } from "../../services/stockCopilotLedger";
 import { createOrchestratorTablePorts } from "../../data/createOrchestratorTablePorts";
+import { createJobRunRecordAdapter } from "../../data/createJobRunRecordPorts";
 import {
   createStockCopilotActivityPort,
   createStockCopilotControlPort,
@@ -404,9 +405,9 @@ function projectClosedPosition(p: CopilotPositionRecord): StockCopilotClosedPosi
 
 /**
  * Issue #3899 (RC3) — whether the copilot cycle has ever fired, per
- * the runs ledger (`SqlJobRunRecordStore`): the cycle handler records
- * every firing under the task id `stock-copilot-paper-cycle` (and
- * the `callback:` fallback id when no schedule id resolves). A
+ * the runs ledger (D1 `job_run_records`, #6101): the cycle handler
+ * records every firing under the task id `stock-copilot-paper-cycle`
+ * (and the `callback:` fallback id when no schedule id resolves). A
  * firing that predates the RC2 activity recording still counts —
  * the ledger is the corroborating signal when the activity log is
  * empty. Best-effort: a ledger read failure reads as "no rows" (the
@@ -418,8 +419,10 @@ function projectClosedPosition(p: CopilotPositionRecord): StockCopilotClosedPosi
  * services/stockCopilotLedger), and this helper is kept only as a
  * thin wrapper for existing callers.
  */
-export function hasCopilotCycleLedgerRows(sql: StockCopilotStoreSqlExecutor): boolean {
-  return latestCopilotCycleLedgerRow(sql) !== undefined;
+export async function hasCopilotCycleLedgerRows(
+  store: Parameters<typeof latestCopilotCycleLedgerRow>[0],
+): Promise<boolean> {
+  return (await latestCopilotCycleLedgerRow(store)) !== undefined;
 }
 
 /**
@@ -501,7 +504,7 @@ export async function getStockCopilotStatusViaDoor(
   // "did the run happen" — lastCycle is a projection of the newest
   // copilot cycle ledger row, never the activity table. The activity
   // list stays as the "Cycle activity" detail feed.
-  const ledgerRow = latestCopilotCycleLedgerRow(ctx.sql);
+  const ledgerRow = await latestCopilotCycleLedgerRow(createJobRunRecordAdapter(ctx.env));
   const lastCycle = ledgerRow
     ? (projectCopilotLedgerRowToLastCycle(ledgerRow) as unknown as Record<string, unknown>)
     : null;
