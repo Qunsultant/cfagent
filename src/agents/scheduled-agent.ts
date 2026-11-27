@@ -543,6 +543,27 @@ type AgenticLoopRunOutcome =
   | { status: "skipped"; detail: string; usedModelTokens: number; turns: number }
   | { status: "failed"; detail: string; usedModelTokens: number; turns: number };
 
+/**
+ * Issue #6710 — one bounded pipeline-host startup leg. Startup
+ * runs inside the SDK's blockConcurrencyWhile gate: every RPC
+ * waits for it. The repo-owned startup legs therefore race
+ * the capture bound (the terminal-writes bound — the settle
+ * leg writes terminal records, the arm leg writes the alarm)
+ * and surface a named timeout the caller's best-effort catch
+ * logs, instead of wedging the host's startup gate
+ * indefinitely on a never-settling store/alarm await.
+ */
+export async function boundedPipelineHostStartupLeg<T>(
+  env: Record<string, string>,
+  work: () => Promise<T>,
+): Promise<T> {
+  return withFeedDeadline(
+    work(),
+    resolveFeedJobTimeouts(env).captureMs,
+    "pipeline_host_startup_leg_timeout",
+  );
+}
+
 export class ScheduledAgent extends PortThink {
   /**
    * #2840: in-memory firing claims for this isolate (the
@@ -1216,7 +1237,10 @@ export class ScheduledAgent extends PortThink {
   override async onStart(props?: Record<string, unknown>): Promise<void> {
     await super.onStart(props);
     try {
-      const { settled } = await settleOrphanedPipelineRuns(this.pipelineContext());
+      const { settled } = await boundedPipelineHostStartupLeg(
+        this.feedEnvStrings(),
+        () => settleOrphanedPipelineRuns(this.pipelineContext()),
+      );
       if (settled.length > 0) {
         structuredLog.info("scheduledAgent.on_start_orphaned_pipeline_runs_settled", {
           message: `[ScheduledAgent][onStart] Settled ${settled.length} orphaned pipeline run(s) from a host restart:`,
@@ -1237,7 +1261,10 @@ export class ScheduledAgent extends PortThink {
     // missing alarm, so a missed arm here is recovered within the
     // hour.
     try {
-      const result = await armHeartbeatAlarm(this, this.env);
+      const result = await boundedPipelineHostStartupLeg(
+        this.feedEnvStrings(),
+        () => armHeartbeatAlarm(this, this.env),
+      );
       structuredLog.info("scheduledAgent.on_start_heartbeat_alarm", {
         message: `[ScheduledAgent][onStart] Heartbeat alarm ${result.armed ? "armed" : "already armed"}.`,
       });

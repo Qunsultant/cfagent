@@ -117,7 +117,9 @@ import {
 import {
   FEED_JOB_TIMEOUT_KNOBS,
   FEED_JOB_TIMEOUTS,
+  FeedJobTimeoutError,
   resolveFeedJobTimeoutMs,
+  resolveFeedJobTimeouts,
   withFeedDeadline,
 } from "../../services/feedJobTimeouts";
 import {
@@ -580,6 +582,44 @@ async function boundedDoorList<T>(
   }
 }
 
+/**
+ * Issue #6710 — one bounded feed dispatch at the caller. The
+ * 270s door bound lives inside the pipeline host, so it only
+ * starts once the RPC enters the host; a host that never
+ * answers (startup gate, wedged instance) left the route's
+ * await unsettled until the async executor's 90-minute
+ * backstop, with no record and no refusal. The dispatch
+ * therefore races the same externalized door bound
+ * (execution + capture) at the caller and refuses
+ * FEED_DEADLINE_EXCEEDED by name past it — the run itself
+ * stays bounded by the engine's own deadline when the host
+ * does answer.
+ */
+async function boundedFeedDispatch<T>(
+  ctx: DataProviderRoutesContext,
+  jobId: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  const timeouts = resolveFeedJobTimeouts(
+    ctx.env as unknown as Record<string, unknown>,
+  );
+  const boundMs = timeouts.executionMs + timeouts.captureMs;
+  try {
+    return await withFeedDeadline(
+      work(),
+      boundMs,
+      FEED_JOB_CODES.deadlineExceeded,
+    );
+  } catch (error) {
+    if (error instanceof FeedJobTimeoutError) {
+      throw new Error(
+        `${FEED_JOB_CODES.deadlineExceeded}: feed job "${jobId}" dispatch did not settle within ${boundMs}ms at the data-providers route (the pipeline host did not answer).`,
+      );
+    }
+    throw error;
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* #3578 — the feed-run route's convergence onto the door above:      */
 /* the outcome read + the refusal mapping onto S1's shapes            */
@@ -665,7 +705,14 @@ function feedRunRefusalResponse(code: string | null, message: string): Response 
   // Issue #6235 — live-state and cancelled outcomes keep the
   // engine's own codes; collapsing them into the generic refusal
   // is what left a paused/cancelled feed run with no reason shown.
-  if (code === "job_already_running" || code === "job_cancelled") {
+  // Issue #6710 — the deadline refusal keeps its code for the
+  // same reason: the job outcome and the panel name the bound
+  // that fired, never a generic action refusal.
+  if (
+    code === "job_already_running" ||
+    code === "job_cancelled" ||
+    code === FEED_JOB_CODES.deadlineExceeded
+  ) {
     return Response.json({ error: message, code }, { status: 409 });
   }
   return Response.json(
@@ -1193,13 +1240,16 @@ export async function handleDataProviderRoutes(
       }
       let outcome: { jobId: string; runId: string; state: string; error?: string };
       try {
-        outcome = await door.runPipelineJob(def.id, {
-          userLogin: ctx.userLogin,
-          // Issue #6682 — the request body carries the run inputs
-          // (universe/symbols/sources/…); the carrier binds them and
-          // refuses undeclared keys by name. No body ⇒ no inputs.
-          runInputs: await readRunInputs(request),
-        });
+        const runInputs = await readRunInputs(request);
+        outcome = await boundedFeedDispatch(ctx, def.id, () =>
+          door.runPipelineJob(def.id, {
+            userLogin: ctx.userLogin,
+            // Issue #6682 — the request body carries the run inputs
+            // (universe/symbols/sources/…); the carrier binds them and
+            // refuses undeclared keys by name. No body ⇒ no inputs.
+            runInputs,
+          }),
+        );
       } catch (error) {
         // The control plane refuses by name (already running, not
         // defined on the host, an unsupported execution mode) —
@@ -1418,19 +1468,29 @@ export async function handleDataProviderRoutes(
         );
       }
       try {
+        // Issue #6710 — the dispatch ops (run/resume/retry) race
+        // the caller-side door bound like the feed-run route;
+        // pause/cancel are control ops and keep their direct
+        // door await.
         const result =
           action === "run"
-            ? await door.runPipelineJob(jobId, {
-                userLogin: ctx.userLogin,
-                runInputs: await readRunInputs(request),
-              })
+            ? await boundedFeedDispatch(ctx, jobId, async () =>
+                door.runPipelineJob(jobId, {
+                  userLogin: ctx.userLogin,
+                  runInputs: await readRunInputs(request),
+                }),
+              )
             : action === "pause"
               ? await door.pausePipelineJob(jobId)
               : action === "resume"
-                ? await door.resumePipelineJob(jobId, { userLogin: ctx.userLogin })
+                ? await boundedFeedDispatch(ctx, jobId, () =>
+                    door.resumePipelineJob(jobId, { userLogin: ctx.userLogin }),
+                  )
                 : action === "cancel"
                   ? await door.cancelPipelineJob(jobId)
-                  : await door.retryPipelineJob(jobId, { userLogin: ctx.userLogin });
+                  : await boundedFeedDispatch(ctx, jobId, () =>
+                      door.retryPipelineJob(jobId, { userLogin: ctx.userLogin }),
+                    );
         await ctx.recordAudit("data_provider.feed_job_action", "orchestrator", {
           actor: ctx.userLogin,
           providerId: id,

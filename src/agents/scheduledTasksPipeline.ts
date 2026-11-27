@@ -95,7 +95,11 @@ import {
 } from "../services/feedJobResidency";
 import { feedRunSettledObserverForEnv } from "../services/feedRunSettledObserverWiring";
 import type { JobPipelineWorkflowOperation } from "../workflows/jobPipelineWorkflowFlow";
-import { resolveFeedJobTimeouts } from "../services/feedJobTimeouts";
+import {
+  FeedJobTimeoutError,
+  resolveFeedJobTimeouts,
+  withFeedDeadline,
+} from "../services/feedJobTimeouts";
 import { resolveStageTimeoutMs } from "../services/stageTimeouts";
 import {
   ensureFeedPipelineJobs,
@@ -985,16 +989,45 @@ export async function dispatchFeedJobWorkflow(
 ): Promise<FeedWorkflowDispatchOutcome> {
   const env = envStrings(ctx.env);
   resolveFeedJobResidency(env);
-  const { instanceId } = await startPipelineJobWorkflow(ctx, jobId, {
-    trigger: opts.trigger ?? "manual",
-    ...(opts.scopePath ? { scopePath: opts.scopePath } : {}),
-    ...(opts.scheduleId ? { scheduleId: opts.scheduleId } : {}),
-    ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
-    operation: opts.operation ?? "run",
-    ...(opts.nodePath ? { nodePath: opts.nodePath } : {}),
-    ...(opts.replayRunId ? { replayRunId: opts.replayRunId } : {}),
-    ...(opts.provenance ? { provenance: opts.provenance } : {}),
-  });
+  const timeouts = resolveFeedJobTimeouts(env);
+  const boundMs = timeouts.executionMs + timeouts.captureMs;
+  const pollMs = resolveFeedWorkflowPollMs(env);
+  const deadline = Date.now() + boundMs;
+  const deadlineError = (): Error =>
+    new Error(
+      `${FEED_JOB_CODES.deadlineExceeded}: feed job "${jobId}" workflow dispatch did not settle within ${boundMs}ms at the pipeline host door.`,
+    );
+  // Issue #6710 — every await on this dispatch path races the
+  // remaining budget: the deadline was previously checked only
+  // AFTER a status read settled, so a start or a status read
+  // that never settles outlived the bound (and the stage /
+  // resume / retry door paths carry no outer race to catch it).
+  const bounded = async <T>(work: () => Promise<T>): Promise<T> => {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) throw deadlineError();
+    try {
+      return await withFeedDeadline(
+        work(),
+        remainingMs,
+        FEED_JOB_CODES.deadlineExceeded,
+      );
+    } catch (error) {
+      if (error instanceof FeedJobTimeoutError) throw deadlineError();
+      throw error;
+    }
+  };
+  const { instanceId } = await bounded(() =>
+    startPipelineJobWorkflow(ctx, jobId, {
+      trigger: opts.trigger ?? "manual",
+      ...(opts.scopePath ? { scopePath: opts.scopePath } : {}),
+      ...(opts.scheduleId ? { scheduleId: opts.scheduleId } : {}),
+      ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
+      operation: opts.operation ?? "run",
+      ...(opts.nodePath ? { nodePath: opts.nodePath } : {}),
+      ...(opts.replayRunId ? { replayRunId: opts.replayRunId } : {}),
+      ...(opts.provenance ? { provenance: opts.provenance } : {}),
+    }),
+  );
   const readStatus = async (): Promise<ManagedWorkflowStatus> => {
     if (ctx.workflowStatus) return ctx.workflowStatus(instanceId);
     const workflow = ctx.env.JOB_PIPELINE_WORKFLOW;
@@ -1008,12 +1041,8 @@ export async function dispatchFeedJobWorkflow(
       instanceId,
     );
   };
-  const timeouts = resolveFeedJobTimeouts(env);
-  const boundMs = timeouts.executionMs + timeouts.captureMs;
-  const pollMs = resolveFeedWorkflowPollMs(env);
-  const deadline = Date.now() + boundMs;
   for (;;) {
-    const status = await readStatus();
+    const status = await bounded(readStatus);
     if (status.status === "complete") {
       return parseWorkflowOutcome(jobId, instanceId, status.output);
     }
