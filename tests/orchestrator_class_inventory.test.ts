@@ -449,9 +449,14 @@ const ORCH = "agents/orchestrator.ts";
  *  #3122 (agentic loop safeguards, landed on main after the #6503
  *  rebase) adds the loop state + turn queue + run-ID mint to the
  *  class — measured 4,160 lines / 192,343 B on the rebased tree, so
- *  budget lines rise to 4170 and bytes rise to 192_900. */
-const BUDGET_LINES = 4170;
-const BUDGET_BYTES = 192_900;
+ *  budget lines rise to 4170 and bytes rise to 192_900.
+ *  #6554 (F1, merge async_jobs into the engine as its async
+ *  capability) adds the async-capability engine accessor + the engine
+ *  wiring to orchestrator.ts — measured 4,198 lines / 194,066 B on
+ *  the rebased tree, so budget lines rise to 4198 and bytes rise to
+ *  194_600. */
+const BUDGET_LINES = 4198;
+const BUDGET_BYTES = 194_600;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;

@@ -557,9 +557,21 @@ describe("source pins: asyncJobs mcp.tool mount (parent-gate addition)", () => {
   // source-pinned; the mechanism it feeds (storage -> scan -> capture)
   // is executing-pinned by the MCP leg pin above. Never claim this
   // pin alone proves a job scan captures.
-  it("mcp.tool branch passes ctx.agentCtx.storage into executeMCPTool", () => {
+  // #6554 (F1): the executor's capability if/else retired — the
+  // mcp.tool leg moved verbatim into the named handler
+  // executeMcpToolCapability, registered as the "mcp.tool" entry of
+  // ASYNC_CAPABILITY_HANDLERS. The pin spans that handler (not the
+  // old branch text) and still asserts the storage handle is passed
+  // into executeMCPTool, plus that the handler is the registered
+  // mcp.tool leg.
+  it("mcp.tool handler passes ctx.agentCtx.storage into executeMCPTool", () => {
     const fileSrc = src("agents/orchestrator/asyncJobs.ts");
-    const span = spanBetween(fileSrc, '} else if (job.capability === "mcp.tool")', "});");
+    const span = spanBetween(
+      fileSrc,
+      "async function executeMcpToolCapability(",
+      "async function executeTaskDraftCapability(",
+    );
     expect(span).toContain("storage: ctx.agentCtx.storage");
+    expect(fileSrc).toContain('"mcp.tool": executeMcpToolCapability');
   });
 });
