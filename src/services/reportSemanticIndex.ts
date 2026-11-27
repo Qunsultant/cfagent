@@ -15,6 +15,8 @@
 
 import type { SqlStorage } from "../orm";
 import { createCanonicalReportStorePorts } from "../data/createCanonicalReportStorePorts";
+import { createAuditReportAdapter } from "../data/createAuditReportPorts";
+import { ensureAuditReportSchema } from "../data/d1AuditReportAdapter";
 import { VectorMemory } from "../memory/vector-memory";
 import { createBlobStore } from "./blobStoreR2Adapter";
 import { blobText } from "./blobStorePorts";
@@ -101,6 +103,11 @@ export interface IndexEnv {
   AI?: any;
   VECTOR_MEMORY?: any;
   REPORTS_BUCKET?: any;
+  /** Issue #6101 (step 8 follow-up) — the D1 binding, when the
+   *  host carries it; the backfill page reads D1 through it.
+   *  Typed as D1Database (not unknown) so IndexEnv stays
+   *  assignable to ReportWriterEnv at the store seam. */
+  AGENT_DB?: D1Database;
 }
 
 /** One canonical report row, as the store seams hand it to the hook. */
@@ -288,13 +295,29 @@ export async function runCanonicalIndexBackfillPage(
   opts: { limit: number; offset: number }
 ): Promise<CanonicalIndexBackfillPage> {
   const { limit, offset } = opts;
-  // Issue #2359 (#1976 step 4d): the page read serves through
-  // the canonical-report read port (same projection, same
-  // oldest-first page) instead of raw SQL.
-  const rows = createCanonicalReportStorePorts(sql as never).read.listIndexBackfillRows(
-    limit,
-    offset
-  ) as Array<Record<string, unknown>>;
+  // Issue #6101 (step 8 follow-up) — the canonical reports moved
+  // to D1 in step 5, but this page read still served through the
+  // DO port, so it found 0 rows once the writer moved (shard 3:
+  // report_index_coverage_p1169 "backfill route: exact covered
+  // set…", expected upserted 6 got 0). A bound AGENT_DB reads D1
+  // (the #6103 D1-only read, same projection, same oldest-first
+  // page); unbound keeps the DO port (the legacy deployment where
+  // no D1 rows exist, and the stub-sql tests that exercise the
+  // page function without a binding).
+  const d1Adapter = env ? createAuditReportAdapter(env) : null;
+  let rows: Array<Record<string, unknown>>;
+  if (d1Adapter) {
+    await ensureAuditReportSchema(d1Adapter.db);
+    rows = await d1Adapter.listIndexBackfillRows(limit, offset);
+  } else {
+    // Issue #2359 (#1976 step 4d): the page read serves through
+    // the canonical-report read port (same projection, same
+    // oldest-first page) instead of raw SQL.
+    rows = createCanonicalReportStorePorts(sql as never).read.listIndexBackfillRows(
+      limit,
+      offset
+    ) as Array<Record<string, unknown>>;
+  }
   let upserted = 0;
   let skippedRetention = 0;
   for (const row of rows) {

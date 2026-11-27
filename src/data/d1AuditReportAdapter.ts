@@ -13,7 +13,7 @@
  * primary key, so replayed writes are no-ops even under
  * at-least-once delivery.
  */
-import { and, desc, eq, like, or } from "drizzle-orm";
+import { and, asc, desc, eq, like, or } from "drizzle-orm";
 import { createDrizzleD1Db } from "./d1QueryLogger";
 import { agentChainAudit, agentReports } from "./drizzleSchema";
 import type {
@@ -267,6 +267,42 @@ export class D1AuditReportAdapter implements AuditReportStore {
       .orderBy(desc(agentReports.createdAtMs), desc(agentReports.reportId))
       .limit(Math.max(1, opts?.limit ?? 100));
     return latestPerReport(rows.map(toReportRow));
+  }
+
+  /**
+   * Issue #6101 (step 8 follow-up) — one page of the index
+   * backfill, oldest first, over the D1 canonical rows. Mirrors
+   * the DO listIndexBackfillRows it replaces (same projection,
+   * same oldest-first page); id is the report id. Single
+   * statement, atomic on D1 without a transaction.
+   */
+  async listIndexBackfillRows(
+    limit: number,
+    offset: number,
+  ): Promise<
+    Array<{
+      id: string;
+      title: string;
+      source: string;
+      summary: string;
+      body: string;
+      body_r2_key: string | null;
+    }>
+  > {
+    const rows = await this.db
+      .select()
+      .from(agentReports)
+      .orderBy(asc(agentReports.createdAtMs), asc(agentReports.reportId))
+      .limit(Math.max(1, limit))
+      .offset(Math.max(0, offset));
+    return rows.map((row) => ({
+      id: row.reportId,
+      title: row.title,
+      source: row.source,
+      summary: row.summary,
+      body: row.body,
+      body_r2_key: row.bodyR2Key ?? null,
+    }));
   }
 
   /**
