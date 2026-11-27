@@ -423,7 +423,10 @@ export type WorkflowErrorCode =
   | "send_event_unsupported"
   // Issue #5783 — instance control: an instance shape that cannot pause,
   // resume, terminate or restart refuses by name instead of reporting success.
-  | "instance_control_unsupported";
+  | "instance_control_unsupported"
+  // Issue #4171 — status read: an instance shape that cannot report
+  // status refuses by name instead of inventing an outcome.
+  | "status_unsupported";
 
 export class WorkflowError extends Error {
   readonly code: WorkflowErrorCode;

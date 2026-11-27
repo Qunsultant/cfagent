@@ -55,8 +55,10 @@ import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { normalizeJobRunTrigger } from "../data/jobRunRecordPorts";
 import { createJobPipelineStoresFromD1 } from "../data/createJobPipelinePorts";
 import {
+  readManagedWorkflowStatus,
   startManagedWorkflowInstance,
   type ManagedWorkflowBinding,
+  type ManagedWorkflowStatus,
 } from "../workflows/workflowInstanceSeam";
 import {
   createD1JobRunRecordDb,
@@ -85,7 +87,14 @@ import {
 } from "../services/jobPipelineEngine";
 import { JobPipelineError } from "../services/jobPipelineConfig";
 import { createJobPipelineControl } from "../services/jobPipelineControlFactory";
-import { buildFeedJobRegistry, buildFeedStatus } from "../services/feedJobs";
+import { buildFeedJobRegistry } from "../services/feedJobs";
+import { FEED_JOB_CODES } from "../services/feedJobCodes";
+import {
+  resolveFeedJobResidency,
+  resolveFeedWorkflowPollMs,
+} from "../services/feedJobResidency";
+import { feedRunSettledObserverForEnv } from "../services/feedRunSettledObserverWiring";
+import type { JobPipelineWorkflowOperation } from "../workflows/jobPipelineWorkflowFlow";
 import { resolveFeedJobTimeouts } from "../services/feedJobTimeouts";
 import { resolveStageTimeoutMs } from "../services/stageTimeouts";
 import {
@@ -131,8 +140,6 @@ import {
 } from "../services/deliverPipelineJobs";
 import { createDeliveryDatasetPorts } from "../data/createDeliveryDatasetPorts";
 import { actorGateway } from "../services/cloudflareActorGateway";
-import { createFeedRunSettledObserver } from "../services/feedJobOutcomes";
-import type { JobOutcomeInput } from "../data/jobOutcomePorts";
 import {
   buildPipelineChainRegistry,
   chainStageNodePath,
@@ -167,6 +174,18 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 /** The Think task-id prefix for pipeline schedule declarations. */
 export const PIPELINE_TASK_ID_PREFIX = "pipeline-job:";
 
+/** The facts one JobPipelineWorkflow start carries (#4171, #6584). */
+export interface PipelineWorkflowStartOpts {
+  trigger: JobRunTrigger;
+  scopePath?: string;
+  scheduleId?: string;
+  userLogin?: string;
+  operation?: JobPipelineWorkflowOperation;
+  nodePath?: string;
+  replayRunId?: string;
+  provenance?: JobRunProvenance;
+}
+
 /** Ports the pipeline declaration receives from the class. */
 export interface ScheduledTasksPipelineContext {
   env: Env;
@@ -176,8 +195,10 @@ export interface ScheduledTasksPipelineContext {
   /** Composition seam (tests): the workflow starter. */
   startWorkflow?: (
     jobId: string,
-    opts: { trigger: JobRunTrigger; scopePath?: string; provenance?: JobRunProvenance },
+    opts: PipelineWorkflowStartOpts,
   ) => Promise<{ instanceId: string }>;
+  /** Composition seam (tests): the workflow status reader. */
+  workflowStatus?: (instanceId: string) => Promise<ManagedWorkflowStatus>;
 }
 
 /**
@@ -460,11 +481,6 @@ export function optionsStepDepsForScheduledAgent(
  * analyze.apply plus generate.apply plus deliver.apply — one
  * registry, every residency.
  */
-/** The Orchestrator door the feed-outcome projection writes through (#3530 slice B). */
-interface OrchestratorOutcomeDoor {
-  recordFeedJobOutcome(input: JobOutcomeInput): Promise<void>;
-}
-
 /**
  * The settle observer for this host's control plane (#3530 slice B):
  * a settled feed run's outcome lands in the job-outcome sink the
@@ -481,23 +497,9 @@ interface OrchestratorOutcomeDoor {
  * an unreachable instance never fails a feed run.
  */
 function feedRunSettledObserverFor(ctx: ScheduledTasksPipelineContext) {
-  return createFeedRunSettledObserver({
-    readFeedRun: async (jobId, runId) => {
-      const datasetStore = createFeedDatasetAdapter(ctx.env);
-      if (!datasetStore) return null;
-      const def = buildFeedJobRegistry(envStrings(ctx.env)).get(jobId);
-      if (!def) return null;
-      const status = await buildFeedStatus(datasetStore, def, Date.now());
-      return status.lastRun?.runId === runId ? status.lastRun : null;
-    },
-    record: async (input) => {
-      const door = actorGateway.stub<OrchestratorOutcomeDoor>(
-        ctx.env.ORCHESTRATOR_AGENT,
-        SHARED_ORCHESTRATOR_INSTANCE,
-      );
-      await door.recordFeedJobOutcome(input);
-    },
-  });
+  // Issue #4171 — the ONE env wiring both residencies build
+  // their observer through (services/feedRunSettledObserverWiring).
+  return feedRunSettledObserverForEnv(ctx.env);
 }
 
 /**
@@ -789,6 +791,22 @@ export async function dispatchScheduledPipelineJob(
   scheduleId?: string,
 ): Promise<JobDispatchResult | null> {
   const serviceLogin = getServiceUserLogin(ctx.env) ?? undefined;
+  // Issue #4171 — a scheduled feed firing dispatches to
+  // workflow residency; the host is the dispatcher, never the
+  // executor. The firing returns once the workflow instance is
+  // started (the run's records are its failure surface, as
+  // before). Non-feed jobs keep the host dispatch below.
+  if (buildFeedJobRegistry(envStrings(ctx.env)).get(jobId)) {
+    resolveFeedJobResidency(envStrings(ctx.env));
+    await startPipelineJobWorkflow(ctx, jobId, {
+      trigger: "scheduled",
+      ...(scopePath ? { scopePath } : {}),
+      ...(scheduleId ? { scheduleId } : {}),
+      ...(serviceLogin ? { userLogin: serviceLogin } : {}),
+      operation: "run",
+    });
+    return null;
+  }
   const control = createScheduledAgentPipelineControl(ctx, serviceLogin);
   await ensureScheduledAgentPipelineJobs(ctx, control);
   const dispatch = await control.runJob(jobId, {
@@ -822,6 +840,11 @@ export async function startPipelineJobWorkflow(
   opts: {
     trigger?: JobRunTrigger;
     scopePath?: string;
+    scheduleId?: string;
+    userLogin?: string;
+    operation?: JobPipelineWorkflowOperation;
+    nodePath?: string;
+    replayRunId?: string;
     /** Issue #6584 — the run's facts, when the caller resolved them. */
     provenance?: JobRunProvenance | null;
   } = {},
@@ -837,6 +860,11 @@ export async function startPipelineJobWorkflow(
       // modes, fail-closed through normalize (absent ⇒ "manual").
       trigger: normalizeJobRunTrigger(opts.trigger),
       ...(opts.scopePath ? { scopePath: opts.scopePath } : {}),
+      ...(opts.scheduleId ? { scheduleId: opts.scheduleId } : {}),
+      ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
+      ...(opts.operation ? { operation: opts.operation } : {}),
+      ...(opts.nodePath ? { nodePath: opts.nodePath } : {}),
+      ...(opts.replayRunId ? { replayRunId: opts.replayRunId } : {}),
       ...(provenance ? { provenance } : {}),
     });
   }
@@ -871,11 +899,127 @@ export async function startPipelineJobWorkflow(
         jobId,
         trigger: opts.trigger ?? "manual",
         ...(opts.scopePath ? { scopePath: opts.scopePath } : {}),
+        ...(opts.scheduleId ? { scheduleId: opts.scheduleId } : {}),
+        ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
+        ...(opts.operation ? { operation: opts.operation } : {}),
+        ...(opts.nodePath ? { nodePath: opts.nodePath } : {}),
+        ...(opts.replayRunId ? { replayRunId: opts.replayRunId } : {}),
+        ...(provenance ? { provenance } : {}),
       },
       workflowName: "JOB_PIPELINE_WORKFLOW",
     },
   );
   return { instanceId: started.workflowId };
+}
+
+/** The outcome view the feed dispatch door returns (#4171). */
+export interface FeedWorkflowDispatchOutcome {
+  jobId: string;
+  runId: string;
+  state: string;
+  error?: string;
+}
+
+function parseWorkflowOutcome(
+  jobId: string,
+  instanceId: string,
+  output: unknown,
+): FeedWorkflowDispatchOutcome {
+  const record =
+    output && typeof output === "object" && !Array.isArray(output)
+      ? (output as Record<string, unknown>)
+      : null;
+  if (
+    !record ||
+    typeof record.runId !== "string" ||
+    typeof record.state !== "string"
+  ) {
+    throw new Error(
+      `feed_job_workflow_outcome_unreadable: workflow instance "${instanceId}" for feed job "${jobId}" completed without a readable run outcome.`,
+    );
+  }
+  return {
+    jobId,
+    runId: record.runId,
+    state: record.state,
+    ...(typeof record.error === "string" && record.error
+      ? { error: record.error }
+      : {}),
+  };
+}
+
+/**
+ * Issue #4171 — dispatch one feed operation to workflow
+ * residency and await THAT instance's outcome. The instance id
+ * is the identity: simultaneous dispatches (same user, other
+ * users, other tenants) each await their own instance, so a
+ * winner's outcome is never read as a loser's. The wait is
+ * bounded by the feed execution + capture bounds; past them
+ * the door refuses by name (the workflow run itself remains
+ * bounded by the engine's own deadline). An errored instance
+ * surfaces the engine's refusal text by name.
+ */
+export async function dispatchFeedJobWorkflow(
+  ctx: ScheduledTasksPipelineContext,
+  jobId: string,
+  opts: {
+    trigger?: JobRunTrigger;
+    scopePath?: string;
+    scheduleId?: string;
+    userLogin?: string;
+    operation?: JobPipelineWorkflowOperation;
+    nodePath?: string;
+    replayRunId?: string;
+    provenance?: JobRunProvenance | null;
+  } = {},
+): Promise<FeedWorkflowDispatchOutcome> {
+  const env = envStrings(ctx.env);
+  resolveFeedJobResidency(env);
+  const { instanceId } = await startPipelineJobWorkflow(ctx, jobId, {
+    trigger: opts.trigger ?? "manual",
+    ...(opts.scopePath ? { scopePath: opts.scopePath } : {}),
+    ...(opts.scheduleId ? { scheduleId: opts.scheduleId } : {}),
+    ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
+    operation: opts.operation ?? "run",
+    ...(opts.nodePath ? { nodePath: opts.nodePath } : {}),
+    ...(opts.replayRunId ? { replayRunId: opts.replayRunId } : {}),
+    ...(opts.provenance ? { provenance: opts.provenance } : {}),
+  });
+  const readStatus = async (): Promise<ManagedWorkflowStatus> => {
+    if (ctx.workflowStatus) return ctx.workflowStatus(instanceId);
+    const workflow = ctx.env.JOB_PIPELINE_WORKFLOW;
+    if (!workflow || typeof workflow.get !== "function") {
+      throw new Error(
+        "job_pipeline_workflow_not_configured: the JOB_PIPELINE_WORKFLOW binding is not configured in this deployment; the run's outcome cannot be read.",
+      );
+    }
+    return readManagedWorkflowStatus(
+      workflow as unknown as ManagedWorkflowBinding,
+      instanceId,
+    );
+  };
+  const timeouts = resolveFeedJobTimeouts(env);
+  const boundMs = timeouts.executionMs + timeouts.captureMs;
+  const pollMs = resolveFeedWorkflowPollMs(env);
+  const deadline = Date.now() + boundMs;
+  for (;;) {
+    const status = await readStatus();
+    if (status.status === "complete") {
+      return parseWorkflowOutcome(jobId, instanceId, status.output);
+    }
+    if (status.status === "errored" || status.status === "terminated") {
+      throw new Error(
+        status.error?.message ??
+          `feed_job_workflow_${status.status}: workflow instance "${instanceId}" for feed job "${jobId}" ${status.status} without an error message.`,
+      );
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `${FEED_JOB_CODES.deadlineExceeded}: feed job "${jobId}" workflow dispatch did not settle within ${boundMs}ms at the pipeline host door.`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
 }
 
 /**

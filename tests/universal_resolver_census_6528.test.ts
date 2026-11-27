@@ -12,7 +12,7 @@
  *    function — a 6th fails);
  *  - a new definition whose NAME already exists in the baseline at another
  *    file fails as a same-question duplicate;
- *  - the resolver definition total above its baselined 623 fails;
+ *  - the resolver definition total above its baselined 626 fails;
  *  - decreases and vanished rows pass — that is the shrink the programme
  *    wants, and retiring a duplicate means lowering or removing its
  *    baseline entry in the same PR.
@@ -812,6 +812,13 @@ const BASELINE: Array<[string, string, Kind, number, Disposition]> = [
   // CANONICAL: it answers a NEW question (the report-body store's policy),
   // not a tenant/context question the universal resolver owns.
   ["src/config/reportBodyStore.ts", "resolveReportBodyStorePolicy", "standalone", 1, "CANONICAL"],
+  // Issue #4171 — the feed workflow-residency activation's resolvers.
+  // CANONICAL: each answers a NEW question no existing resolver answers
+  // (the feed residency switch, the feed workflow outcome poll bound,
+  // and the workflow payload's declared operation).
+  ["src/services/feedJobResidency.ts", "resolveFeedJobResidency", "standalone", 1, "CANONICAL"],
+  ["src/services/feedJobResidency.ts", "resolveFeedWorkflowPollMs", "standalone", 1, "CANONICAL"],
+  ["src/workflows/jobPipelineWorkflowFlow.ts", "resolveWorkflowOperation", "standalone", 1, "CANONICAL"],
 ];
 
 /** [file, name, kind, definition count] — the measured tests-only resolver set. */
@@ -1241,11 +1248,12 @@ describe("universal resolver census (#6528 Phase 1)", () => {
   it("the distinct-question count is a range, never an exact number", () => {
     expect(QUESTION_RANGE_LOW).toBeLessThan(QUESTION_CENTRAL_ESTIMATE);
     expect(QUESTION_CENTRAL_ESTIMATE).toBeLessThan(QUESTION_RANGE_HIGH);
-    // Implied copies at the seeded total: 623 − 320 = 303 … 623 − 285 = 338
+    // Implied copies at the seeded total: 626 − 320 = 306 … 626 − 285 = 341
     // (the seed moved 597 → 622 with #6503's 29 CANONICAL rows − 4 retired rows;
-    //  #6659 adds one CANONICAL row, the report-body store's policy resolver).
-    expect(baselineTotal - QUESTION_RANGE_HIGH).toBe(303);
-    expect(baselineTotal - QUESTION_RANGE_LOW).toBe(338);
+    //  #6659 adds one CANONICAL row, the report-body store's policy resolver;
+    //  #4171 adds three CANONICAL rows, the feed residency resolvers).
+    expect(baselineTotal - QUESTION_RANGE_HIGH).toBe(306);
+    expect(baselineTotal - QUESTION_RANGE_LOW).toBe(341);
   });
 
   it("no test-only or scripts-only resolver is counted as production", () => {
@@ -1304,12 +1312,12 @@ describe("universal resolver census (#6528 Phase 1)", () => {
       expect(count, `${kind} count`).toBeGreaterThan(0);
       expect(DISPOSITIONS.has(disposition), `unknown disposition ${disposition}`).toBe(true);
     }
-    expect(baselineTotal).toBe(623);
+    expect(baselineTotal).toBe(626);
     const byKind = new Map<Kind, number>();
     for (const [, , kind, count] of BASELINE) {
       byKind.set(kind, (byKind.get(kind) ?? 0) + count);
     }
-    expect(byKind.get("standalone")).toBe(592);
+    expect(byKind.get("standalone")).toBe(595);
     expect(byKind.get("class-method")).toBe(18);
     expect(byKind.get("resolver-type")).toBe(9);
     expect(byKind.get("interface-method")).toBe(4);

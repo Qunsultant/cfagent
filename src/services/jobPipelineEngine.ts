@@ -1611,7 +1611,11 @@ export class JobPipelineControl {
    *  - the stamped version is no longer resolvable →
    *    `replay_definition_version_unresolved`.
    */
-  async replayRun(jobId: string, runId: string): Promise<JobDispatchResult> {
+  async replayRun(
+    jobId: string,
+    runId: string,
+    opts?: { workflowInstanceId?: string },
+  ): Promise<JobDispatchResult> {
     const { original, definition } = await this.pastRunDefinition(jobId, runId);
     // The original's trigger is the replay's trigger; its schedule and
     // async-job links belong to that dispatch, so they are NOT copied —
@@ -1620,6 +1624,11 @@ export class JobPipelineControl {
       trigger: normalizeJobRunTrigger(original.trigger),
       kind: "replay",
       originRunId: runId,
+      // Issue #4171 — a replay dispatched as a workflow instance
+      // stamps that instance as the new run's executor.
+      ...(opts?.workflowInstanceId
+        ? { workflowInstanceId: opts.workflowInstanceId }
+        : {}),
     });
   }
 
@@ -1901,7 +1910,10 @@ export class JobPipelineControl {
   }
 
   /** Resume a stopped (paused) run from its persisted stage checkpoint, under the definition version it started with (#5278). */
-  async resumeJob(jobId: string): Promise<JobDispatchResult> {
+  async resumeJob(
+    jobId: string,
+    opts?: { workflowInstanceId?: string },
+  ): Promise<JobDispatchResult> {
     const instance = await this.requireInstance(jobId);
     if (instance.state !== "paused") {
       throw new JobPipelineError(
@@ -1932,8 +1944,11 @@ export class JobPipelineControl {
       asyncJobId: instance.runAsyncJobId ?? null,
       // ... but NOT the workflow instance id: a resume is a new
       // executor, and the dispatching workflow instance settled
-      // with the paused outcome — the stamp clears (#4454).
-      workflowInstanceId: null,
+      // with the paused outcome — the stamp clears (#4454). A
+      // resume dispatched AS a workflow instance (#4171) stamps
+      // that new instance instead: it IS the new executor, and
+      // its eviction replay proves itself by the stamp.
+      workflowInstanceId: opts?.workflowInstanceId ?? null,
       resuming: true,
       // Issue #6555 — resume addresses the job's management row.
       runInstanceKey: null,
@@ -2332,7 +2347,10 @@ export class JobPipelineControl {
   }
 
   /** Retry: a NEW run from the start (fresh run id, checkpoints cleared), from a terminal or paused state. */
-  async retryJob(jobId: string): Promise<JobDispatchResult> {
+  async retryJob(
+    jobId: string,
+    opts?: { workflowInstanceId?: string },
+  ): Promise<JobDispatchResult> {
     const definition = await this.requireDefinition(jobId);
     const instance = await this.requireInstance(jobId);
     if (instance.state === "running" || instance.state === "queued") {
@@ -2369,21 +2387,30 @@ export class JobPipelineControl {
       trigger: resolveRunNowTrigger(definition),
       kind: "re-run",
       originRunId,
+      // Issue #4171 — a retry dispatched as a workflow instance
+      // stamps that instance as the new run's executor.
+      ...(opts?.workflowInstanceId
+        ? { workflowInstanceId: opts.workflowInstanceId }
+        : {}),
     });
   }
 
   /**
    * Issue #4002: settle pipeline runs orphaned by a host restart.
    * Called from the pipeline host's onStart, after the job
-   * definitions are ensured. At host start no executor can still
-   * be running — a live run cannot survive its host's death — so
-   * every instance still marked `running` is settled as failed
-   * with a named orphan error, through the engine's own failure
-   * path (state + terminal run record + published transition),
-   * and the job is dispatchable again. Paused, queued, idle,
-   * completed, and failed instances are untouched: a paused run
-   * resumes from its checkpoint, a queued run is still owed its
-   * execution. Returns the settled job ids for the host's log.
+   * definitions are ensured. At host start no host executor can
+   * still be running — a live run cannot survive its host's death
+   * — so every host-resident instance still marked `running` is
+   * settled as failed with a named orphan error, through the
+   * engine's own failure path (state + terminal run record +
+   * published transition), and the job is dispatchable again.
+   * Workflow-resident instances (stamped with a workflow instance
+   * id, #4171) are skipped: their executor is the workflow, which
+   * survives this host's restart and settles or replays the run
+   * itself. Paused, queued, idle, completed, and failed instances
+   * are untouched: a paused run resumes from its checkpoint, a
+   * queued run is still owed its execution. Returns the settled
+   * job ids for the host's log.
    */
   async settleOrphanedRuns(): Promise<{ settled: string[] }> {
     const definitions = await this.deps.stores.definitions.listDefinitions();
@@ -2391,6 +2418,11 @@ export class JobPipelineControl {
     for (const definition of definitions) {
       const instance = await this.deps.stores.instances.getInstance(definition.jobId);
       if (!instance || instance.state !== "running") continue;
+      // Issue #4171 — a workflow-stamped run's executor is its
+      // workflow instance, not this host; settling it here would
+      // fail a live run. The workflow settles it, or its replay
+      // proof resumes it after an eviction.
+      if (instance.runWorkflowInstanceId) continue;
       const message =
         `Orphaned by a host restart: the run was still 'running' when the pipeline host started, ` +
         `so no executor can still be running it (run ${instance.currentRunId ?? "unknown"}, ` +
@@ -2570,6 +2602,7 @@ export class JobPipelineControl {
     jobId: string,
     runId: string,
     nodePath: string,
+    opts?: { workflowInstanceId?: string },
   ): Promise<JobDispatchResult> {
     const { original, definition } = await this.pastRunDefinition(jobId, runId);
     const node = this.nodeAtPath(definition.root, nodePath);
@@ -2597,6 +2630,9 @@ export class JobPipelineControl {
       scopePath: nodePath,
       input,
       stageOnly: true,
+      ...(opts?.workflowInstanceId
+        ? { workflowInstanceId: opts.workflowInstanceId }
+        : {}),
     });
   }
 
@@ -2877,7 +2913,7 @@ export class JobPipelineControl {
   async runStage(
     jobId: string,
     nodePath: string,
-    opts?: { runId?: string },
+    opts?: { runId?: string; workflowInstanceId?: string },
   ): Promise<JobDispatchResult> {
     const definition = await this.requireDefinition(jobId);
     const instance = await this.requireInstance(jobId);
@@ -2909,7 +2945,13 @@ export class JobPipelineControl {
       action: "run",
       at: this.iso(),
     });
-    return this.executeStageAction(definition, instance, nodePath, false);
+    return this.executeStageAction(
+      definition,
+      instance,
+      nodePath,
+      false,
+      opts?.workflowInstanceId,
+    );
   }
 
   /**
@@ -2925,7 +2967,7 @@ export class JobPipelineControl {
   async rerunStage(
     jobId: string,
     nodePath: string,
-    opts?: { runId?: string },
+    opts?: { runId?: string; workflowInstanceId?: string },
   ): Promise<JobDispatchResult> {
     const definition = await this.requireDefinition(jobId);
     const instance = await this.requireInstance(jobId);
@@ -2968,7 +3010,13 @@ export class JobPipelineControl {
       at: this.iso(),
     });
     const fresh = await this.requireInstance(jobId);
-    return this.executeStageAction(definition, fresh, nodePath, true);
+    return this.executeStageAction(
+      definition,
+      fresh,
+      nodePath,
+      true,
+      opts?.workflowInstanceId,
+    );
   }
 
   /**
@@ -3049,7 +3097,11 @@ export class JobPipelineControl {
    * (its checkpoint is the stage's), and the runner's decisions
    * guarantee no completed effect re-executes.
    */
-  async resumeStage(jobId: string, nodePath: string): Promise<JobDispatchResult> {
+  async resumeStage(
+    jobId: string,
+    nodePath: string,
+    opts?: { workflowInstanceId?: string },
+  ): Promise<JobDispatchResult> {
     // The retire check reads TODAY's definition on purpose (#3944): a
     // retirement is the operator's current veto over that stage, not a
     // property of the run's pinned version — a retired stage never
@@ -3086,7 +3138,11 @@ export class JobPipelineControl {
       action: "resume",
       at: this.iso(),
     });
-    return this.resumeJob(jobId);
+    return this.resumeJob(jobId, {
+      ...(opts?.workflowInstanceId
+        ? { workflowInstanceId: opts.workflowInstanceId }
+        : {}),
+    });
   }
 
   /**
@@ -3417,7 +3473,7 @@ export class JobPipelineControl {
   async runStageByVocabulary(
     jobId: string,
     stage: VocabularyStage,
-    opts?: { runId?: string },
+    opts?: { runId?: string; workflowInstanceId?: string },
   ): Promise<JobDispatchResult> {
     return this.runStage(jobId, await this.vocabularyNodePath(jobId, stage), opts);
   }
@@ -3426,7 +3482,7 @@ export class JobPipelineControl {
   async rerunStageByVocabulary(
     jobId: string,
     stage: VocabularyStage,
-    opts?: { runId?: string },
+    opts?: { runId?: string; workflowInstanceId?: string },
   ): Promise<JobDispatchResult> {
     return this.rerunStage(jobId, await this.vocabularyNodePath(jobId, stage), opts);
   }
@@ -3437,8 +3493,12 @@ export class JobPipelineControl {
   }
 
   /** Resume a stopped vocabulary stage from its persisted checkpoint. */
-  async resumeStageByVocabulary(jobId: string, stage: VocabularyStage): Promise<JobDispatchResult> {
-    return this.resumeStage(jobId, await this.vocabularyNodePath(jobId, stage));
+  async resumeStageByVocabulary(
+    jobId: string,
+    stage: VocabularyStage,
+    opts?: { workflowInstanceId?: string },
+  ): Promise<JobDispatchResult> {
+    return this.resumeStage(jobId, await this.vocabularyNodePath(jobId, stage), opts);
   }
 
   /** Cancel a vocabulary stage — terminal, surfaced as cancelled. */
@@ -3562,6 +3622,7 @@ export class JobPipelineControl {
     instance: JobInstanceRecord,
     nodePath: string,
     force: boolean,
+    workflowInstanceId?: string,
   ): Promise<JobDispatchResult> {
     const jobId = definition.jobId;
     const runId = instance.currentRunId!;
@@ -3574,6 +3635,10 @@ export class JobPipelineControl {
       state: "running",
       desiredState: "none",
       lastError: null,
+      // Issue #4171 — a stage action dispatched as a workflow
+      // instance stamps that instance as its executor, so host
+      // orphan settlement leaves it to the workflow.
+      ...(workflowInstanceId ? { runWorkflowInstanceId: workflowInstanceId } : {}),
     };
     await this.setInstance(running);
     const ctx = await this.buildContext(definition, {

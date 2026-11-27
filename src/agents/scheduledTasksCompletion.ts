@@ -40,6 +40,10 @@ export interface CompletionFiringResult {
 export async function dispatchCompletionSchedules(
   control: JobPipelineControl,
   event: CompletionEvent,
+  dispatchJob?: (
+    jobId: string,
+    opts: { trigger: "scheduled"; scopePath?: string },
+  ) => Promise<unknown>,
 ): Promise<CompletionFiringResult> {
   const result: CompletionFiringResult = { fired: [], skipped: [], invalid: [] };
   const jobs = await control.listJobs();
@@ -62,10 +66,18 @@ export async function dispatchCompletionSchedules(
     }
     if (!completionMatchesTrigger(parsed.binding, event)) continue;
     try {
-      await control.runJob(job.jobId, {
-        trigger: "scheduled",
+      // Issue #4171 — the host may route a target's dispatch
+      // (feed targets start workflow residency); absent a
+      // router, the control plane dispatch stands.
+      const dispatchOpts = {
+        trigger: "scheduled" as const,
         ...(parsed.binding.targetStage ? { scopePath: parsed.binding.targetStage } : {}),
-      });
+      };
+      if (dispatchJob) {
+        await dispatchJob(job.jobId, dispatchOpts);
+      } else {
+        await control.runJob(job.jobId, dispatchOpts);
+      }
       result.fired.push(job.jobId);
     } catch (error) {
       result.skipped.push({
