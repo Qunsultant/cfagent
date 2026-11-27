@@ -1699,6 +1699,28 @@ export class JobPipelineControl {
       assertExecutionModeSupported(definition.config.executionMode);
       this.assertScopeNotRetired(definition, opts.scopePath ?? "");
       runId = this.newRunId();
+      // Issue #3992 — the guard above is check-then-write across
+      // awaits: concurrent dispatches can both read a non-live
+      // instance before either stamps queued, and both execute.
+      // The claim is the atomic half: one conditional write that
+      // lands only while no live run holds the row. A lost claim
+      // refuses with the winner's live state named.
+      const claimed = await this.deps.stores.instances.claimInstance({
+        ...instance,
+        state: "queued",
+        desiredState: "none",
+        currentRunId: runId,
+        runStartedAt: this.iso(),
+        lastError: null,
+        updatedAt: this.iso(),
+      });
+      if (!claimed) {
+        const live = await this.requireInstance(jobId);
+        throw new JobPipelineError(
+          "job_already_running",
+          `Job "${jobId}" is ${live.state} (run ${live.currentRunId ?? "unknown"}); resume or cancel it before dispatching a new run.`,
+        );
+      }
       completion = this.executeRun(definition, {
         runId,
         trigger: normalizeJobRunTrigger(opts.trigger),
@@ -3903,7 +3925,24 @@ export class JobPipelineControl {
     const { publisher } = this.deps;
     const jobId = definition.jobId;
     const startedAt = this.iso();
-    let instance = await this.requireRunInstance(jobId, opts.runInstanceKey);
+    // Issue #4775 S1 (Decision 1) — the run bound the stage
+    // deadlines clamp to: a feed job's whole-execution deadline;
+    // a non-feed job has no run deadline, so its stages carry
+    // their own timeout alone. Issue #3992 — resolved BEFORE
+    // setup so the bound covers setup + execution: a setup leg
+    // that never settles (an instance stamp, a publish, the
+    // ledger persist) previously sat outside the race and the
+    // run never settled or recorded.
+    const runDeadlineMs = jobTreeInvokesStep(definition.root, FEED_PULL_STEP_NAME)
+      ? resolveFeedExecutionDeadlineMs(this.deps.feedExecutionDeadlineMs)
+      : undefined;
+    const runStartedAtMs = Date.now();
+    const remainingDeadlineMs = (): number =>
+      Math.max(1, (runDeadlineMs ?? 0) - (Date.now() - runStartedAtMs));
+    let instance: JobInstanceRecord;
+    let ctx!: RunContext;
+    const setupRun = async (): Promise<void> => {
+    instance = await this.requireRunInstance(jobId, opts.runInstanceKey);
     // Issue #4767 (Q6) — the resume guard: a resuming run refuses
     // a stage checkpoint stamped under a different trigger than
     // the run's own. A checkpoint belongs to exactly one
@@ -3980,15 +4019,7 @@ export class JobPipelineControl {
     await this.setInstance(instance);
     await publishJobStatus(publisher, { jobId, runId: opts.runId, state: "running", at: this.iso() });
 
-    // Issue #4775 S1 (Decision 1) — the run bound the stage
-    // deadlines clamp to: a feed job's whole-execution deadline;
-    // a non-feed job has no run deadline, so its stages carry
-    // their own timeout alone. Resolved once here so the race
-    // below and the stage compilation agree on the bound.
-    const runDeadlineMs = jobTreeInvokesStep(definition.root, FEED_PULL_STEP_NAME)
-      ? resolveFeedExecutionDeadlineMs(this.deps.feedExecutionDeadlineMs)
-      : undefined;
-    const ctx = await this.buildContext(definition, {
+    ctx = await this.buildContext(definition, {
       runId: opts.runId,
       trigger: opts.trigger,
       kind: opts.kind,
@@ -4008,9 +4039,18 @@ export class JobPipelineControl {
     // retry gate share one budget instead of each leg silently
     // spending against its own bound.
     ctx.executionBudgetMs = runDeadlineMs;
-    ctx.runStartedAtMs = Date.now();
-
+    ctx.runStartedAtMs = runStartedAtMs;
+    };
     try {
+      if (runDeadlineMs !== undefined) {
+        await withFeedDeadline(
+          setupRun(),
+          remainingDeadlineMs(),
+          FEED_JOB_CODES.deadlineExceeded,
+        );
+      } else {
+        await setupRun();
+      }
       const scoped = this.nodeAtPath(definition.root, opts.scopePath);
       // Issue #6400 — a stage replay executes ONE stage: the named node's
       // own work, with its downstream children detached. replayStage
@@ -4021,9 +4061,10 @@ export class JobPipelineControl {
         ? { ...scoped, children: undefined }
         : scoped;
       // #3992 PR-4: a feed job's whole execution tree is bounded
-      // by the resolved feed execution deadline. The race covers
-      // ONLY this await — instance setup above and the terminal
-      // writes below stay outside it. The rejection abandons the
+      // by the resolved feed execution deadline. Issue #3992 —
+      // the race now covers setup (above) plus this await, with
+      // one shared budget; the terminal writes below stay
+      // outside it. The rejection abandons the
       // execution (abandon-not-abort, the withFeedDeadline
       // idiom): the tree may keep running in the host, but the
       // run is terminally settled by the catch below, and the
@@ -4040,7 +4081,7 @@ export class JobPipelineControl {
       if (runDeadlineMs !== undefined) {
         await withFeedDeadline(
           execution,
-          runDeadlineMs,
+          remainingDeadlineMs(),
           FEED_JOB_CODES.deadlineExceeded,
         );
       } else {
@@ -4078,9 +4119,12 @@ export class JobPipelineControl {
       };
     } catch (error) {
       instance = await this.requireRunInstance(jobId, opts.runInstanceKey);
+      // Issue #3992 — a setup leg that timed out may leave ctx
+      // unbuilt; settle from the instance row alone then.
+      const settledCtx = ctx as RunContext | undefined;
       if (error instanceof RunStopped && error.reason === "paused") {
         // The boundary that stopped already persisted the checkpoint + paused state.
-        return { jobId, runId: opts.runId, state: "paused", artifactKeys: [...ctx.artifactKeys] };
+        return { jobId, runId: opts.runId, state: "paused", artifactKeys: [...(settledCtx?.artifactKeys ?? [])] };
       }
       if (error instanceof RunStopped && error.reason === "cancelled") {
         // Surface the cancellation per stage: every outstanding
@@ -4089,18 +4133,18 @@ export class JobPipelineControl {
         // units stay "retired" — the sweep below never
         // overwrites them; only the run's other outstanding
         // units are recorded cancelled.
-        if (error instanceof StageRetired && !ctx.notes.includes(`stage retired: ${error.stageId}`)) {
-          ctx.notes.push(`stage retired: ${error.stageId}`);
+        if (error instanceof StageRetired && !settledCtx?.notes.includes(`stage retired: ${error.stageId}`)) {
+          settledCtx?.notes.push(`stage retired: ${error.stageId}`);
         }
-        if (error instanceof StageCancelled && !ctx.notes.includes(`stage cancelled: ${error.stageId}`)) {
-          ctx.notes.push(`stage cancelled: ${error.stageId}`);
+        if (error instanceof StageCancelled && !settledCtx?.notes.includes(`stage cancelled: ${error.stageId}`)) {
+          settledCtx?.notes.push(`stage cancelled: ${error.stageId}`);
         }
-        for (const unit of ctx.ledger.units) {
+        for (const unit of settledCtx?.ledger.units ?? []) {
           if (unit.status !== "completed" && unit.status !== "cancelled" && unit.status !== "skipped" && unit.status !== "retired") {
-            this.setEntry(ctx, { ...unit, status: "cancelled", endedAt: this.iso(), updatedAt: this.iso() });
+            this.setEntry(settledCtx!, { ...unit, status: "cancelled", endedAt: this.iso(), updatedAt: this.iso() });
           }
         }
-        await this.persistLedger(ctx);
+        if (settledCtx) await this.persistLedger(settledCtx);
         instance = { ...instance, state: "cancelled", desiredState: "none", stageDesired: null };
         await this.setInstance(instance);
         await publishJobStatus(publisher, {
@@ -4114,7 +4158,7 @@ export class JobPipelineControl {
           jobId,
           runId: opts.runId,
           state: "cancelled",
-          artifactKeys: [...ctx.artifactKeys],
+          artifactKeys: [...(settledCtx?.artifactKeys ?? [])],
         };
       }
       // #3992 PR-4: a feed execution that exceeded its whole-run
@@ -4142,25 +4186,35 @@ export class JobPipelineControl {
       const legSummary =
         error instanceof FeedJobTimeoutError &&
         error.code === FEED_JOB_CODES.deadlineExceeded &&
-        ctx.legTimings.length > 0
-          ? ` Leg timings: ${ctx.legTimings
+        (settledCtx?.legTimings.length ?? 0) > 0
+          ? ` Leg timings: ${settledCtx!.legTimings
               .map(
                 (leg) =>
                   `${leg.stageId} attempt ${leg.attempt}: ${Math.max(0, (leg.endedAtMs ?? Date.now()) - leg.startedAtMs)}ms (${leg.outcome})`,
               )
               .join("; ")}.${
-              ctx.budgetExhausted && ctx.executionBudgetMs !== undefined
-                ? ` The execution budget of ${ctx.executionBudgetMs}ms was consumed by cumulative legs; no further attempt was started.`
+              settledCtx?.budgetExhausted && settledCtx.executionBudgetMs !== undefined
+                ? ` The execution budget of ${settledCtx?.executionBudgetMs}ms was consumed by cumulative legs; no further attempt was started.`
                 : ""
             }`
           : "";
       const terminalMessage =
         error instanceof FeedJobTimeoutError &&
         error.code === FEED_JOB_CODES.deadlineExceeded &&
-        ctx.lastLegError !== null
-          ? `${message} Last leg error (attempt ${ctx.lastLegError.attempt}): ${ctx.lastLegError.message}${legSummary}`
+        settledCtx?.lastLegError != null
+          ? `${message} Last leg error (attempt ${settledCtx!.lastLegError!.attempt}): ${settledCtx!.lastLegError!.message}${legSummary}`
           : `${message}${legSummary}`;
-      instance = { ...instance, state: "failed", desiredState: "none", lastError: terminalMessage };
+      instance = {
+        ...instance,
+        state: "failed",
+        desiredState: "none",
+        // Issue #3992 — a setup timeout can settle before the
+        // setup stamp landed; stamp this run's identity so the
+        // terminal record is written for THIS run, never skipped.
+        currentRunId: instance.currentRunId ?? opts.runId,
+        runStartedAt: instance.runStartedAt ?? startedAt,
+        lastError: terminalMessage,
+      };
       await this.setInstance(instance);
       await publishJobStatus(publisher, {
         jobId,
@@ -4175,7 +4229,7 @@ export class JobPipelineControl {
         runId: opts.runId,
         state: "failed",
         error: terminalMessage,
-        artifactKeys: [...ctx.artifactKeys],
+        artifactKeys: [...(settledCtx?.artifactKeys ?? [])],
       };
     }
   }

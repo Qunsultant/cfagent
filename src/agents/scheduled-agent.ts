@@ -195,6 +195,12 @@ import { buildJobConfigFromSpec } from "../services/jobDefinitionSpecBuilder";
 import { buildFeedRunInputDefinition } from "../services/runInputCarrier";
 import { bindJobDefinitionParams, bindStageOverrides } from "../services/jobDefinitionParamBinders";
 import { buildFeedJobRegistry } from "../services/feedJobs";
+import { FEED_JOB_CODES } from "../services/feedJobCodes";
+import {
+  FeedJobTimeoutError,
+  resolveFeedJobTimeouts,
+  withFeedDeadline,
+} from "../services/feedJobTimeouts";
 import {
   buildFeedJobSurfaceView,
   FEED_PIPELINE_CATALOG,
@@ -1359,6 +1365,20 @@ export class ScheduledAgent extends PortThink {
       runInputs?: Record<string, unknown>;
     },
   ): Promise<{ jobId: string; runId: string; state: string; error?: string }> {
+    // Issue #3992 — a feed dispatch at this door is bounded:
+    // ensure + dispatch + settle must complete within the feed
+    // execution bound plus the capture bound for the terminal
+    // writes. The engine's own race settles the run record
+    // first in the ordinary hang; this bound covers the legs
+    // outside it (definition ensure, door reads) so the caller
+    // refuses by name instead of hanging until the async
+    // executor's 90-minute backstop.
+    const envStrings: Record<string, string> = {};
+    for (const [key, value] of Object.entries(this.env as Record<string, unknown>)) {
+      if (typeof value === "string") envStrings[key] = value;
+    }
+    const isFeedJob = buildFeedJobRegistry(envStrings).get(jobId) !== undefined;
+    const runDispatch = async (): Promise<{ jobId: string; runId: string; state: string; error?: string }> => {
     const ctx = this.pipelineContext();
     const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
     await ensureScheduledAgentPipelineJobs(ctx, control);
@@ -1397,6 +1417,24 @@ export class ScheduledAgent extends PortThink {
       state: outcome.state,
       ...(outcome.error ? { error: outcome.error } : {}),
     };
+    };
+    if (!isFeedJob) return runDispatch();
+    const timeouts = resolveFeedJobTimeouts(envStrings);
+    const doorBoundMs = timeouts.executionMs + timeouts.captureMs;
+    try {
+      return await withFeedDeadline(
+        runDispatch(),
+        doorBoundMs,
+        FEED_JOB_CODES.deadlineExceeded,
+      );
+    } catch (error) {
+      if (error instanceof FeedJobTimeoutError) {
+        throw new Error(
+          `${FEED_JOB_CODES.deadlineExceeded}: feed job "${jobId}" dispatch did not settle within ${doorBoundMs}ms at the pipeline host door.`,
+        );
+      }
+      throw error;
+    }
   }
 
   /**

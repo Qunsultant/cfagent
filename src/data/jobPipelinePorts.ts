@@ -504,6 +504,16 @@ export interface JobInstanceStore {
    */
   getInstance(jobId: string, runKey?: string | null): Promise<JobInstanceRecord | null>;
   saveInstance(record: JobInstanceRecord): Promise<void>;
+  /**
+   * Issue #3992 — atomically claim the instance row for a fresh
+   * dispatch: write `record` iff no live run holds the row
+   * (absent row, or a state outside queued/running/paused).
+   * Returns true iff this caller claimed. The dispatch guard's
+   * check-then-write across awaits let concurrent dispatches
+   * both pass; the claim is the single conditional write that
+   * closes that window in every residency.
+   */
+  claimInstance(record: JobInstanceRecord): Promise<boolean>;
 }
 
 /** Persisted step hand-offs, scoped by run. Values are JSON-shaped data. */

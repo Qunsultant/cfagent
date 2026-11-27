@@ -427,6 +427,24 @@ export class DoSqliteJobPipelineStores implements JobPipelineStores {
       this.ensureSchema();
       this.instancesRepo.save(instanceToRow(record));
     },
+    claimInstance: async (record: JobInstanceRecord): Promise<boolean> => {
+      this.ensureSchema();
+      // Synchronous read-check-write inside one isolate turn:
+      // no await between the check and the write, so a second
+      // claim cannot interleave.
+      const row = instanceToRow(record);
+      const existing = this.instancesRepo.findById(row.jobId);
+      if (
+        existing &&
+        (existing.state === "queued" ||
+          existing.state === "running" ||
+          existing.state === "paused")
+      ) {
+        return false;
+      }
+      this.instancesRepo.save(row);
+      return true;
+    },
   };
 
   readonly artifacts = {

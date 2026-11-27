@@ -53,6 +53,11 @@ import {
   executeIndexListRefreshJob,
   type IndexListJobResult,
 } from "./indexListJob";
+import {
+  FeedJobTimeoutError,
+  resolveFeedJobTimeouts,
+  withFeedDeadline,
+} from "./feedJobTimeouts";
 import type { IndexListFetchService } from "./indexListProducer";
 import type { JobPipelineStores } from "../data/jobPipelinePorts";
 import type {
@@ -724,12 +729,28 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
       const existingList = await deps.universeStore.latest(effectiveUniverse!);
       if (!existingList || existingList.symbols.length === 0) {
         try {
-          await executeIndexListRefreshJob({
-            store: deps.indexRefresh.store,
-            service: deps.indexRefresh.service,
-            indices: [effectiveUniverse!],
-          });
+          // Issue #3992 — the step-level hydration carries the
+          // same refresh bound the runners apply (#3992 PR-2):
+          // a refresh that never settles fails by name here
+          // instead of hanging the unit until the whole-run
+          // deadline names the wrong leg.
+          await withFeedDeadline(
+            executeIndexListRefreshJob({
+              store: deps.indexRefresh.store,
+              service: deps.indexRefresh.service,
+              indices: [effectiveUniverse!],
+            }),
+            resolveFeedJobTimeouts(
+              (deps.env ?? {}) as Record<string, unknown>,
+            ).refreshMs,
+            FEED_JOB_CODES.refreshTimeout,
+          );
         } catch (err) {
+          if (err instanceof FeedJobTimeoutError) {
+            throw new Error(
+              `${FEED_JOB_CODES.refreshTimeout}: index-list refresh for the "${effectiveUniverse}" universe did not settle within its bound before the shard partition could be computed.`,
+            );
+          }
           throw new Error(
             `${FEED_JOB_CODES.universeRefreshFailed}: index-list refresh for the "${effectiveUniverse}" universe failed before the shard partition could be computed: ${err instanceof Error ? err.message : String(err)}`,
           );

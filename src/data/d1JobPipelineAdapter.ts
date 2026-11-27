@@ -12,7 +12,7 @@
  */
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { createDrizzleD1Db } from "./d1QueryLogger";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, notInArray } from "drizzle-orm";
 import {
   jobPipelineArtifacts,
   jobPipelineDefinitionVersions,
@@ -280,6 +280,48 @@ export class D1JobPipelineStores implements JobPipelineStores {
             updatedAt: row.updatedAt,
           },
         });
+    },
+    claimInstance: async (record: JobInstanceRecord): Promise<boolean> => {
+      await this.ensure();
+      const row = instanceToRow(record);
+      // One conditional UPDATE is the claim: it lands only while
+      // no live run holds the row. D1 serializes writers, so two
+      // concurrent claims cannot both land.
+      const updated = await this.db
+        .update(jobPipelineInstances)
+        .set({
+          state: row.state,
+          desiredState: row.desiredState,
+          currentRunId: row.currentRunId,
+          runStartedAt: row.runStartedAt,
+          runTrigger: row.runTrigger,
+          runKind: row.runKind,
+          runOriginId: row.runOriginId,
+          runScheduleId: row.runScheduleId,
+          runAsyncJobId: row.runAsyncJobId,
+          runWorkflowInstanceId: row.runWorkflowInstanceId,
+          runDefinitionVersion: row.runDefinitionVersion,
+          runProvenanceJson: row.runProvenanceJson,
+          checkpointJson: row.checkpointJson,
+          stageCheckpointJson: row.stageCheckpointJson,
+          stageDesiredJson: row.stageDesiredJson,
+          lastError: row.lastError,
+          updatedAt: row.updatedAt,
+        })
+        .where(
+          and(
+            eq(jobPipelineInstances.jobId, row.jobId),
+            notInArray(jobPipelineInstances.state, ["queued", "running", "paused"]),
+          ),
+        )
+        .returning({ jobId: jobPipelineInstances.jobId });
+      if (updated.length > 0) return true;
+      const inserted = await this.db
+        .insert(jobPipelineInstances)
+        .values(row)
+        .onConflictDoNothing()
+        .returning({ jobId: jobPipelineInstances.jobId });
+      return inserted.length > 0;
     },
   };
 
