@@ -1169,7 +1169,9 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   // wiredMembershipStore once, following the IAAA admin pattern; 4 -> 5.
   // #3185 bridge (2026-11-20): the /api/ops/usage-events-reconcile
   // route composes wiredMembershipStore once, same pattern; 5 -> 6.
-  ["src/server/routes/privacy.ts", "wiredMembershipStore", 6],
+  // #6101 (step 5, 2026-11-26): the run-ledger-reconcile route died
+  // with the projector — its site goes with it; 6 -> 5.
+  ["src/server/routes/privacy.ts", "wiredMembershipStore", 5],
 ];
 
 describe("global D-D census: step 5b — session family port composition sites (#2433)", () => {

@@ -423,27 +423,6 @@ export const agentTenantChannels = sqliteTable("agent_tenant_channels", {
   updatedAtMs: integer("updated_at_ms").notNull(),
 });
 
-/**
- * Issue #4116 — per-tenant run-ledger projection carrier flags.
- * One row per tenant, one flag per carrier (queues / ORM / sweep)
- * plus the read mode the surfaces use. NO defaults anywhere: the
- * columns carry no `.default()` (contrast agentTenantChannels,
- * whose absent row means "everything enabled" — the wrong
- * direction here). Absent row = unconfigured: the tenant projects
- * nothing and the read names it, never silently degrades to a
- * default carrier. readMode is "merged" (today's Option B view)
- * or "d1-only"; it is set explicitly by the operator — the read
- * seam treats an absent row as merged (the documented pre-cutover
- * state) and reports the mode in the response, never silently.
- */
-export const agentTenantProjectionCarriers = sqliteTable("agent_tenant_projection_carriers", {
-  tenantId: text("tenant_id").primaryKey(),
-  queuesEnabled: integer("queues_enabled").notNull(),
-  ormEnabled: integer("orm_enabled").notNull(),
-  sweepEnabled: integer("sweep_enabled").notNull(),
-  readMode: text("read_mode").notNull(),
-  updatedAtMs: integer("updated_at_ms").notNull(),
-});
 
 /**
  * Issue #3256 — server-side onboarding state: one row per verified
@@ -2149,6 +2128,25 @@ export const jobRunRecords = sqliteTable("job_run_records", {
   modeSource: text("mode_source"),
   /** Issue #6099 — the owning tenant of a projected row (null = engine-written, never projected). */
   tenantId: text("tenant_id"),
+  /** Issue #6101 — the platform the run executed on (Q7; null =
+   *  pre-cutover row, never backfilled). FK-spine column: references
+   *  the platform identity, but no platform master table exists yet
+   *  (#6427) — the REFERENCES constraint waits on the masters. */
+  platformId: text("platform_id"),
+  /** Issue #6101 — the user the run executed for (Q7; null =
+   *  pre-cutover row, never backfilled). FK-spine column: references
+   *  the user identity; no users master table exists yet (#6427). */
+  userId: text("user_id"),
+  /** Issue #6101 — the session the run executed in (Q7; null =
+   *  pre-cutover row, never backfilled). FK-spine column: references
+   *  the session identity; #6131 owns the session store. */
+  sessionId: text("session_id"),
+  /** Issue #6101 — the correlation id carried with the run (Q8;
+   *  plain column, stamped nowhere else; null = no correlation). */
+  correlationId: text("correlation_id"),
+  /** Issue #6101 — the trace id carried with the run (Q8; plain
+   *  column, stamped nowhere else; null = no trace). */
+  traceId: text("trace_id"),
   /** Issue #6099 — when the row landed via the projector (null = engine-written). */
   projectedAtMs: integer("projected_at_ms"),
   /** Issue #5102 (F5 of #5094) — the binding tuple the run executed against (null = pre-F5 row, never backfilled). */

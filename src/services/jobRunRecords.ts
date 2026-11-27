@@ -166,6 +166,25 @@ export function buildJobRunRecord(input: JobRunRecordInput): JobRunRecord {
       );
     }
   }
+  // Issue #6101 — the identity fields (migration 0093) validate
+  // exactly like the binding tuple: a string-or-null, non-empty,
+  // real id, never a poisoned literal (#3650). Optional on the
+  // input (legacy call sites omit them); when present they must be
+  // real values, never stringified missing ids.
+  for (const key of ["tenantId", "platformId", "userId", "sessionId", "correlationId", "traceId"] as const) {
+    const value = input[key];
+    if (value !== undefined && value !== null && typeof value !== "string") {
+      throw new Error(`Job run ${key} must be a string or null.`);
+    }
+    if (typeof value === "string" && !value.trim()) {
+      throw new Error(`Job run ${key} must be a non-empty string or null.`);
+    }
+    if (typeof value === "string" && isMissingIdLiteral(value)) {
+      throw new Error(
+        `Job run ${key} must be a real id or null: a literal "undefined"/"null" id is a missing id (#3650).`,
+      );
+    }
+  }
   // Issue #5887 — the definition version a run executed with is a
   // non-negative integer or an explicit null (a row written before the
   // stamp). Anything else is a bug at the call site, not a value to store.
@@ -225,6 +244,13 @@ export function buildJobRunRecord(input: JobRunRecordInput): JobRunRecord {
     ...(input.accountId !== undefined ? { accountId: input.accountId } : {}),
     ...(input.bindingScope !== undefined ? { bindingScope: input.bindingScope } : {}),
     ...(input.bindingSource !== undefined ? { bindingSource: input.bindingSource } : {}),
+    // Issue #6101: the identity fields (migration 0093).
+    ...(input.tenantId !== undefined ? { tenantId: input.tenantId } : {}),
+    ...(input.platformId !== undefined ? { platformId: input.platformId } : {}),
+    ...(input.userId !== undefined ? { userId: input.userId } : {}),
+    ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+    ...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
+    ...(input.traceId !== undefined ? { traceId: input.traceId } : {}),
   };
 }
 
@@ -292,6 +318,16 @@ export function normalizeJobRunRecord(record: JobRunRecord): JobRunRecord {
   const accountId = binding(record.accountId);
   const bindingScope = binding(record.bindingScope);
   const bindingSource = binding(record.bindingSource);
+  // Issue #6101 — the identity fields read the same way: a row
+  // stored before the cutover carries none of them, so they read
+  // as explicit nulls, never guessed identities; a stored value
+  // that is not a real non-empty id reads as null, never as a link.
+  const tenantId = binding(record.tenantId);
+  const platformId = binding(record.platformId);
+  const userId = binding(record.userId);
+  const sessionId = binding(record.sessionId);
+  const correlationId = binding(record.correlationId);
+  const traceId = binding(record.traceId);
   return {
     ...record,
     jobId,
@@ -302,6 +338,12 @@ export function normalizeJobRunRecord(record: JobRunRecord): JobRunRecord {
     accountId,
     bindingScope,
     bindingSource,
+    tenantId,
+    platformId,
+    userId,
+    sessionId,
+    correlationId,
+    traceId,
     ...linkage,
   };
 }

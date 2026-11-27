@@ -1,6 +1,6 @@
 /**
  * Issue #3185 (bridge slice) — the write-site hook for the
- * usage-events projection (mirrors runLedgerProjectionHooks'
+ * usage-events projection (the run-ledger projection hooks are deleted with #6101;
  * projectAsyncJobBestEffort, minus the carrier gate: the mirror
  * has no per-tenant carrier config — see
  * usageEventProjectionPosting).

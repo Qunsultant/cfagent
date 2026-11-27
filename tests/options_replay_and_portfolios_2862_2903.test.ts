@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { replayOptionsReport } from "../src/services/optionsReportReplay";
+import { MockD1Database } from "./mock-d1";
 import {
   constructPortfolioFromSnapshots,
   createRecommendationSnapshot,
@@ -135,8 +136,11 @@ describe("2862 options report replay from stored data", () => {
 });
 
 describe("2903 timestamped recommendation portfolios with full lineage", () => {
-  it("stores immutable snapshots and constructs a new portfolio without mutating sources", () => {
-    const sql = createInMemorySqlStorage();
+  it("stores immutable snapshots and constructs a new portfolio without mutating sources", async () => {
+    // #6101 step 8: snapshots persist in D1 agent_reports via env
+    // (the first arg is env now, not sql).
+    const mock = new MockD1Database();
+    const env = { AGENT_DB: mock as unknown as never };
     const s1: RecommendationSnapshot = {
       snapshotId: "snap-1",
       runId: "run-1",
@@ -173,11 +177,12 @@ describe("2903 timestamped recommendation portfolios with full lineage", () => {
       lineage: { sourceRunId: "run-2", captureIds: ["cap-b"], stage: "analysis" },
     };
 
-    expect(createRecommendationSnapshot(sql as any, s1).created).toBe(true);
-    expect(createRecommendationSnapshot(sql as any, s1).created).toBe(false); // immutable
-    expect(createRecommendationSnapshot(sql as any, s2).created).toBe(true);
+    // #6101 step 8: the snapshot/portfolios seam is async now.
+    expect((await createRecommendationSnapshot(env, s1)).created).toBe(true);
+    expect((await createRecommendationSnapshot(env, s1)).created).toBe(false); // immutable
+    expect((await createRecommendationSnapshot(env, s2)).created).toBe(true);
 
-    const constructed = constructPortfolioFromSnapshots(sql as any, {
+    const constructed = await constructPortfolioFromSnapshots(env, {
       snapshotId: "portfolio-1",
       runId: "run-port-1",
       userLogin: "owner",
@@ -194,7 +199,7 @@ describe("2903 timestamped recommendation portfolios with full lineage", () => {
       expect(constructed.snapshot.lineage.captureIds).toEqual(["cap-a", "cap-b"]);
     }
 
-    expect(listRecommendationSnapshots(sql as any, "t1", "owner")).toHaveLength(3);
-    expect(getRecommendationSnapshot(sql as any, "t1", "owner", "snap-1")?.legs).toHaveLength(1);
+    expect(await listRecommendationSnapshots(env, "t1", "owner")).toHaveLength(3);
+    expect((await getRecommendationSnapshot(env, "t1", "owner", "snap-1"))?.legs).toHaveLength(1);
   });
 });

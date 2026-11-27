@@ -38,6 +38,7 @@ vi.mock("../src/orchestrate", () => ({
 
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
 import { MockD1Database } from "./mock-d1";
+import { makeLedgerStub } from "./ledger-stub";
 import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 import { PaymentsAgent } from "../src/agents/payments-agent";
@@ -85,6 +86,7 @@ function makeEnv(sessionNamespace?: any) {
     // #6503 — goals live in the D1 unified store only (fail-closed
     // without AGENT_DB); the tick/trigger resolve the store from env.
     AGENT_DB: new MockD1Database(),
+    ORCHESTRATOR_AGENT: makeLedgerStub().namespace,
     PAYMENTS_AGENT: {
       idFromName: () => "payments-default",
       get: () => ({
@@ -226,6 +228,10 @@ describe("ScheduledAgent DO RPC boundary (#1391)", () => {
     const env = {
       // #6503 — goals live in the D1 unified store only.
       AGENT_DB: new MockD1Database(),
+      // #6101: the scheduled agent records its run through the
+      // ledger stub (ORCHESTRATOR_AGENT); without it the tick
+      // fails with "run record did not land (ledger write failed)".
+      ORCHESTRATOR_AGENT: makeLedgerStub().namespace,
       PAYMENTS_AGENT: {
         idFromName: () => "default",
         get: () => paymentsAgent,

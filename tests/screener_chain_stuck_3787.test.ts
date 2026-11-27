@@ -26,6 +26,7 @@
  *     itself is pinned in tests/feed_refresh_goal_3787.test.ts).
  */
 import { DatabaseSync } from "node:sqlite";
+import { MockD1Database } from "./mock-d1";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -390,8 +391,11 @@ describe("completed ScreenerScreenWorkflow run (#3787a)", () => {
     const shardStore = new InMemoryShardJobAdapter();
     const traceStore = new InMemoryMeshTraceStore();
     const trace = newTraceContext();
+    // #6101: the canonical report lands in D1 — the write side
+    // (reportCtx) and the door read side (ctx.env below) share one d1.
+    const d1 = new MockD1Database();
     const reportCtx = {
-      env: {},
+      env: { AGENT_DB: d1 },
       ensureTables: () => sql,
     } as never;
     const full = {
@@ -463,7 +467,9 @@ describe("completed ScreenerScreenWorkflow run (#3787a)", () => {
     const ctx: MeshScreenDoorContext = {
       // Phase 3 (#6550): see makeDoorCtx above — same paid-gate
       // pin for this test's own door context.
-      env: { MONETIZATION_ENABLED: "false" } as Env,
+      // #6101: shares the d1 the workflow's storeReport writes to,
+      // so the door's read-back finds the canonical row.
+      env: { MONETIZATION_ENABLED: "false", AGENT_DB: d1 } as Env,
       ensureTables: () => sql as never,
       asyncJobSessionId: "owner-login-1",
       workflowPort: port,
