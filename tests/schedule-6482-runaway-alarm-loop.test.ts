@@ -122,8 +122,19 @@ import {
   writeScheduleManagedSetting,
 } from "../src/services/scheduleControls";
 import { createSettingsPort } from "../src/data/createSettingsPorts";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
 import { recordScheduleCallbackRun } from "../src/agents/orchestrator/scheduleCallbackRunRecords";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+
+/** A D1 ledger for the run-record assertions: the store + the env that carries it. */
+function ledgerD1() {
+  const mock = new MockD1Database();
+  const d1 = mock as unknown as D1Database;
+  const store = new D1JobRunRecordStore(createD1JobRunRecordDb(d1));
+  return { mock, store, env: { AGENT_DB: d1 } };
+}
 import { makeScheduleAlarmsPort } from "../src/agents/routes/schedules";
 import {
   classifyAgentScheduleRequest,
@@ -520,16 +531,17 @@ describe("6482-P05 the kill-switch halts a firing at the one choke point", () =>
     const sql = killSwitchSql("off");
     const run = vi.fn(async () => ({ outcome: "success" as const, descriptor: "ran" }));
     const audits: Array<{ type: string; payload: Record<string, unknown> }> = [];
+    const ledger = ledgerD1();
     await recordScheduleCallbackRun(
       sql as never,
       "autonomousMarketScreen",
       { trigger: "scheduled" },
       { id: "sched-1" },
       run,
-      { audit: (type, agent, payload) => audits.push({ type, payload }) },
+      { audit: (type, agent, payload) => audits.push({ type, payload }), env: ledger.env },
     );
     expect(run).not.toHaveBeenCalled();
-    const rows = new SqlJobRunRecordStore(sql as never).listRecent(10);
+    const rows = await ledger.store.listRecent(10);
     expect(rows).toHaveLength(1);
     expect(rows[0].outcome).toBe("skipped");
     expect(String(rows[0].detail ?? "")).toMatch(/kill-switch/i);
@@ -539,9 +551,10 @@ describe("6482-P05 the kill-switch halts a firing at the one choke point", () =>
   it("kill-switch on lets it run", async () => {
     const sql = killSwitchSql("on");
     const run = vi.fn(async () => ({ outcome: "success" as const, descriptor: "ran" }));
-    await recordScheduleCallbackRun(sql as never, "autonomousMarketScreen", { trigger: "scheduled" }, { id: "sched-1" }, run, {});
+    const ledger = ledgerD1();
+    await recordScheduleCallbackRun(sql as never, "autonomousMarketScreen", { trigger: "scheduled" }, { id: "sched-1" }, run, { env: ledger.env });
     expect(run).toHaveBeenCalledTimes(1);
-    const rows = new SqlJobRunRecordStore(sql as never).listRecent(10);
+    const rows = await ledger.store.listRecent(10);
     expect(rows).toHaveLength(1);
     expect(rows[0].outcome).toBe("success");
   });
@@ -549,7 +562,8 @@ describe("6482-P05 the kill-switch halts a firing at the one choke point", () =>
   it("nothing configured means firing allowed: deploying the slice halts no existing schedule", async () => {
     const sql = killSwitchSql(null);
     const run = vi.fn(async () => ({ outcome: "success" as const, descriptor: "ran" }));
-    await recordScheduleCallbackRun(sql as never, "autonomousMarketScreen", { trigger: "scheduled" }, { id: "sched-1" }, run, {});
+    const ledger = ledgerD1();
+    await recordScheduleCallbackRun(sql as never, "autonomousMarketScreen", { trigger: "scheduled" }, { id: "sched-1" }, run, { env: ledger.env });
     expect(run).toHaveBeenCalledTimes(1);
     expect(DEFAULT_SCHEDULE_FIRING_ENABLED).toBe(true);
     expect(SCHEDULE_FIRING_ENABLED_ENV_VAR).toBe("SCHEDULE_FIRING_ENABLED");
@@ -558,13 +572,14 @@ describe("6482-P05 the kill-switch halts a firing at the one choke point", () =>
   it("the env carrier alone halts firings (managed setting absent)", async () => {
     const sql = killSwitchSql(null);
     const run = vi.fn(async () => ({ outcome: "success" as const, descriptor: "ran" }));
+    const ledger = ledgerD1();
     await recordScheduleCallbackRun(
       sql as never,
       "autonomousMarketScreen",
       { trigger: "scheduled" },
       { id: "sched-1" },
       run,
-      { env: { SCHEDULE_FIRING_ENABLED: "false" } },
+      { env: { SCHEDULE_FIRING_ENABLED: "false", ...ledger.env } },
     );
     expect(run).not.toHaveBeenCalled();
   });
@@ -582,13 +597,14 @@ describe("6482-P05 the kill-switch halts a firing at the one choke point", () =>
   it("a manual trigger is never halted by the kill-switch", async () => {
     const sql = killSwitchSql("off");
     const run = vi.fn(async () => ({ outcome: "success" as const, descriptor: "ran" }));
+    const ledger = ledgerD1();
     await recordScheduleCallbackRun(
       sql as never,
       "autonomousMarketScreen",
       { trigger: "manual", scheduleId: "sched-1" },
       { id: "sched-1" },
       run,
-      {},
+      { env: ledger.env },
     );
     expect(run).toHaveBeenCalledTimes(1);
   });
@@ -1013,10 +1029,13 @@ describe("6482-P08 the firing-rate alert: threshold + emitted observation", () =
 
   it("a runaway-rate ledger emits the observation once per window through the audit sink", async () => {
     const sql = new SqliteTestStorage() as never;
-    const store = new SqlJobRunRecordStore(sql as never);
+    // Issue #6101 — the ledger is D1: the rows seed the D1 store
+    // and the check resolves it from the env.
+    const ledger = ledgerD1();
+    const store = ledger.store;
     const nowMs = Date.parse("2026-11-24T12:00:00.000Z");
     for (let i = 0; i < 121; i++) {
-      store.record({
+      await store.record({
         system: "orchestrator-schedule",
         jobId: `sched-${i % 3}`,
         operation: "autonomousMarketScreen",
@@ -1030,7 +1049,7 @@ describe("6482-P08 the firing-rate alert: threshold + emitted observation", () =
       });
     }
     const emitted: Array<{ type: string; payload: Record<string, unknown> }> = [];
-    const first = checkScheduleFiringRate(sql, {}, nowMs, (type, payload) => emitted.push({ type, payload }));
+    const first = await checkScheduleFiringRate(sql, ledger.env, nowMs, (type, payload) => emitted.push({ type, payload }));
     expect(first.exceeded).toBe(true);
     expect(first.count).toBe(121);
     expect(first.alerted).toBe(true);
@@ -1038,7 +1057,7 @@ describe("6482-P08 the firing-rate alert: threshold + emitted observation", () =
     expect(emitted[0].type).toBe("schedule.firing_rate_exceeded");
     expect(emitted[0].payload.count).toBe(121);
     // Second check inside the window: still exceeded, but no second alert.
-    const second = checkScheduleFiringRate(sql, {}, nowMs + 60_000, (type, payload) => emitted.push({ type, payload }));
+    const second = await checkScheduleFiringRate(sql, ledger.env, nowMs + 60_000, (type, payload) => emitted.push({ type, payload }));
     expect(second.exceeded).toBe(true);
     expect(second.alerted).toBe(false);
     expect(emitted).toHaveLength(1);
@@ -1046,11 +1065,12 @@ describe("6482-P08 the firing-rate alert: threshold + emitted observation", () =
     expect(readScheduleManagedSetting(sql, SCHEDULE_FIRING_RATE_ALERT_LAST_AT_KEY)).not.toBeNull();
   });
 
-  it("a normal rate emits nothing", () => {
+  it("a normal rate emits nothing", async () => {
     const sql = new SqliteTestStorage() as never;
-    const store = new SqlJobRunRecordStore(sql as never);
+    const ledger = ledgerD1();
+    const store = ledger.store;
     const nowMs = Date.parse("2026-11-24T12:00:00.000Z");
-    store.record({
+    await store.record({
       system: "orchestrator-schedule",
       jobId: "sched-1",
       operation: "autonomousMarketScreen",
@@ -1063,7 +1083,7 @@ describe("6482-P08 the firing-rate alert: threshold + emitted observation", () =
       workflowId: null,
     });
     const emitted: unknown[] = [];
-    const out = checkScheduleFiringRate(sql, {}, nowMs, () => emitted.push(1));
+    const out = await checkScheduleFiringRate(sql, ledger.env, nowMs, () => emitted.push(1));
     expect(out.exceeded).toBe(false);
     expect(out.alerted).toBe(false);
     expect(emitted).toHaveLength(0);
@@ -1341,9 +1361,9 @@ describe("6482 controls service: patch validation", () => {
     expect(readScheduleManagedSetting(sql, SCHEDULE_FIRING_ENABLED_SETTING_KEY)).toBe("off");
   });
 
-  it("resolveScheduleControlsView names the effective values and the firing rate", () => {
+  it("resolveScheduleControlsView names the effective values and the firing rate", async () => {
     const sql = new SqliteTestStorage() as never;
-    const view = resolveScheduleControlsView(sql, {}, []);
+    const view = await resolveScheduleControlsView(sql, {}, []);
     expect(view.minIntervalSeconds).toBe(2_592_000);
     expect(view.minIntervalSource).toBe("default");
     expect(view.defaultMinIntervalSeconds).toBe(2_592_000);

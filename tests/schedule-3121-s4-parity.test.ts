@@ -634,9 +634,11 @@ describe("S4-P07 an executed follow-up step's run record carries the four fields
 describe("S4-P08 the recordJobOutcome sink check — trigger only, no chain path (#3121)", () => {
   it("the bridged-run path stamps trigger and the sink contract carries no linkage fields", () => {
     const asyncJobsSrc = readFileSync("src/agents/orchestrator/asyncJobs.ts", "utf8");
-    // The bridge is the only recordJobOutcome call in the chain module
-    // (import + the one call) and it stamps the run's trigger.
-    expect(asyncJobsSrc.split("recordJobOutcome").length - 1).toBe(2);
+    // #6101 retired recordJobOutcome from the chain module: the bridge
+    // folds the outcome directly onto D1 (ledgerStore.foldJobOutcome)
+    // and stamps the run's trigger the same way.
+    expect(asyncJobsSrc).not.toContain("recordJobOutcome");
+    expect(asyncJobsSrc).toContain("await ledgerStore.foldJobOutcome(");
     expect(asyncJobsSrc).toContain("trigger: outcome.trigger,");
     // The sink contract is trigger-only by design: no scheduleId /
     // workflowId / asyncJobId fields exist to stamp into. The chain's

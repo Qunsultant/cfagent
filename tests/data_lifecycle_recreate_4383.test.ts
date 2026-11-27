@@ -420,13 +420,21 @@ describe("recreate, tenant scope (#4383)", () => {
     // the table), so the D1 leg skips seven more: 18 → 25. Selected
     // stays 315.
     // #6503 adds migration 0092 (D1 unified_schedules table + 3 indexes + 6 seeds): the 3 D1 indexes are selected (+3) and retire the remainder created_idx (−1); the 6 seeds are skipped on this world (the stub table exists, so its creation is not selected) — 315 → 317.
-    // Union: 317.
-    expect(body.d1.selected).toHaveLength(317);
+    // #6101 adds migration 0093 (5 job_run_records identity ALTERs, all
+    // selected, + the carriers DROP, selected — the CREATE leg puts the
+    // table in the projected model): 317 → 323; the #6101 fix round
+    // removes the dead carriers CREATE leg (the DROP is unselected on
+    // this world — the stub world never creates the table): 323 → 321.
+    // Union: 321.
+    expect(body.d1.selected).toHaveLength(321);
     // #6503's 0092 adds 8 skipped D1 steps on this world: the 6
     // seeds (their table's creation is not selected), the table
     // creation itself (the stub table exists), and the retired
     // remainder created_idx — 25 → 33.
-    expect(body.d1.skipped).toHaveLength(33);
+    // #6101's 0093 adds 1 skipped D1 step on this world: the carriers
+    // DROP is unselected (nothing to drop — the CREATE leg is gone):
+    // 33 → 34.
+    expect(body.d1.skipped).toHaveLength(34);
     // Two member instances (alice, bob), each planning the fresh DO leg.
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {
@@ -531,8 +539,13 @@ describe("recreate, tenant scope (#4383)", () => {
     // #6102 adds migration 0089 (mas_events D1 table + 6 indexes): the
     // projected-model walk already has them, so the D1 leg skips seven more.
     // #6503 adds migration 0092 (D1 unified_schedules table + 3 indexes + 6 seeds): the 3 D1 indexes are selected (+3) and retire the remainder created_idx (−1) — 315 → 317.
-    // Union: 317.
-    expect(body.d1.report.executed).toHaveLength(317);
+    // #6101 adds migration 0093 (5 job_run_records identity ALTERs, all
+    // executed, + the carriers DROP, executed — the CREATE leg puts the
+    // table in the projected model): 317 → 323; the #6101 fix round
+    // removes the dead carriers CREATE leg (the DROP is unselected on
+    // this world): 323 → 321.
+    // Union: 321.
+    expect(body.d1.report.executed).toHaveLength(321);
     expect(body.d1.verification.ok).toBe(true);
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {

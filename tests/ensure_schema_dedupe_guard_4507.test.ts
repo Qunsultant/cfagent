@@ -33,6 +33,12 @@
  * The P4 recreate path is unchanged and stays the honesty
  * reference; the recreate planner's phased order, the schema
  * catalogues, and every other adapter's ensure path are untouched.
+ *
+ * Issue #6101 (step 8): the seam test at the end moved to D1 —
+ * the DO dedupe (which deleted the older row) has no D1
+ * equivalent; D1 dedupe is a newest-wins lookup, the older row
+ * stays. The five adapter pins above are unchanged (the DO
+ * adapter still exists for the frozen table).
  */
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -258,32 +264,77 @@ describe("#4507 [pin]: ensure dedupes legacy duplicate pairs and builds the inde
     expect(failed[0].level).toBe("error");
   });
 
-  it("seam green on a deduped DO: same generation dedupes to the survivor, a new generation lands", () => {
-    const sql = new SqliteTestStorage();
-    createTable(sql);
-    insertRaw(sql, "rep-old", "run-old", "2026-10-30T09:00:00.000Z", "gen-dup", "alice");
-    insertRaw(sql, "rep-new", "run-new", "2026-10-30T10:00:00.000Z", "gen-dup", "alice");
+  it("seam green on D1 with duplicate generations: same generation dedupes to the newest, a new generation lands", async () => {
+    // #6101 step 8: the seam writes D1 now — the DO dedupe above
+    // (which DELETED the older row) has no D1 equivalent. D1 dedupe
+    // is a lookup: latestReportByGeneration returns the newest row
+    // for the generation and the redelivery adopts it (created:false);
+    // the older row stays as its own report (nothing deletes it).
+    const { MockD1Database } = await import("./mock-d1");
+    const { createD1AuditReportDb, D1AuditReportAdapter, ensureAuditReportSchema } =
+      await import("../src/data/d1AuditReportAdapter");
+    const mock = new MockD1Database();
+    const db = createD1AuditReportDb(mock as unknown as any);
+    await ensureAuditReportSchema(db);
+    const adapter = new D1AuditReportAdapter(db);
+    const tenant = "primary";
     const base = {
-      runId: "run-redeliver",
-      generationId: "gen-dup",
-      userLogin: "alice",
+      tenantId: tenant,
+      workspaceId: tenant,
+      runId: "run-seed",
       title: "Daily screen",
       source: "screener",
       summary: "10 scanned",
-      body: { hello: "world" },
+      body: "{}",
+      createdAtMs: Date.parse("2026-10-30T09:00:00.000Z"),
+      updatedAtMs: Date.parse("2026-10-30T09:00:00.000Z"),
+      version: 1,
+      provenanceWriter: "test",
+      provenanceSourceDo: "Orchestrator",
+      provenanceSourceVersion: "1",
+      linkedJobRunId: null,
+      userLogin: "alice",
+      bodyR2Key: null,
     };
-    const deduped = storeReportAtGeneration(sql as never, base);
+    await adapter.recordReport({ ...base, reportId: "rep-old", generationId: "gen-dup" });
+    await adapter.recordReport({
+      ...base,
+      reportId: "rep-new",
+      generationId: "gen-dup",
+      createdAtMs: Date.parse("2026-10-30T10:00:00.000Z"),
+      updatedAtMs: Date.parse("2026-10-30T10:00:00.000Z"),
+    });
+    const env = { AGENT_DB: mock as unknown as any };
+    const deduped = await storeReportAtGeneration(
+      {
+        runId: "run-redeliver",
+        generationId: "gen-dup",
+        userLogin: "alice",
+        title: "Daily screen",
+        source: "screener",
+        summary: "10 scanned",
+        body: { hello: "world" },
+      },
+      env,
+    );
     expect(deduped?.created).toBe(false);
     expect(deduped?.reportId).toBe("rep-new");
-    const landed = storeReportAtGeneration(sql as never, {
-      ...base,
-      runId: "run-fresh",
-      generationId: "gen-fresh",
-      title: "Fresh screen",
-    });
+    const landed = await storeReportAtGeneration(
+      {
+        runId: "run-fresh",
+        generationId: "gen-fresh",
+        userLogin: "alice",
+        title: "Fresh screen",
+        source: "screener",
+        summary: "10 scanned",
+        body: { hello: "world" },
+      },
+      env,
+    );
     expect(landed?.created).toBe(true);
     expect(landed?.reportId).not.toBe("rep-new");
-    expect(generationIndexColumns(sql)).toEqual(["user_login", "generation_id"]);
-    expect(rowIds(sql).sort()).toEqual(["rep-new", landed!.reportId].sort());
+    const ids = (await adapter.listReports(tenant, { limit: 100 })).map((r) => r.reportId);
+    expect(ids).toContain("rep-new");
+    expect(ids).toContain(landed!.reportId);
   });
 });

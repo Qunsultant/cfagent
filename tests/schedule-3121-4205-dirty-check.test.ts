@@ -81,6 +81,7 @@ vi.mock("../src/security/etradeOAuth", () => ({
 }));
 
 import { MockD1Database } from "./mock-d1";
+import { makeLedgerStub } from "./ledger-stub";
 import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import {
   goalToRecord,
@@ -156,6 +157,7 @@ class CountingD1 {
 
 function makeEnv() {
   return {
+    ORCHESTRATOR_AGENT: makeLedgerStub().namespace,
     PAYMENTS_AGENT: {
       idFromName: () => "payments-default",
       get: () => ({ budgetCheck: async () => ({ allowed: true }) }),

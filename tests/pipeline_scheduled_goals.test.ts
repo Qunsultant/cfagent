@@ -43,6 +43,7 @@ import { createSocialStoresFromNamespace } from "../src/agents/social/durableSto
 import { MockD1Database } from "./mock-d1";
 import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import { goalToRecord } from "../src/services/unifiedScheduleManagement";
+import { makeLedgerStub } from "./ledger-stub";
 
 // Monday 2026-10-26 09:00 EDT = 13:00Z.
 const MON_0900 = "2026-10-26T13:00:00Z";
@@ -120,6 +121,11 @@ function makeEnv(sessionStore: unknown, budgetSpy: { calls: number }, extra: Rec
     // #6503 — goals live in the D1 unified store only (fail-closed
     // without AGENT_DB); the agent never reads the "goals" KV key.
     AGENT_DB: new MockD1Database(),
+    // #6101 step 9 — the KV "jobRunRecords" key is retired: fired
+    // goals' records land via the ledger post on ORCHESTRATOR_AGENT
+    // (the shared stub), and listJobRuns reads them back from it.
+    // A fresh stub per env; the agent posts through this.env's.
+    ORCHESTRATOR_AGENT: makeLedgerStub().namespace,
     PAYMENTS_AGENT: {
       idFromName: () => "payments-default",
       get: () => ({
@@ -363,28 +369,20 @@ describe("pipeline goals through ScheduledAgent", () => {
   });
 
   it("a run whose record does not land is a tick error, not a silent success (issue 6293)", async () => {
-    // The firing itself succeeds; only the legacy "jobRunRecords" KV
-    // write fails (the ledger post is absent in this env, so the KV
-    // key is the only home). Before the fix the tick said jobsCreated
-    // 1 with no error and no row anywhere — the trigger looked like
-    // a success while the ledger showed nothing.
-    const store = new Map<string, unknown>();
-    const ctx = {
-      storage: {
-        get: async (k: string) => (store.has(k) ? store.get(k) : undefined),
-        put: async (k: string, v: unknown) => {
-          if (k === "jobRunRecords") throw new Error("record store down");
-          void store.set(k, v);
-        },
-      },
-      _goals: store,
-    };
+    // The firing itself succeeds; only the record fails to land —
+    // ORCHESTRATOR_AGENT is UNBOUND in this env, so there is no
+    // ledger post and recordJobRun returns false (the KV
+    // "jobRunRecords" write is retired in #6101 step 9 and is no
+    // longer a home at all). Before the fix the tick said
+    // jobsCreated 1 with no error and no row anywhere — the trigger
+    // looked like a success while the ledger showed nothing.
+    const ctx = makeCtx();
     const ss = makeSessionStore();
     await seedBrief(ss.namespace, "2026-10-26", "Morning brief.");
     const budgetSpy = { calls: 0 };
     // #6503 — the goal is planted in D1 (the "goals" KV key is dead);
-    // the failing write is the ctx.storage "jobRunRecords" put below.
-    const env = makeEnv(ss.namespace, budgetSpy);
+    // the absent post is the ORCHESTRATOR_AGENT override below.
+    const env = makeEnv(ss.namespace, budgetSpy, { ORCHESTRATOR_AGENT: undefined });
     await plantGoals(env.AGENT_DB as MockD1Database, [pipelineGoal()]);
     const agent = new ScheduledAgent(ctx as any, env);
     const tick = await agent.onCron(makeEnv(ss.namespace, budgetSpy));

@@ -20,6 +20,8 @@ import {
 import { createInMemoryCancelPreviewStore } from "../src/services/cancelPreviewStore";
 import { resolveTradingLimits } from "../src/trading";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import { createJobRunRecordAdapter } from "../src/data/createJobRunRecordPorts";
 import type { BrokerRemoteOrder } from "../src/types";
 
 function remoteOrder(orderId: number, overrides: Partial<BrokerRemoteOrder> = {}): BrokerRemoteOrder {
@@ -172,22 +174,26 @@ describe("the scoped-cancel ledger names the broker it cancelled on (#3937)", ()
     const sql = new MockSqlStorage();
     const platform = fakePlatform([remoteOrder(1), remoteOrder(2)]);
     const receipt = await cancelTickerOrders(createPlatformCancelPort(platform as never), { symbol: "AAPL" });
-    recordScopedCancelOutcome(sql, receipt, "broker_orders_cancel_ticker", undefined, "cancel_ticker:test-etrade", {
+    // #6101: the scoped cancel folds onto D1 — bind AGENT_DB (the
+    // ledger identity stays the 6th arg) and read back from D1.
+    const d1 = new MockD1Database();
+    await recordScopedCancelOutcome(sql, receipt, "broker_orders_cancel_ticker", { AGENT_DB: d1 } as any, "cancel_ticker:test-etrade", {
       broker: "etrade",
       mode: "paper",
     });
-    const rows = Array.from(sql.exec("SELECT * FROM mas_job_outcomes") as any);
-    expect(rows).toHaveLength(1);
-    expect(JSON.parse(rows[0].delivery_json)).toMatchObject({ action: "cancel_ticker", broker: "etrade", mode: "paper" });
+    const row = await createJobRunRecordAdapter({ AGENT_DB: d1 } as never)!.latestByJob("order:cancel_ticker:test-etrade");
+    expect(row).toBeDefined();
+    expect(row!.deliveryStates).toMatchObject({ action: "cancel_ticker", broker: "etrade", mode: "paper" });
   });
 
   it("defaults to the Alpaca ledger row when no broker is given (the MCP tools)", async () => {
     const sql = new MockSqlStorage();
     const platform = fakePlatform([remoteOrder(1)]);
     const receipt = await cancelTickerOrders(createPlatformCancelPort(platform as never), { symbol: "AAPL" });
-    recordScopedCancelOutcome(sql, receipt, "alpaca_cancel_ticker", { ALPACA_TRADING_TYPE: "paper" } as any, "cancel_ticker:test-default");
-    const rows = Array.from(sql.exec("SELECT * FROM mas_job_outcomes") as any);
-    expect(rows).toHaveLength(1);
-    expect(JSON.parse(rows[0].delivery_json)).toMatchObject({ action: "cancel_ticker", broker: "alpaca", mode: "paper" });
+    const d1 = new MockD1Database();
+    await recordScopedCancelOutcome(sql, receipt, "alpaca_cancel_ticker", { ALPACA_TRADING_TYPE: "paper", AGENT_DB: d1 } as any, "cancel_ticker:test-default");
+    const row = await createJobRunRecordAdapter({ AGENT_DB: d1 } as never)!.latestByJob("order:cancel_ticker:test-default");
+    expect(row).toBeDefined();
+    expect(row!.deliveryStates).toMatchObject({ action: "cancel_ticker", broker: "alpaca", mode: "paper" });
   });
 });

@@ -13,7 +13,7 @@
  * same record shape the DO adapter returns, which is what lets the stage read
  * answer from D1 alone when the DO is unreachable.
  */
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { createDrizzleD1Db } from "./d1QueryLogger";
 import { jobStageEvents } from "./drizzleSchema";
@@ -71,6 +71,24 @@ export function createD1JobStageEventStore(d1: D1Database): JobStageEventStore {
   return {
     record: async (event: JobStageEventRecord): Promise<boolean> => {
       await ensureOnce();
+      // Issue #6101 (step 7) — the port contract is dedup on the
+      // event key: a re-delivered publication is a no-op returning
+      // false, like the DO and in-memory stores did. One row per
+      // (run, stage), latest wins, so the check reads the current
+      // row's event key: same key ⇒ already recorded, no write.
+      const existing = await db
+        .select({ eventKey: jobStageEvents.eventKey })
+        .from(jobStageEvents)
+        .where(
+          and(
+            eq(jobStageEvents.runId, event.runId),
+            eq(jobStageEvents.stageId, event.stageId),
+          ),
+        )
+        .limit(1);
+      if (existing.length > 0 && existing[0].eventKey === event.eventKey) {
+        return false;
+      }
       const values = {
         eventKey: event.eventKey,
         claimKey: event.claimKey,

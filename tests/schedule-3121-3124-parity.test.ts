@@ -82,13 +82,17 @@ vi.mock("../src/security/etradeOAuth", () => ({
 }));
 
 import { SqlUnifiedScheduleStore } from "../src/data/doSqliteUnifiedScheduleAdapter";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
 import type { UnifiedScheduleRecord } from "../src/data/unifiedSchedulePorts";
 import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 import type { JobRunRecord } from "../src/services/jobRunRecords";
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
 import { compileGoal } from "../src/orchestrate";
 import { MockD1Database } from "./mock-d1";
+import { makeLedgerStub } from "./ledger-stub";
 import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 
 function source(rel: string): string {
@@ -148,9 +152,9 @@ class CountingD1 {
       } else if (/^select .* from "unified_schedules" order by/i.test(norm)) {
         this.counts.listScan++;
       }
-      // No D1 equivalent for recentScan/byJobScan: job run records
-      // live in the ctx.storage KV "jobRunRecords" key (#6503), so
-      // those counters stay 0 by construction.
+      // No counting for recentScan/byJobScan: the ledger reads go
+      // through the same D1 binding (#6101), not the unified
+      // store, so those counters stay 0 by construction.
     };
     return {
       bind: (...params: unknown[]) => {
@@ -203,9 +207,18 @@ async function makeCountedAgent() {
     },
   };
   // #6503 — the unified store lives in D1 only (fail-closed without
-  // AGENT_DB); the counting D1 is the store. Job run records stay in
-  // the ctx.storage KV "jobRunRecords" key, unchanged.
-  const agent = new (ScheduledAgent as any)(ctx, { ...makeEnv(), AGENT_DB: counting as never });
+  // AGENT_DB); the counting D1 is the store. Issue #6101 — the run
+  // ledger lives in the same D1 binding (the goal runs record
+  // through it), never the ctx.storage KV key. Issue #6101 step 9 —
+  // the KV "jobRunRecords" key is retired: fired goals post their
+  // runs to the shared ledger through ORCHESTRATOR_AGENT, so bind a
+  // fresh in-memory ledger stub — listJobRuns/getLatestJobRun read
+  // the posted runs back.
+  const agent = new (ScheduledAgent as any)(ctx, {
+    ...makeEnv(),
+    AGENT_DB: counting as never,
+    ORCHESTRATOR_AGENT: makeLedgerStub().namespace,
+  });
   const store = createD1UnifiedSchedulePorts({ d1: counting as never }).unifiedSchedules;
   // The first store op lazily ensures the schema and migration
   // 0092's seeds land (5 system rows + 9 goals); clear them so the
@@ -448,7 +461,9 @@ describe("3124-P05 one ledger read path (census)", () => {
 
   it("Autopilot and Workflow Runs read their own row types, never the ledger store", () => {
     const autopilot = source("src/agents/routes/autopilot.ts");
-    expect(autopilot).toContain("listJobOutcomes");
+    // Issue #6101 — Autopilot reads its job feed from D1 now
+    // (listD1JobOutcomes); the DO listJobOutcomes reader is gone.
+    expect(autopilot).toContain("listD1JobOutcomes");
     expect(autopilot).not.toContain("SqlJobRunRecordStore");
     const workflowRuns = source("src/agents/routes/workflowRuns.ts");
     expect(workflowRuns).toContain("readWorkflowRunJobs");
@@ -494,20 +509,15 @@ describe("3124-P06 index coverage (#2280 pattern)", () => {
     }
   }
 
-  function seedLedger(db: DatabaseSync, n: number): void {
-    const store = new SqlJobRunRecordStore(
-      {
-        exec: (query: string, ...params: unknown[]) => {
-          const stmt = db.prepare(query);
-          if (/^\s*(SELECT|PRAGMA)/i.test(query)) return stmt.all(...(params as never[])) as unknown[];
-          stmt.run(...(params as never[]));
-          return [];
-        },
-      } as never,
+  async function seedLedger(d1: MockD1Database, n: number): Promise<void> {
+    // Issue #6101 — the ledger seed lands in D1; the EXPLAIN QUERY
+    // PLAN pins below run against the mock binding's own SQLite.
+    const store = new D1JobRunRecordStore(
+      createD1JobRunRecordDb(d1 as unknown as D1Database),
     );
     for (let i = 0; i < n; i++) {
       const started = new Date(Date.now() - i * 60_000).toISOString();
-      store.record({
+      await store.record({
         system: "orchestrator-schedule",
         jobId: `job-${i % 10}`,
         operation: "autonomousMarketScreen",
@@ -543,10 +553,10 @@ describe("3124-P06 index coverage (#2280 pattern)", () => {
     expect(p).not.toContain("USE TEMP B-TREE FOR ORDER BY");
   });
 
-  it("listRecent walks the recent-read index, not the table", () => {
-    const db = new DatabaseSync(":memory:");
-    seedLedger(db, 50);
-    const p = plan(db, "SELECT * FROM job_run_records ORDER BY started DESC, id DESC LIMIT ?", 50);
+  it("listRecent walks the recent-read index, not the table", async () => {
+    const d1 = new MockD1Database();
+    await seedLedger(d1, 50);
+    const p = plan(d1.sqlite, "SELECT * FROM job_run_records ORDER BY started DESC, id DESC LIMIT ?", 50);
     // Same index-walk shape as list(): "SCAN ... USING INDEX" in
     // started order, LIMIT stops the walk at 50 rows, no temp
     // b-tree. Before #3124: "SCAN job_run_records | USE TEMP
@@ -555,11 +565,11 @@ describe("3124-P06 index coverage (#2280 pattern)", () => {
     expect(p).not.toContain("USE TEMP B-TREE FOR ORDER BY");
   });
 
-  it("listByJob still walks job_idx (regression guard)", () => {
-    const db = new DatabaseSync(":memory:");
-    seedLedger(db, 50);
+  it("listByJob still walks job_idx (regression guard)", async () => {
+    const d1 = new MockD1Database();
+    await seedLedger(d1, 50);
     const p = plan(
-      db,
+      d1.sqlite,
       "SELECT * FROM job_run_records WHERE job_id = ? ORDER BY started DESC, id DESC LIMIT ?",
       "job-1",
       50,

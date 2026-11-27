@@ -21,6 +21,7 @@
  * proves the stage genuinely re-executed against threaded storage.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { MockD1Database } from "./mock-d1";
 import { DatabaseSync } from "node:sqlite";
 import type { SqlStorage } from "../src/orm";
 import type { ETradeOptionChain, ETradeOptionExpireDate } from "../src/types";
@@ -176,7 +177,10 @@ afterEach(() => {
 describe("panel stage-storage threading (#4400)", () => {
   it("a stage rerun of a discovery panel run reads its artifacts from threaded stage storage", async () => {
     const sql = new SqliteTestStorage();
-    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage);
+    const d1 = new MockD1Database();
+    // #6101: the engine settlement records the run to D1;
+    // without AGENT_DB the recorder fails closed.
+    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage, { AGENT_DB: d1 });
     const runId = "panel-storage:threaded";
     const result = await runOptionsPanelViaEngineWithAgents(panelAgents(), PANEL_REQUEST, {
       runId,
@@ -195,6 +199,7 @@ describe("panel stage-storage threading (#4400)", () => {
     DynamicOptionsScreener.setTestChainsFixture({ TREND: makeChain("TREND", 150) });
     const rerun = await controlOptionsStage({
       sql: sql as unknown as SqlStorage,
+      env: { AGENT_DB: d1 },
       runId,
       stage: "chainFetch",
       operation: "rerun",
@@ -208,8 +213,10 @@ describe("panel stage-storage threading (#4400)", () => {
 
   it("a rerun with no threaded storage refuses by name instead of reporting an unexecuted completion", async () => {
     const sql = new SqliteTestStorage();
+    const d1 = new MockD1Database();
     const engineStores: OptionsEngineStores = optionsEngineStoresFromSql(
       sql as unknown as SqlStorage,
+      { AGENT_DB: d1 },
     );
     const runId = "panel-storage:unthreaded";
     // The pre-#4400 panel shape: SQL engine stores, but per-call
@@ -244,6 +251,7 @@ describe("panel stage-storage threading (#4400)", () => {
     const error = await expectControlError(
       controlOptionsStage({
         sql: sql as unknown as SqlStorage,
+        env: { AGENT_DB: d1 },
         runId,
         stage: "screen",
         operation: "rerun",
@@ -257,8 +265,10 @@ describe("panel stage-storage threading (#4400)", () => {
 
   it("a first-stage rerun needs no threaded storage: plan re-executes from the request", async () => {
     const sql = new SqliteTestStorage();
+    const d1 = new MockD1Database();
     const engineStores: OptionsEngineStores = optionsEngineStoresFromSql(
       sql as unknown as SqlStorage,
+      { AGENT_DB: d1 },
     );
     const runId = "panel-storage:plan";
     const outcome = await runStrategyScreenViaEngine(
@@ -292,6 +302,7 @@ describe("panel stage-storage threading (#4400)", () => {
     // nothing was threaded — it must NOT refuse stage_storage_unavailable.
     const rerun = await controlOptionsStage({
       sql: sql as unknown as SqlStorage,
+      env: { AGENT_DB: d1 },
       runId,
       stage: "plan",
       operation: "rerun",
@@ -303,8 +314,10 @@ describe("panel stage-storage threading (#4400)", () => {
 
   it("caller-supplied storage still wins: a rerun reads and writes the storage it is given", async () => {
     const sql = new SqliteTestStorage();
+    const d1 = new MockD1Database();
     const engineStores: OptionsEngineStores = optionsEngineStoresFromSql(
       sql as unknown as SqlStorage,
+      { AGENT_DB: d1 },
     );
     const runId = "panel-storage:supplied";
     const shared = memoryStageStorage();
@@ -344,6 +357,7 @@ describe("panel stage-storage threading (#4400)", () => {
     DynamicOptionsScreener.setTestChainsFixture({ TREND: makeChain("TREND", 150) });
     const rerun = await controlOptionsStage({
       sql: sql as unknown as SqlStorage,
+      env: { AGENT_DB: d1 },
       storage: shared,
       runId,
       stage: "chainFetch",

@@ -52,7 +52,6 @@ import type {
 import {
   deleteCanonicalReport,
   recordAuditEvent,
-  seedCanonicalReports,
 } from "../src/data/auditReportProjection";
 import {
   isChainOperationAllowed,
@@ -65,7 +64,7 @@ import {
   handleSeedReportsRoute,
 } from "../src/data/auditReportRoute";
 import { handleReconcileChainsRoute } from "../src/data/chainStatusRoute";
-import { runCanonicalReportSeed } from "../src/agents/orchestrator/canonicalReportSeed";
+import { storeReportAtGeneration } from "../src/services/scheduledReports";
 
 /** Minimal D1Database stand-in over node:sqlite (test-only, same as slices 0–2). */
 class MockD1Database {
@@ -397,115 +396,99 @@ describe("canonical reports (#1688)", () => {
     }
   });
 
-  it("oversized report bodies are capped, never unbounded", async () => {
-    const store = new InMemoryAuditReportAdapter();
-    const seeded = await seedCanonicalReports({
-      store,
-      auditStore: store,
-      tenantId: "primary",
-      workspaceId: "primary",
-      reports: [
-        {
-          reportId: "r-big",
-          runId: "run-big",
-          generationId: null,
-          title: "big",
-          source: "screener",
-          summary: "s",
-          body: "x".repeat(20000),
-          createdAtMs: 1000,
-        },
-      ],
-      nowMs: 2000,
-      writer: "test",
-      actor: "operator",
-    });
-    expect(seeded.seededCount).toBe(1);
-    const row = await store.latestReport("primary", "r-big");
+  it("report bodies are stored whole up to the 200k seam bound, sliced above it", async () => {
+    // #6101 step 8: the seed that used to carry a body-size pin is
+    // retired; the live contract is the writer seam's bound
+    // (SCHEDULED_REPORT_MAX_BODY_CHARS, 200_000, applied by
+    // toScheduledReportRecord). The 8000-char audit cap (capText)
+    // NEVER belonged on the stored body — a splice error capped
+    // inline bodies at 8000, truncating them mid-JSON; fixed
+    // in-step, this test pins the restored behaviour.
+    const mock = new MockD1Database();
+    const db = createD1AuditReportDb(mock as unknown as any);
+    await ensureAuditReportSchema(db);
+    const env = { AGENT_DB: mock as unknown as any };
+    const adapter = new D1AuditReportAdapter(db);
+    const stored = await storeReportAtGeneration(
+      {
+        runId: "run-big",
+        generationId: "gen-big",
+        userLogin: "alice",
+        title: "big",
+        source: "screener",
+        summary: "s",
+        body: "x".repeat(20000),
+      },
+      env,
+    );
+    expect(stored?.created).toBe(true);
+    const row = await adapter.latestReport("primary", stored!.reportId);
     expect(row).not.toBeNull();
-    expect(row!.body.length).toBeLessThanOrEqual(8000 + "[truncated]".length);
-    expect(row!.body).toContain("[truncated]");
+    expect(row!.body).toBe(`"${"x".repeat(20000)}"`);
+    const storedHuge = await storeReportAtGeneration(
+      {
+        runId: "run-huge",
+        generationId: "gen-huge",
+        userLogin: "alice",
+        title: "huge",
+        source: "screener",
+        summary: "s",
+        body: "y".repeat(250000),
+      },
+      env,
+    );
+    const hugeRow = await adapter.latestReport("primary", storedHuge!.reportId);
+    expect(hugeRow).not.toBeNull();
+    expect(hugeRow!.body.length).toBe(200000);
   });
 });
 
-describe("canonical mas_reports seed (#1688)", () => {
-  it("first run seeds every row; second run seeds none", async () => {
-    const store = new InMemoryAuditReportAdapter();
-    const reports = [
-      {
-        reportId: "r1", runId: "run-1", generationId: "g1",
-        title: "one", source: "screener", summary: "s1", body: "b1", createdAtMs: 100,
-      },
-      {
-        reportId: "r2", runId: "run-2", generationId: null,
-        title: "two", source: "screener", summary: "s2", body: "b2", createdAtMs: 200,
-      },
-    ];
-    const first = await seedCanonicalReports({
-      store, auditStore: store, tenantId: "primary", workspaceId: "primary",
-      reports, nowMs: 1000, writer: "test", actor: "operator",
-    });
-    expect(first).toMatchObject({ seeded: true, seededCount: 2, alreadyPresent: 0, total: 2 });
-    const second = await seedCanonicalReports({
-      store, auditStore: store, tenantId: "primary", workspaceId: "primary",
-      reports, nowMs: 2000, writer: "test", actor: "operator",
-    });
-    expect(second).toMatchObject({ seeded: false, seededCount: 0, alreadyPresent: 2, total: 2 });
-    expect((await store.listReports("primary"))).toHaveLength(2);
+describe("canonical mas_reports seed — RETIRED by #6101 step 8", () => {
+  it("the seed code is gone: the seeder module is a deprecated stub, no RPC method, no projection function", () => {
+    // Issue #6101 (gate (i) rework, owner ruling 2026-11-26): the
+    // module file returns as a deprecated-in-place stub — the seed
+    // CODE is still gone, only the file is present. Pin the stub
+    // state, not the absence.
+    const stub = readFileSync(
+      resolve(__dirname, "../src/agents/orchestrator/canonicalReportSeed.ts"),
+      "utf8",
+    );
+    expect(stub).toContain("@deprecated");
+    expect(stub.toLowerCase()).toContain("superseded by");
+    for (const gone of [
+      "seedCanonicalReports",
+      "runCanonicalReportSeed",
+      "canonicalReportRowFromSeed",
+      "SeedCanonicalReportsResult",
+      "CanonicalReportSeedContext",
+      "CanonicalSourceReport",
+    ]) {
+      expect(stub, gone).not.toContain(gone);
+    }
+    const orchestrator = readFileSync(
+      resolve(__dirname, "../src/agents/orchestrator.ts"),
+      "utf8",
+    );
+    expect(orchestrator).not.toContain("seedCanonicalReports");
+    const projection = readFileSync(
+      resolve(__dirname, "../src/data/auditReportProjection.ts"),
+      "utf8",
+    );
+    expect(projection).not.toContain("seedCanonicalReports");
+    expect(projection).not.toContain("canonicalReportRowFromSeed");
   });
 
-  it("a partial seed fills only the missing rows and records one seed audit event", async () => {
-    const store = new InMemoryAuditReportAdapter();
-    await store.recordReport(reportRow({ reportId: "r1" }));
-    const result = await seedCanonicalReports({
-      store, auditStore: store, tenantId: "primary", workspaceId: "primary",
-      reports: [
-        { reportId: "r1", runId: "run-1", generationId: "g1", title: "one", source: "screener", summary: "s", body: "b", createdAtMs: 100 },
-        { reportId: "r2", runId: "run-2", generationId: null, title: "two", source: "screener", summary: "s", body: "b", createdAtMs: 200 },
-      ],
-      nowMs: 1000, writer: "test", actor: "operator",
-    });
-    expect(result).toMatchObject({ seeded: true, seededCount: 1, alreadyPresent: 1, total: 2 });
-    const audit = await store.listAuditForChain("primary", "chain-1");
-    expect(audit).toHaveLength(0);
-    const tenantAudit = await store.listAuditForTenant("primary");
-    expect(tenantAudit.some((e) => e.eventKind === "seed")).toBe(true);
-  });
-
-  it("seed execution throws when AgentDB is unbound (never a fabricated result)", async () => {
-    await expect(
-      runCanonicalReportSeed({
-        env: {},
-        listCanonicalReports: () => [],
-        tenantId: "primary",
-        setBy: "operator",
-        nowMs: 1000,
-      }),
-    ).rejects.toThrow(/not bound/);
-  });
-
-  it("seed execution over a bound store seeds and is idempotent", async () => {
-    const mock = new MockD1Database();
-    const result1 = await runCanonicalReportSeed({
-      env: { AGENT_DB: mock as any },
-      listCanonicalReports: () => [
-        { id: "r1", runId: "run-1", generationId: "g1", title: "one", source: "screener", summary: "s", body: "b", createdAt: new Date(100).toISOString() },
-      ],
+  it("the seed route answers 410 Gone with the named reason for admins", async () => {
+    const res = await handleSeedReportsRoute({
+      method: "POST",
       tenantId: "primary",
-      setBy: "operator",
-      nowMs: 1000,
+      session: { internalUserId: "u", githubLogin: "op" },
+      isPlatformAdmin: true,
     });
-    expect(result1).toMatchObject({ seeded: true, seededCount: 1, total: 1 });
-    const result2 = await runCanonicalReportSeed({
-      env: { AGENT_DB: mock as any },
-      listCanonicalReports: () => [
-        { id: "r1", runId: "run-1", generationId: "g1", title: "one", source: "screener", summary: "s", body: "b", createdAt: new Date(100).toISOString() },
-      ],
-      tenantId: "primary",
-      setBy: "operator",
-      nowMs: 2000,
-    });
-    expect(result2).toMatchObject({ seeded: false, seededCount: 0, total: 1 });
+    expect(res.status).toBe(410);
+    const body = (await res.json()) as any;
+    expect(body.reason).toBe("reports-seed-retired-6101");
+    expect(body.error).toContain("retired by #6101");
   });
 });
 
@@ -579,20 +562,15 @@ describe("audit + report routes (#1688)", () => {
     expect(oneBody.reports[0].reportId).toBe("r1");
   });
 
-  it("seed route: 401 / 405 / 403 unwired / 403 non-admin / 200 for admins / 500 on failure", async () => {
-    const base = { method: "POST", tenantId: "primary", runSeed: async () => ({ seeded: true, seededCount: 1, alreadyPresent: 0, total: 1 }) };
+  it("seed route: 401 / 405 / 403 unwired / 403 non-admin / 410 Gone for admins (retired #6101)", async () => {
+    const base = { method: "POST", tenantId: "primary" };
     expect((await handleSeedReportsRoute({ ...base, session: null, isPlatformAdmin: false })).status).toBe(401);
     expect((await handleSeedReportsRoute({ ...base, session: { internalUserId: "u" }, method: "GET", isPlatformAdmin: true })).status).toBe(405);
     expect((await handleSeedReportsRoute({ ...base, session: { githubLogin: "op" }, isPlatformAdmin: true })).status).toBe(403);
     expect((await handleSeedReportsRoute({ ...base, session: { internalUserId: "u" }, isPlatformAdmin: false })).status).toBe(403);
-    const ok = await handleSeedReportsRoute({ ...base, session: { internalUserId: "u", githubLogin: "op" }, isPlatformAdmin: true });
-    expect(ok.status).toBe(200);
-    expect((await ok.json() as any).seeded).toBe(true);
-    const fail = await handleSeedReportsRoute({
-      ...base, session: { internalUserId: "u" }, isPlatformAdmin: true,
-      runSeed: async () => { throw new Error("boom"); },
-    });
-    expect(fail.status).toBe(500);
+    const gone = await handleSeedReportsRoute({ ...base, session: { internalUserId: "u", githubLogin: "op" }, isPlatformAdmin: true });
+    expect(gone.status).toBe(410);
+    expect(((await gone.json()) as any).reason).toBe("reports-seed-retired-6101");
   });
 });
 
@@ -628,9 +606,11 @@ describe("port purity (#1688, R1/R9)", () => {
   });
 
   it("new domain modules never import drizzle-orm", () => {
+    // #6101 step 8: canonicalReportSeed.ts is deleted with the
+    // retired seed (see the retirement describe above); only the
+    // route module remains in this list.
     for (const file of [
       "../src/data/auditReportRoute.ts",
-      "../src/agents/orchestrator/canonicalReportSeed.ts",
     ]) {
       const text = readFileSync(resolve(__dirname, file), "utf8");
       expect(text).not.toMatch(/drizzle-orm/);

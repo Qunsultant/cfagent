@@ -10,8 +10,9 @@
  * terminal event both persist.
  *
  * Types and the port interface only (ADR 0002 R1/R2). Adapters:
- * `doSqliteJobStageEventAdapter.ts` (production, the ScheduledAgent's
- * DO SQLite), `inMemoryJobStageEventAdapter.ts` (tests).
+ * `d1JobStageEventAdapter.ts` (production, D1 `job_stage_events` —
+ * the #6101 step-7 writer; the DO adapter is deleted),
+ * `inMemoryJobStageEventAdapter.ts` (tests).
  */
 
 export const JOB_STAGE_EVENTS_TABLE = "job_stage_events";
