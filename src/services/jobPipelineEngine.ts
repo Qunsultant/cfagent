@@ -3941,27 +3941,33 @@ export class JobPipelineControl {
       Math.max(1, (runDeadlineMs ?? 0) - (Date.now() - runStartedAtMs));
     let instance: JobInstanceRecord;
     let ctx!: RunContext;
-    const setupRun = async (): Promise<void> => {
-    instance = await this.requireRunInstance(jobId, opts.runInstanceKey);
-    // Issue #4767 (Q6) — the resume guard: a resuming run refuses
-    // a stage checkpoint stamped under a different trigger than
-    // the run's own. A checkpoint belongs to exactly one
-    // execution's trigger lineage; resuming under the wrong
-    // trigger would silently restamp it. A checkpoint with no
-    // trigger (stored before #4767) is legacy, not a mismatch —
-    // it is restamped from the run below. Checked BEFORE the
-    // instance stamp, so a refusal leaves the instance untouched.
-    if (opts.resuming && instance.stageCheckpoint?.trigger !== undefined) {
-      const storedTrigger = normalizeJobRunTrigger(
-        instance.stageCheckpoint.trigger,
+    // Issue #4767 (Q6) — the resume guard runs BEFORE the setup
+    // race: a checkpoint stamped under a different trigger is a
+    // refusal that must throw to the caller, never a settled
+    // failed run (#3992's setup race would otherwise swallow it
+    // into a terminal record). Checked before any stamp, so a
+    // refusal leaves the instance untouched. A checkpoint with
+    // no trigger (stored before #4767) is legacy, not a
+    // mismatch — it is restamped from the run in setup.
+    if (opts.resuming) {
+      const guardInstance = await this.requireRunInstance(
+        jobId,
+        opts.runInstanceKey,
       );
-      if (storedTrigger !== opts.trigger) {
-        throw new JobPipelineError(
-          "job_checkpoint_trigger_mismatch",
-          `Job "${jobId}" run ${opts.runId} cannot resume: its stage checkpoint was stamped under trigger "${storedTrigger}" but the run's trigger is "${opts.trigger}". Refusing rather than resuming under the wrong trigger.`,
+      if (guardInstance.stageCheckpoint?.trigger !== undefined) {
+        const storedTrigger = normalizeJobRunTrigger(
+          guardInstance.stageCheckpoint.trigger,
         );
+        if (storedTrigger !== opts.trigger) {
+          throw new JobPipelineError(
+            "job_checkpoint_trigger_mismatch",
+            `Job "${jobId}" run ${opts.runId} cannot resume: its stage checkpoint was stamped under trigger "${storedTrigger}" but the run's trigger is "${opts.trigger}". Refusing rather than resuming under the wrong trigger.`,
+          );
+        }
       }
     }
+    const setupRun = async (): Promise<void> => {
+    instance = await this.requireRunInstance(jobId, opts.runInstanceKey);
     instance = {
       ...instance,
       state: "queued",
