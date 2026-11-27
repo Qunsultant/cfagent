@@ -197,6 +197,12 @@ function measure(): Map<string, number> {
  * market-data module gains one Alpaca mention — INTEGRATION, the adapter's own
  * name for its own host.
  *
+ * Baseline update (#6690, 2026-11-26): the batch-quotes shape fix names the
+ * provider in its own module's new error strings and feed-selection comments
+ * (marketDataResearch.ts/alpaca 130->133) and declares the ALPACA_STOCKS_FEED
+ * env field beside ALPACA_OPTIONS_FEED (types.ts/alpaca 15->16) — INTEGRATION,
+ * the adapter's own name for its own endpoint, errors, and config.
+ *
  * Baseline repair (#3866, 2026-11-09): the platform lifecycle document added by
  * the CPO lane (`docs/architecture/agentic/…-lifecycle.md`, #3864/#3868) landed
  * with five provider-brand rows and no disposition, so `main` was red on this
@@ -1793,7 +1799,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/goalScreenWorkflowSubmission.ts", "yahoo", 2],
   ["src/services/hedgeProposals.ts", "etrade", 10],
   // #4672 (Gap 18): marketDataResearch.ts/alpaca 120->130 — adds exerciseOptionPosition (`POST /v2/positions/{id}/exercise`) on AlpacaMarketDataProvider.
-  ["src/services/marketDataResearch.ts", "alpaca", 130],
+  ["src/services/marketDataResearch.ts", "alpaca", 133],
   ["src/services/marketDataResearch.ts", "etrade", 2],
   ["src/services/marketDataResearch.ts", "yahoo", 31],
   ["src/services/marketDataService.ts", "alpaca", 3],
@@ -2021,7 +2027,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/universes.ts", "etrade", 4],
   ["src/trading/universes.ts", "yahoo", 1],
   ["src/trading/voice/agent.ts", "etrade", 16],
-  ["src/types.ts", "alpaca", 15],
+  ["src/types.ts", "alpaca", 16],
   ["src/types.ts", "etrade", 82],
   ["src/types.ts", "yahoo", 3],
   // Issue #4676 / #3410 INTEGRATION: IBKR Hosted MCP v1 config, OAuth 2.1 + PKCE + DCR seam, and mesh registration.

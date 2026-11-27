@@ -961,6 +961,13 @@ export interface Env {
   TRADING_SESSION_EXTENDED_HOURS?: string;
   /** Options feed: `indicative` (default, no OPRA subscription) or `opra`. */
   ALPACA_OPTIONS_FEED?: string;
+  /**
+   * Issue #6690: stocks feed for snapshot reads (`iex`, `sip`,
+   * `delayed_sip`, …). Unset omits the parameter, so Alpaca applies
+   * its entitled default (sip with the unlimited subscription,
+   * otherwise iex) — the ALPACA_OPTIONS_FEED pattern for stocks.
+   */
+  ALPACA_STOCKS_FEED?: string;
   YFINANCE_API_ENDPOINT?: string;
   MARKET_DATA_PROVIDER?: "alpaca" | "yfinance" | "hybrid";
   // Cloudflare Email Service & Email Agent Configuration

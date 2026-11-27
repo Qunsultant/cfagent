@@ -229,8 +229,10 @@ const alpacaEnv = {
 } as unknown as Env;
 
 function snapshotPayload() {
+  // Issue #6690: the documented multi-symbol shape is a top-level
+  // symbol map; the wrapped { snapshots: … } form this fixture
+  // used before hid the production zero-results failure.
   return {
-    snapshots: {
       AAPL: {
         latestTrade: { p: 232.5, s: 100, t: iso(T0) },
         latestQuote: { bp: 232.4, bs: 3, ap: 232.6, as: 2, t: iso(T0) },
@@ -244,7 +246,6 @@ function snapshotPayload() {
         prevDailyBar: { o: 400.0, h: 406.0, l: 399.0, c: 405.1, v: 450_000, vw: 403.2, t: iso(T0 - 86400_000) },
       },
       // NVDA deliberately absent: Alpaca omits it, the caller diffs.
-    },
   };
 }
 
@@ -527,7 +528,7 @@ describe("AlpacaMarketDataProvider.getQuotes (#3530 S2 batch leg)", () => {
     const provider = new AlpacaMarketDataProvider(alpacaEnv);
     await expect(provider.getQuotes(["AAPL"])).rejects.toThrow(/Alpaca batch quotes HTTP 500/);
 
-    stubFetch(async () => fetchResponse(true, 200, { snapshots: {} }));
+    stubFetch(async () => fetchResponse(true, 200, {}));
     await expect(provider.getQuotes(["AAPL"])).rejects.toThrow(/returned no results/);
   });
 
