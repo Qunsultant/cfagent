@@ -22,7 +22,44 @@ import {
   STOCK_COPILOT_TASK_ID,
   type ScheduledTasksCopilotContext,
 } from "../src/agents/orchestrator/scheduledTasksCopilot";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
+
+/** Minimal D1Database stand-in over node:sqlite (the #6101 double). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: { changes: info.changes, last_row_id: info.lastInsertRowid },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+}
 
 /** SqlStorage-shaped executor over node:sqlite (same shim as #3784). */
 function makeSql(db: DatabaseSync) {
@@ -48,14 +85,17 @@ interface AuditEvent {
 function baseCtx(overrides: Partial<ScheduledTasksCopilotContext> = {}): {
   ctx: ScheduledTasksCopilotContext;
   audits: AuditEvent[];
+  // Issue #6101 — the D1 binding the firing records into.
+  d1: MockD1Database;
 } {
   const audits: AuditEvent[] = [];
   // Each harness gets its own storage map, so the non-declaration
   // dedup state is isolated per test (production: the agent's own
   // storage, shared across declarations on the instance).
   const dedupStore = new Map<string, unknown>();
+  const d1 = new MockD1Database();
   const ctx = {
-    env: { STOCK_COPILOT_PAPER_ENABLED: "1" } as any,
+    env: { STOCK_COPILOT_PAPER_ENABLED: "1", AGENT_DB: d1 } as any,
     agentCtx: {
       storage: {
         get: async (k: string) => dedupStore.get(k),
@@ -69,7 +109,7 @@ function baseCtx(overrides: Partial<ScheduledTasksCopilotContext> = {}): {
     },
     ...overrides,
   } as unknown as ScheduledTasksCopilotContext;
-  return { ctx, audits };
+  return { ctx, audits, d1 };
 }
 
 describe("copilot non-declaration signal (#3788)", () => {
@@ -194,6 +234,7 @@ describe("copilot handler failure + firing ledger record (#3788)", () => {
   it("records a firing in the runs ledger when the cycle runs", async () => {
     const db = new DatabaseSync(":memory:");
     const sql = makeSql(db);
+    const d1 = new MockD1Database();
     const { ctx, audits } = baseCtx({
       // Flag off inside the cycle: it short-circuits to "disabled"
       // before touching the platform, so the firing is observable
@@ -201,7 +242,7 @@ describe("copilot handler failure + firing ledger record (#3788)", () => {
       // Phase 3 (#6550): STOCK_COPILOT_PAPER_ENABLED lives in
       // environment.config.json (ON in production), so a bare env
       // no longer means the flag is off.
-      env: { STOCK_COPILOT_PAPER_ENABLED: "0" } as any,
+      env: { AGENT_DB: d1, STOCK_COPILOT_PAPER_ENABLED: "0" } as any,
       agentCtx: { storage: { sql } } as any,
       getScreenerExecutionContext: async () => ({ userLogin: "owner", environment: "TEST" as const }),
     });
@@ -210,8 +251,9 @@ describe("copilot handler failure + firing ledger record (#3788)", () => {
       { userLogin: "owner", environment: "TEST" } as any,
       { taskId: STOCK_COPILOT_TASK_ID, scheduledFor: Date.now(), occurrenceKey: "occ-1", idempotencyKey: "idem-1", schedule: "every 30 minutes", scheduleKind: "interval" } as any,
     );
-    const store = new SqlJobRunRecordStore(sql as never);
-    const latest = store.latestByJob(STOCK_COPILOT_TASK_ID);
+    // Issue #6101 — the firing lands in the D1 ledger now.
+    const store = new D1JobRunRecordStore(createD1JobRunRecordDb(d1 as unknown as D1Database));
+    const latest = await store.latestByJob(STOCK_COPILOT_TASK_ID);
     expect(latest).toBeDefined();
     expect(latest?.outcome).toBe("skipped");
     expect(latest?.detail).toBe("cycle disabled");

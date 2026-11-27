@@ -12,16 +12,23 @@
  * fixed by this slice and their tests fail until the fix lands.
  *
  * Harnesses follow the established patterns: node:sqlite storage for
- * the DO routes (orchestrator_tables_step4d pattern), MockD1Database
- * for the commercial routes (commercial_routes pattern).
+ * the DO confirmation rows (orchestrator_tables_step4d pattern),
+ * the shared MockD1Database for the canonical reports and the
+ * commercial routes (commercial_routes pattern).
+ *
+ * Issue #6101 (step 8): canonical reports live in D1 agent_reports —
+ * the DO mas_reports table is frozen at cutover and receives no new
+ * writes. The store/read/delivery seams take a D1 env now
+ * (storeReportAtGeneration(input, env), list/get with env first,
+ * deliverStoredReport* through ctx.env).
  */
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
+import { MockD1Database } from "./mock-d1";
 import { handleReportsRoutes } from "../src/agents/routes/reports";
 import {
   canonicalResearchEmailBody,
   canonicalResearchWebhookBody,
-  ensureScheduledReportsTable,
   getScheduledReportById,
   listScheduledReports,
   storeReportAtGeneration,
@@ -48,6 +55,14 @@ import {
 import { createD1SubscriptionDb, ensureSubscriptionSchema } from "../src/data/d1SubscriptionAdapter";
 import { createD1LifecycleDb, ensureLifecycleSchema } from "../src/data/d1LifecycleAdapter";
 
+type D1Database = any;
+
+function d1Env() {
+  const mock = new MockD1Database();
+  const env = { AGENT_DB: mock as unknown as D1Database, IAAA_TENANT_ID: "tenant-2664" };
+  return { mock, env };
+}
+
 /** SqlStorage-shaped executor over node:sqlite (real semantics). */
 class SqliteTestStorage {
   readonly sqlite = new DatabaseSync(":memory:");
@@ -65,9 +80,13 @@ class SqliteTestStorage {
 
 const TTL_MS = 24 * 60 * 60 * 1000;
 
-function makeDispatch(sql: SqliteTestStorage, sent: { emails: string[]; webhooks: number }) {
+function makeDispatch(
+  sql: SqliteTestStorage,
+  sent: { emails: string[]; webhooks: number },
+  env: { AGENT_DB: D1Database; IAAA_TENANT_ID?: string } = {} as never,
+) {
   const ctx: ReportDispatchContext = {
-    env: {} as never,
+    env: env as never,
     ensureTables: () => sql as never,
     getOrm: () => ({}) as never,
     reportDispatchHitlKey: "test-hit",
@@ -84,42 +103,60 @@ function makeDispatch(sql: SqliteTestStorage, sent: { emails: string[]; webhooks
   return ctx;
 }
 
-function storeEmailReport(sql: SqliteTestStorage, owner: string, runId: string) {
-  ensureScheduledReportsTable(sql as never);
-  const stored = storeReportAtGeneration(sql as never, {
-    runId,
-    generationId: runId,
-    title: `Report ${runId}`,
-    source: "research_report",
-    summary: "s",
-    body: JSON.parse(
-      canonicalResearchEmailBody({ title: "T", fileName: "r.xlsx", attachmentBase64: "QUJD" })
-    ),
-    userLogin: owner,
-  });
+async function storeEmailReport(
+  env: { AGENT_DB: D1Database; IAAA_TENANT_ID?: string },
+  owner: string,
+  runId: string,
+) {
+  const stored = await storeReportAtGeneration(
+    {
+      runId,
+      generationId: runId,
+      title: `Report ${runId}`,
+      source: "research_report",
+      summary: "s",
+      body: JSON.parse(
+        canonicalResearchEmailBody({ title: "T", fileName: "r.xlsx", attachmentBase64: "QUJD" })
+      ),
+      userLogin: owner,
+    },
+    env,
+  );
   if (!stored) throw new Error("store failed");
   return stored.reportId;
 }
 
-function storeWebhookReport(sql: SqliteTestStorage, owner: string, runId: string) {
-  ensureScheduledReportsTable(sql as never);
-  const stored = storeReportAtGeneration(sql as never, {
-    runId,
-    generationId: runId,
-    title: `Report ${runId}`,
-    source: "research_report",
-    summary: "s",
-    body: JSON.parse(
-      canonicalResearchWebhookBody({ title: "T", query: "q", sheets: [{ name: "s", rows: [{}] }] })
-    ),
-    userLogin: owner,
-  });
+async function storeWebhookReport(
+  env: { AGENT_DB: D1Database; IAAA_TENANT_ID?: string },
+  owner: string,
+  runId: string,
+) {
+  const stored = await storeReportAtGeneration(
+    {
+      runId,
+      generationId: runId,
+      title: `Report ${runId}`,
+      source: "research_report",
+      summary: "s",
+      body: JSON.parse(
+        canonicalResearchWebhookBody({ title: "T", query: "q", sheets: [{ name: "s", rows: [{}] }] })
+      ),
+      userLogin: owner,
+    },
+    env,
+  );
   if (!stored) throw new Error("store failed");
   return stored.reportId;
 }
 
-function reportsRouteCtx(sql: SqliteTestStorage, dispatch: ReportDispatchContext, audits: string[]) {
+function reportsRouteCtx(
+  sql: SqliteTestStorage,
+  dispatch: ReportDispatchContext,
+  audits: string[],
+  env: { AGENT_DB: D1Database; IAAA_TENANT_ID?: string } = {} as never,
+) {
   return {
+    env,
     ensureTables: () => sql as never,
     getReportConfirmation: (id: string) => getReportConfirmation(dispatch, id),
     decideReportConfirmation: (id: string, status: "approved" | "rejected" | "expired", by: string | null) =>
@@ -160,9 +197,10 @@ describe("tenant isolation #2664: report confirmations are creator-owned", () =>
   it("the creator approves their own held delivery", async () => {
     const sql = new SqliteTestStorage();
     const sent = { emails: [] as string[], webhooks: 0 };
-    const dispatch = makeDispatch(sql, sent);
+    const { env } = d1Env();
+    const dispatch = makeDispatch(sql, sent, env);
     createOrchestratorTablePorts(sql as never).confirmations.ensureSchema();
-    const reportId = storeEmailReport(sql, "alice", "run-alice-1");
+    const reportId = await storeEmailReport(env, "alice", "run-alice-1");
     const cid = createReportConfirmation(
       dispatch,
       "email",
@@ -172,7 +210,7 @@ describe("tenant isolation #2664: report confirmations are creator-owned", () =>
     );
     const audits: string[] = [];
     const { req, url, path } = confirmReq("alice", cid, "approved");
-    const res = await handleReportsRoutes(req, url, path, "sess-1", reportsRouteCtx(sql, dispatch, audits));
+    const res = await handleReportsRoutes(req, url, path, "sess-1", reportsRouteCtx(sql, dispatch, audits, env));
     expect(res?.status).toBe(200);
     expect(sent.emails).toEqual(["alice@example.com"]);
     expect(getReportConfirmation(dispatch, cid)?.status).toBe("approved");
@@ -181,9 +219,10 @@ describe("tenant isolation #2664: report confirmations are creator-owned", () =>
   it("another user approving a held delivery gets 403 and nothing is decided or sent", async () => {
     const sql = new SqliteTestStorage();
     const sent = { emails: [] as string[], webhooks: 0 };
-    const dispatch = makeDispatch(sql, sent);
+    const { env } = d1Env();
+    const dispatch = makeDispatch(sql, sent, env);
     createOrchestratorTablePorts(sql as never).confirmations.ensureSchema();
-    const reportId = storeEmailReport(sql, "alice", "run-alice-2");
+    const reportId = await storeEmailReport(env, "alice", "run-alice-2");
     const cid = createReportConfirmation(
       dispatch,
       "email",
@@ -193,7 +232,7 @@ describe("tenant isolation #2664: report confirmations are creator-owned", () =>
     );
     const audits: string[] = [];
     const { req, url, path } = confirmReq("bob", cid, "approved");
-    const res = await handleReportsRoutes(req, url, path, "sess-1", reportsRouteCtx(sql, dispatch, audits));
+    const res = await handleReportsRoutes(req, url, path, "sess-1", reportsRouteCtx(sql, dispatch, audits, env));
     expect(res?.status).toBe(403);
     expect(sent.emails).toEqual([]);
     expect(getReportConfirmation(dispatch, cid)?.status).toBe("pending");
@@ -202,9 +241,10 @@ describe("tenant isolation #2664: report confirmations are creator-owned", () =>
   it("another user rejecting a held delivery gets 403 and the row stays pending", async () => {
     const sql = new SqliteTestStorage();
     const sent = { emails: [] as string[], webhooks: 0 };
-    const dispatch = makeDispatch(sql, sent);
+    const { env } = d1Env();
+    const dispatch = makeDispatch(sql, sent, env);
     createOrchestratorTablePorts(sql as never).confirmations.ensureSchema();
-    const reportId = storeEmailReport(sql, "alice", "run-alice-3");
+    const reportId = await storeEmailReport(env, "alice", "run-alice-3");
     const cid = createReportConfirmation(
       dispatch,
       "email",
@@ -214,7 +254,7 @@ describe("tenant isolation #2664: report confirmations are creator-owned", () =>
     );
     const audits: string[] = [];
     const { req, url, path } = confirmReq("bob", cid, "rejected");
-    const res = await handleReportsRoutes(req, url, path, "sess-1", reportsRouteCtx(sql, dispatch, audits));
+    const res = await handleReportsRoutes(req, url, path, "sess-1", reportsRouteCtx(sql, dispatch, audits, env));
     expect(res?.status).toBe(403);
     expect(getReportConfirmation(dispatch, cid)?.status).toBe("pending");
   });
@@ -222,9 +262,10 @@ describe("tenant isolation #2664: report confirmations are creator-owned", () =>
   it("a legacy row (no created_by) whose report belongs to the caller is still decidable", async () => {
     const sql = new SqliteTestStorage();
     const sent = { emails: [] as string[], webhooks: 0 };
-    const dispatch = makeDispatch(sql, sent);
+    const { env } = d1Env();
+    const dispatch = makeDispatch(sql, sent, env);
     createOrchestratorTablePorts(sql as never).confirmations.ensureSchema();
-    const reportId = storeEmailReport(sql, "alice", "run-alice-4");
+    const reportId = await storeEmailReport(env, "alice", "run-alice-4");
     sql.exec(
       "INSERT INTO mas_report_confirmations (id, kind, payload_json, status, created_at, report_id) VALUES (?, ?, ?, ?, ?, ?)",
       "rc_legacy_alice",
@@ -236,7 +277,7 @@ describe("tenant isolation #2664: report confirmations are creator-owned", () =>
     );
     const audits: string[] = [];
     const { req, url, path } = confirmReq("alice", "rc_legacy_alice", "approved");
-    const res = await handleReportsRoutes(req, url, path, "sess-1", reportsRouteCtx(sql, dispatch, audits));
+    const res = await handleReportsRoutes(req, url, path, "sess-1", reportsRouteCtx(sql, dispatch, audits, env));
     expect(res?.status).toBe(200);
     expect(sent.emails).toEqual(["alice@example.com"]);
     expect(getReportConfirmation(dispatch, "rc_legacy_alice")?.status).toBe("approved");
@@ -245,9 +286,10 @@ describe("tenant isolation #2664: report confirmations are creator-owned", () =>
   it("a legacy row whose report belongs to another user gets 403", async () => {
     const sql = new SqliteTestStorage();
     const sent = { emails: [] as string[], webhooks: 0 };
-    const dispatch = makeDispatch(sql, sent);
+    const { env } = d1Env();
+    const dispatch = makeDispatch(sql, sent, env);
     createOrchestratorTablePorts(sql as never).confirmations.ensureSchema();
-    const reportId = storeEmailReport(sql, "alice", "run-alice-5");
+    const reportId = await storeEmailReport(env, "alice", "run-alice-5");
     sql.exec(
       "INSERT INTO mas_report_confirmations (id, kind, payload_json, status, created_at, report_id) VALUES (?, ?, ?, ?, ?, ?)",
       "rc_legacy_bob",
@@ -259,7 +301,7 @@ describe("tenant isolation #2664: report confirmations are creator-owned", () =>
     );
     const audits: string[] = [];
     const { req, url, path } = confirmReq("bob", "rc_legacy_bob", "approved");
-    const res = await handleReportsRoutes(req, url, path, "sess-1", reportsRouteCtx(sql, dispatch, audits));
+    const res = await handleReportsRoutes(req, url, path, "sess-1", reportsRouteCtx(sql, dispatch, audits, env));
     expect(res?.status).toBe(403);
     expect(sent.emails).toEqual([]);
     expect(getReportConfirmation(dispatch, "rc_legacy_bob")?.status).toBe("pending");
@@ -274,7 +316,8 @@ describe("tenant isolation #2664: report confirmations are creator-owned", () =>
     // row created since #308 and every report-linked legacy row.
     const sql = new SqliteTestStorage();
     const sent = { emails: [] as string[], webhooks: 0 };
-    const dispatch = makeDispatch(sql, sent);
+    const { env } = d1Env();
+    const dispatch = makeDispatch(sql, sent, env);
     createOrchestratorTablePorts(sql as never).confirmations.ensureSchema();
     sql.exec(
       "INSERT INTO mas_report_confirmations (id, kind, payload_json, status, created_at, report_id) VALUES (?, ?, ?, ?, ?, ?)",
@@ -287,7 +330,7 @@ describe("tenant isolation #2664: report confirmations are creator-owned", () =>
     );
     const audits: string[] = [];
     const { req, url, path } = confirmReq("alice", "rc_legacy_orphan", "approved");
-    const res = await handleReportsRoutes(req, url, path, "sess-1", reportsRouteCtx(sql, dispatch, audits));
+    const res = await handleReportsRoutes(req, url, path, "sess-1", reportsRouteCtx(sql, dispatch, audits, env));
     expect(res?.status).toBe(200);
     expect(sent.emails).toEqual(["nobody@example.com"]);
     expect(getReportConfirmation(dispatch, "rc_legacy_orphan")?.status).toBe("approved");
@@ -296,11 +339,12 @@ describe("tenant isolation #2664: report confirmations are creator-owned", () =>
   it("an unknown confirmation id stays 404", async () => {
     const sql = new SqliteTestStorage();
     const sent = { emails: [] as string[], webhooks: 0 };
-    const dispatch = makeDispatch(sql, sent);
+    const { env } = d1Env();
+    const dispatch = makeDispatch(sql, sent, env);
     createOrchestratorTablePorts(sql as never).confirmations.ensureSchema();
     const audits: string[] = [];
     const { req, url, path } = confirmReq("alice", "rc_nope", "approved");
-    const res = await handleReportsRoutes(req, url, path, "sess-1", reportsRouteCtx(sql, dispatch, audits));
+    const res = await handleReportsRoutes(req, url, path, "sess-1", reportsRouteCtx(sql, dispatch, audits, env));
     expect(res?.status).toBe(404);
   });
 });
@@ -313,8 +357,9 @@ describe("tenant isolation #2664: stored-report delivery is owner-checked", () =
   it("the owner delivers their own stored report by email", async () => {
     const sql = new SqliteTestStorage();
     const sent = { emails: [] as string[], webhooks: 0 };
-    const dispatch = makeDispatch(sql, sent);
-    const reportId = storeEmailReport(sql, "alice", "run-alice-6");
+    const { env } = d1Env();
+    const dispatch = makeDispatch(sql, sent, env);
+    const reportId = await storeEmailReport(env, "alice", "run-alice-6");
     expect(await deliverStoredReportEmail(dispatch, reportId, "alice@example.com", "alice")).toBe("sent");
     expect(sent.emails).toEqual(["alice@example.com"]);
   });
@@ -322,8 +367,9 @@ describe("tenant isolation #2664: stored-report delivery is owner-checked", () =
   it("a non-owner delivering another user's stored report gets missing, never sent", async () => {
     const sql = new SqliteTestStorage();
     const sent = { emails: [] as string[], webhooks: 0 };
-    const dispatch = makeDispatch(sql, sent);
-    const reportId = storeEmailReport(sql, "alice", "run-alice-7");
+    const { env } = d1Env();
+    const dispatch = makeDispatch(sql, sent, env);
+    const reportId = await storeEmailReport(env, "alice", "run-alice-7");
     expect(await deliverStoredReportEmail(dispatch, reportId, "bob@example.com", "bob")).toBe("missing");
     expect(sent.emails).toEqual([]);
   });
@@ -331,8 +377,9 @@ describe("tenant isolation #2664: stored-report delivery is owner-checked", () =
   it("the owner delivers their own stored report by webhook", async () => {
     const sql = new SqliteTestStorage();
     const sent = { emails: [] as string[], webhooks: 0 };
-    const dispatch = makeDispatch(sql, sent);
-    const reportId = storeWebhookReport(sql, "alice", "run-alice-8");
+    const { env } = d1Env();
+    const dispatch = makeDispatch(sql, sent, env);
+    const reportId = await storeWebhookReport(env, "alice", "run-alice-8");
     const out = await deliverStoredReportWebhook(dispatch, reportId, "alice");
     expect(out.outcome).toBe("sent");
     expect(sent.webhooks).toBe(1);
@@ -341,8 +388,9 @@ describe("tenant isolation #2664: stored-report delivery is owner-checked", () =
   it("a non-owner delivering another user's stored report by webhook gets missing", async () => {
     const sql = new SqliteTestStorage();
     const sent = { emails: [] as string[], webhooks: 0 };
-    const dispatch = makeDispatch(sql, sent);
-    const reportId = storeWebhookReport(sql, "alice", "run-alice-9");
+    const { env } = d1Env();
+    const dispatch = makeDispatch(sql, sent, env);
+    const reportId = await storeWebhookReport(env, "alice", "run-alice-9");
     const out = await deliverStoredReportWebhook(dispatch, reportId, "bob");
     expect(out.outcome).toBe("missing");
     expect(sent.webhooks).toBe(0);
@@ -351,7 +399,8 @@ describe("tenant isolation #2664: stored-report delivery is owner-checked", () =
   it("an unknown report id stays missing", async () => {
     const sql = new SqliteTestStorage();
     const sent = { emails: [] as string[], webhooks: 0 };
-    const dispatch = makeDispatch(sql, sent);
+    const { env } = d1Env();
+    const dispatch = makeDispatch(sql, sent, env);
     expect(await deliverStoredReportEmail(dispatch, "nope", "a@b.c", "alice")).toBe("missing");
   });
 });
@@ -361,22 +410,22 @@ describe("tenant isolation #2664: stored-report delivery is owner-checked", () =
 // ---------------------------------------------------------------------------
 
 describe("tenant isolation #2664: report lists and detail are caller-scoped", () => {
-  it("a list under one login returns only that login's rows", () => {
-    const sql = new SqliteTestStorage();
-    storeEmailReport(sql, "alice", "run-alice-10");
-    storeEmailReport(sql, "bob", "run-bob-10");
-    const alice = listScheduledReports(sql as never, { userLogin: "alice", limit: 100 });
+  it("a list under one login returns only that login's rows", async () => {
+    const { env } = d1Env();
+    await storeEmailReport(env, "alice", "run-alice-10");
+    await storeEmailReport(env, "bob", "run-bob-10");
+    const alice = await listScheduledReports(env, { userLogin: "alice", limit: 100 });
     expect(alice.length).toBeGreaterThan(0);
     expect(alice.every((r) => r.runId.startsWith("run-alice"))).toBe(true);
-    const bob = listScheduledReports(sql as never, { userLogin: "bob", limit: 100 });
+    const bob = await listScheduledReports(env, { userLogin: "bob", limit: 100 });
     expect(bob.every((r) => r.runId.startsWith("run-bob"))).toBe(true);
   });
 
-  it("a detail read of another user's report id returns null", () => {
-    const sql = new SqliteTestStorage();
-    const bobId = storeEmailReport(sql, "bob", "run-bob-11");
-    expect(getScheduledReportById(sql as never, bobId, { userLogin: "alice" })).toBeNull();
-    expect(getScheduledReportById(sql as never, bobId, { userLogin: "bob" })?.id).toBe(bobId);
+  it("a detail read of another user's report id returns null", async () => {
+    const { env } = d1Env();
+    const bobId = await storeEmailReport(env, "bob", "run-bob-11");
+    expect(await getScheduledReportById(env, bobId, { userLogin: "alice" })).toBeNull();
+    expect((await getScheduledReportById(env, bobId, { userLogin: "bob" }))?.id).toBe(bobId);
   });
 });
 
@@ -411,33 +460,6 @@ describe("tenant isolation #2664: schedule creation stamps the creator", () => {
 // ---------------------------------------------------------------------------
 // Commercial D1 reads/writes: cross-user attempts refused (pins)
 // ---------------------------------------------------------------------------
-
-/** Minimal D1Database stand-in over node:sqlite (test-only, mirrors slice0). */
-class MockD1Database {
-  readonly sqlite = new DatabaseSync(":memory:");
-  prepare(sql: string) {
-    const db = this.sqlite;
-    return {
-      bind(...params: unknown[]) {
-        return {
-          async run() {
-            const info = db.prepare(sql).run(...(params as any[]));
-            return { success: true, meta: { changes: info.changes, last_row_id: info.lastInsertRowid }, results: [] };
-          },
-          async all() {
-            return { results: db.prepare(sql).all(...(params as any[])) };
-          },
-          async first() {
-            return db.prepare(sql).get(...(params as any[])) ?? null;
-          },
-          async raw() {
-            return db.prepare(sql).all(...(params as any[])).map((row: any) => Object.values(row));
-          },
-        };
-      },
-    };
-  }
-}
 
 async function commercialSetup() {
   const mock = new MockD1Database();

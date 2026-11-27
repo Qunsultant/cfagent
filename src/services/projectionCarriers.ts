@@ -1,55 +1,12 @@
 /**
- * Issue #4116 — the tenant's run-ledger projection carrier config
- * read, in the readTenantBrokerSelection shape (#1069 pattern):
- * presence-aware, status union, named denial — never a default.
- *
- * - ok: the tenant configured carriers (each flag independent) +
- *   the read mode the surfaces use.
- * - unconfigured: no carrier row exists. The tenant projects
- *   nothing; the caller names the refusal, never silently degrades
- *   to a default carrier.
- * - store_unavailable: AGENT_DB unbound, or the read threw.
- *
- * The read happens once per call chain; callers thread the
- * resolved flags down (the same threading the queue binding
- * already uses) — never a D1 round-trip per row write.
+ * @deprecated Retired by #6101 step 5 (2026-11-26) — the tenant
+ * run-ledger projection carrier-config read. The carrier table was
+ * dropped by migration 0093 and there is no carrier config left to
+ * read. Superseded by src/data/createJobRunRecordPorts.ts
+ * (recordLedgerRunD1 — writes go to D1 directly, with no carriers).
+ * This file is a frozen stub: no implementation, no callers, no
+ * exports. Do not add consumers. Deletion needs zero consumers plus
+ * an owner decision plus a gate amendment (gitops §22); recorded in
+ * docs/architecture/transition/deprecations.md (#6101).
  */
-import { resolveIaaaTenant } from "../security/iaaaGithubEndToEnd";
-import { createRunLedgerAdapter } from "../data/createRunLedgerPorts";
-import type { D1RunLedgerAdapter } from "../data/d1RunLedgerAdapter";
-import type { TenantProjectionCarriersRead } from "../data/runLedgerPorts";
-import type { Env } from "../types";
-
-export type ProjectionCarrierStore = Pick<
-  D1RunLedgerAdapter,
-  "getTenantProjectionCarriers"
->;
-
-export async function readTenantProjectionCarriers(
-  env: Partial<Env>,
-  store?: ProjectionCarrierStore | null,
-): Promise<TenantProjectionCarriersRead> {
-  const adapter = store !== undefined ? store : createRunLedgerAdapter(env);
-  if (!adapter) {
-    return {
-      status: "store_unavailable",
-      error: "projection carriers could not be read: tenant store is not bound",
-    };
-  }
-  let stored: Awaited<ReturnType<ProjectionCarrierStore["getTenantProjectionCarriers"]>>;
-  try {
-    stored = await adapter.getTenantProjectionCarriers(resolveIaaaTenant(env));
-  } catch {
-    return {
-      status: "store_unavailable",
-      error: "projection carriers could not be read: tenant store failed",
-    };
-  }
-  if (stored === null) {
-    return {
-      status: "unconfigured",
-      error: "no projection carriers configured: the tenant has not configured a run-ledger projection carrier",
-    };
-  }
-  return { status: "ok", carriers: stored.carriers, readMode: stored.readMode };
-}
+export {};

@@ -14,7 +14,9 @@
  * formerly a stubbed global fetch). The shared isolate cache is
  * reset between tests so no pin reads another pin's cached result.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, beforeAll } from "vitest";
+import { MockD1Database } from "./mock-d1";
+import { storeReportAtGeneration } from "../src/services/scheduledReports";
 import { handleSearchHubRoutes } from "../src/agents/routes/searchHub";
 import { __resetAiSearchCacheForTests } from "../src/services/aiSearchCache";
 
@@ -41,6 +43,25 @@ const REPORT_ROWS = [
   },
 ];
 
+const d1 = new MockD1Database();
+
+beforeAll(async () => {
+  for (const row of REPORT_ROWS) {
+    await storeReportAtGeneration(
+      {
+        runId: row.run_id,
+        generationId: row.run_id,
+        title: row.title,
+        source: row.source,
+        summary: row.summary,
+        body: JSON.parse(row.body),
+        userLogin: "tester",
+      } as never,
+      { AGENT_DB: d1 },
+    );
+  }
+});
+
 function stubSql(rows: unknown[]) {
   return {
     exec: (query: string, ..._args: unknown[]) => {
@@ -58,6 +79,8 @@ function stubSql(rows: unknown[]) {
  */
 function bindingEnv(chunks: unknown[] | "throw") {
   return {
+    // #6101: mas.searchKnowledge reads reports from D1 now.
+    AGENT_DB: d1,
     AI_SEARCH_INSTANCE: "screener-search",
     AI_SEARCH: {
       get: (_name: string) => ({
@@ -130,7 +153,7 @@ describe("#1169 S4-2 MAS search hub route", () => {
       new Request("https://agent.internal/api/search/mas", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-user-login": "tester" },
-        body: JSON.stringify({ query: "options risk" }),
+        body: JSON.stringify({ query: "screen" }),
       }),
       new URL("https://agent.internal/api/search/mas"),
       "/api/search/mas",
@@ -150,7 +173,7 @@ describe("#1169 S4-2 MAS search hub route", () => {
     expect(res).not.toBeNull();
     expect(res!.status).toBe(200);
     const body = await res!.json();
-    expect(body.query).toBe("options risk");
+    expect(body.query).toBe("screen");
     expect(body.reportCount).toBe(2);
     expect(body.count).toBe(4);
     expect(body.chunks).toHaveLength(5);
@@ -165,7 +188,7 @@ describe("#1169 S4-2 MAS search hub route", () => {
       new Request("https://agent.internal/api/search/mas", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-user-login": "tester" },
-        body: JSON.stringify({ query: "options risk" }),
+        body: JSON.stringify({ query: "screen" }),
       }),
       new URL("https://agent.internal/api/search/mas"),
       "/api/search/mas",

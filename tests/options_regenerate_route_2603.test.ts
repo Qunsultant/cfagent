@@ -19,6 +19,7 @@ vi.mock("../src/agents/routes/etradeOptionsScreen", () => ({
 
 import { executeOptionsRegenerate } from "../src/agents/routes/optionsRegenerate";
 import { storeReportAtGeneration } from "../src/services/scheduledReports";
+import { MockD1Database } from "./mock-d1";
 
 /** Minimal SqlStorage shim over node:sqlite (the #2528 harness shape). */
 class SqliteTestStorage {
@@ -35,29 +36,40 @@ class SqliteTestStorage {
   }
 }
 
-function seedOptionsRun(
-  sql: never,
+// #6101 step 8: the regenerate handler reads D1 agent_reports
+// through ctx.env, so the seed stores through the async D1 seam.
+type D1Env = { AGENT_DB: unknown };
+
+function d1Env(): D1Env {
+  return { AGENT_DB: new MockD1Database() as unknown as never };
+}
+
+async function seedOptionsRun(
+  env: D1Env,
   over: { userLogin?: string; body?: Record<string, unknown>; generationId?: string } = {},
 ) {
-  const stored = storeReportAtGeneration(sql, {
-    runId: `options:${over.generationId ?? "gen-1"}`,
-    generationId: over.generationId ?? "gen-1",
-    userLogin: over.userLogin ?? "alice",
-    title: "Options screen — TSLA",
-    source: "options_scanner",
-    summary: "1 symbol scanned",
-    body: over.body ?? {
-      symbol: "TSLA",
-      thesis: "income",
-      strategyMode: "all",
-      trigger: "manual",
-    },
-  } as never);
+  const stored = await storeReportAtGeneration(
+    {
+      runId: `options:${over.generationId ?? "gen-1"}`,
+      generationId: over.generationId ?? "gen-1",
+      userLogin: over.userLogin ?? "alice",
+      title: "Options screen — TSLA",
+      source: "options_scanner",
+      summary: "1 symbol scanned",
+      body: over.body ?? {
+        symbol: "TSLA",
+        thesis: "income",
+        strategyMode: "all",
+        trigger: "manual",
+      },
+    } as never,
+    env as never,
+  );
   return stored!;
 }
 
-function ctxFor(sql: never) {
-  return { ensureTables: () => sql, env: {} } as never;
+function ctxFor(sql: never, env: D1Env) {
+  return { ensureTables: () => sql, env } as never;
 }
 
 function request(body: Record<string, unknown> = {}, login: string | null = "alice"): Request {
@@ -78,10 +90,11 @@ beforeEach(() => {
 describe("POST /trading/options/regenerate — the handler's own decisions (#2603)", () => {
   it("refuses an unauthenticated caller", async () => {
     const sql = new SqliteTestStorage() as never;
+    const env = d1Env();
     const res = await executeOptionsRegenerate({
       request: request({}, null),
       sessionId: "s",
-      ctx: ctxFor(sql),
+      ctx: ctxFor(sql, env),
     });
     expect(res.status).toBe(401);
     expect(executeUnifiedOptions).not.toHaveBeenCalled();
@@ -89,10 +102,11 @@ describe("POST /trading/options/regenerate — the handler's own decisions (#260
 
   it("404s when the caller has no stored options run", async () => {
     const sql = new SqliteTestStorage() as never;
+    const env = d1Env();
     const res = await executeOptionsRegenerate({
       request: request({}),
       sessionId: "s",
-      ctx: ctxFor(sql),
+      ctx: ctxFor(sql, env),
     });
     expect(res.status).toBe(404);
     expect(executeUnifiedOptions).not.toHaveBeenCalled();
@@ -100,11 +114,12 @@ describe("POST /trading/options/regenerate — the handler's own decisions (#260
 
   it("does not regenerate another owner's run (owner scoping)", async () => {
     const sql = new SqliteTestStorage() as never;
-    const bobs = seedOptionsRun(sql, { userLogin: "bob" });
+    const env = d1Env();
+    const bobs = await seedOptionsRun(env, { userLogin: "bob" });
     const res = await executeOptionsRegenerate({
       request: request({ reportId: bobs.reportId }),
       sessionId: "s",
-      ctx: ctxFor(sql),
+      ctx: ctxFor(sql, env),
     });
     expect(res.status).toBe(404);
     expect(executeUnifiedOptions).not.toHaveBeenCalled();
@@ -112,11 +127,12 @@ describe("POST /trading/options/regenerate — the handler's own decisions (#260
 
   it("422s with the missing fields when the stored record cannot name the request", async () => {
     const sql = new SqliteTestStorage() as never;
-    const stored = seedOptionsRun(sql, { body: { thesis: "income", trigger: "manual" } });
+    const env = d1Env();
+    const stored = await seedOptionsRun(env, { body: { thesis: "income", trigger: "manual" } });
     const res = await executeOptionsRegenerate({
       request: request({ reportId: stored.reportId }),
       sessionId: "s",
-      ctx: ctxFor(sql),
+      ctx: ctxFor(sql, env),
     });
     expect(res.status).toBe(422);
     const payload = (await res.json()) as { error?: string; missing?: string[] };
@@ -127,11 +143,12 @@ describe("POST /trading/options/regenerate — the handler's own decisions (#260
 
   it("hands the REBUILT request to the unified executor and passes its response through", async () => {
     const sql = new SqliteTestStorage() as never;
-    const stored = seedOptionsRun(sql);
+    const env = d1Env();
+    const stored = await seedOptionsRun(env);
     const res = await executeOptionsRegenerate({
       request: request({ reportId: stored.reportId }),
       sessionId: "session-1",
-      ctx: ctxFor(sql),
+      ctx: ctxFor(sql, env),
     });
     expect(res.status).toBe(200);
     expect(executeUnifiedOptions).toHaveBeenCalledTimes(1);
@@ -153,11 +170,12 @@ describe("POST /trading/options/regenerate — the handler's own decisions (#260
 
   it("defaults to the caller's latest options run when no id is sent", async () => {
     const sql = new SqliteTestStorage() as never;
-    const stored = seedOptionsRun(sql);
+    const env = d1Env();
+    const stored = await seedOptionsRun(env);
     const res = await executeOptionsRegenerate({
       request: request({}),
       sessionId: "s",
-      ctx: ctxFor(sql),
+      ctx: ctxFor(sql, env),
     });
     expect(res.status).toBe(200);
     const arg = executeUnifiedOptions.mock.calls[0]![0] as unknown as {

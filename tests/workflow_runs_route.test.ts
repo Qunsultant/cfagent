@@ -1,22 +1,21 @@
 /**
  * GET /workflow-runs — the route contract for the Workflow Runs tab.
  *
- * Issue #6103 (D1-only reads): the route no longer reads the DO
- * ledgers (mas_async_jobs, mas_job_outcomes, mas_screening_activity).
- * Jobs are read from the projected D1 async jobs, outcomes from the
- * facts folded onto D1 job_run_records, and stage transitions are
+ * Issue #6101 (D1-first): the route no longer reads the DO
+ * ledgers (mas_async_jobs, mas_job_outcomes, mas_screening_activity),
+ * and the #6099 projector is deleted — there is no write-time
+ * projection anymore. Jobs are read from the FROZEN D1
+ * agent_async_jobs table (pre-cutover projected rows only; the
+ * freeze is named in storeErrors.jobs, never silent), outcomes
+ * from the facts folded onto D1 job_run_records via
+ * D1JobRunRecordStore.foldJobOutcome, and stage transitions are
  * not read at all — they are not part of the D1 run ledger,
- * permanently. The seeds below still start as DO rows (the
- * producers' writes), but each row is projected into D1 at write
- * time via postRunLedgerBestEffort — the ORM-carrier path, using
- * the sweep's own input mapping from
- * src/agents/orchestrator/runLedgerReconcile.ts — never via the
- * sweep itself (reconcileRunLedgerProjection copies existing DO
- * rows, which the replacement ruling forbids). Outcomes are seeded
- * through the real fold, D1JobRunRecordStore.attachOutcomeFacts.
+ * permanently. The seeds below are written DIRECTLY to D1:
+ * async jobs straight into agent_async_jobs, outcomes through
+ * the real fold. There is no carrier row anymore
+ * (D1RunLedgerAdapter no longer has setTenantProjectionCarriers).
  * The route is always called with env { AGENT_DB, IAAA_TENANT_ID:
- * "primary" } and a configured carrier row, so storeErrors.runs
- * stays unset.
+ * "primary" }.
  *
  * Two D1-only shapes this file pins, because they differ from the
  * merged view the old seeds produced:
@@ -34,14 +33,12 @@ import { describe, it, expect } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { MockSqlStorage } from "./mock-sql";
 import { handleWorkflowRunsRoutes } from "../src/agents/routes/workflowRuns";
-import { postRunLedgerBestEffort } from "../src/services/runLedgerProjectionPosting";
-import { createAsyncJobPorts } from "../src/data/createAsyncJobPorts";
 import { createRunLedgerAdapter, ensureRunLedgerTables } from "../src/data/createRunLedgerPorts";
 import {
   createD1JobRunRecordDb,
   D1JobRunRecordStore,
 } from "../src/data/d1JobRunRecordAdapter";
-import type { JobOutcomeRow } from "../src/services/jobOutcomes";
+import type { JobOutcomeInput, JobOutcomeRow } from "../src/services/jobOutcomes";
 
 /** Minimal D1Database stand-in over node:sqlite (the #4116 parity file's double). */
 class MockD1Database {
@@ -89,75 +86,78 @@ class MockD1Database {
   }
 }
 
-/** A D1 env with the tenant's projection carriers configured, so storeErrors.runs stays unset. */
+/** A D1 env over the frozen agent_async_jobs table (#6101 — no carriers anymore). */
 async function setupD1() {
   const mock = new MockD1Database();
   const adapter = createRunLedgerAdapter({ AGENT_DB: mock as never })!;
   await ensureRunLedgerTables(adapter);
-  await adapter.setTenantProjectionCarriers(
-    "primary",
-    { queues: true, orm: true, sweep: true },
-    "merged",
-    Date.now(),
-  );
   const env = { AGENT_DB: mock as never, IAAA_TENANT_ID: "primary" };
   return { mock, env };
 }
 
-/**
- * Project every DO async job for the session into D1 at write time,
- * using the sweep's own async_jobs input mapping
- * (runLedgerReconcile.ts: workflowRunRows, session-scoped). The
- * sweep itself is never run here.
- */
-async function projectJobs(
-  env: { AGENT_DB: unknown; IAAA_TENANT_ID: string },
-  sql: MockSqlStorage,
-  sessionId = "session-1",
-): Promise<void> {
-  const nowMs = Date.now();
-  for (const row of createAsyncJobPorts(sql as never).read.workflowRunRows(sessionId, 100)) {
-    const posted = await postRunLedgerBestEffort(env as never, "primary", {
-      ledger: "async_jobs",
-      row: {
-        jobId: row.job_id,
-        sessionId,
-        tenantId: "primary",
-        status: row.status,
-        capability: row.capability,
-        displayName: row.display_name,
-        payloadJson: row.payload_json ?? "{}",
-        resultJson: row.result_json,
-        responseStatus: null,
-        error: row.error,
-        errorCode: row.error_code,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-        startedAt: row.started_at,
-        completedAt: row.completed_at,
-        parentJobId: row.parent_job_id,
-        jobKind: row.job_kind,
-        channel: row.channel,
-        notBefore: row.not_before,
-        stage: row.stage,
-        chainId: row.chain_id,
-        stuckAlertedAt: row.stuck_alerted_at,
-        trigger: row.trigger,
-        triggeredBy: row.triggered_by,
-        scheduleId: row.schedule_id,
-        lastActivityAt: row.last_activity_at,
-      },
-    }, nowMs);
-    expect(posted.projected).toBe(true);
-  }
-}
+/** The frozen-jobs entry every seeded read names (#6101). */
+const FROZEN_JOBS = "frozen at the #6101 cutover";
 
-/** Seed one outcome through the real fold (the production write-time path). */
-async function foldOutcome(mock: MockD1Database, outcome: JobOutcomeRow): Promise<void> {
-  const store = new D1JobRunRecordStore(createD1JobRunRecordDb(mock as never));
-  const folded = await store.attachOutcomeFacts({ outcome, tenantId: "primary" }, Date.now());
-  expect(folded.landed).toBe(true);
-  expect(folded.created).toBe(true);
+/**
+ * Write one async job DIRECTLY into the frozen D1
+ * agent_async_jobs table (#6101 — the pre-cutover projected row
+ * shape; no DO row, no projection). The trigger columns stay
+ * null, exactly as the old DO rows carried them: the run-level
+ * trigger is still evidenced from the payload body.
+ */
+const D1_JOB_COLUMNS =
+  "job_id, tenant_id, session_id, capability, display_name, status, payload_json, result_json, response_status, error, error_code, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at, trigger, triggered_by, schedule_id, last_activity_at, projected_at_ms";
+const D1_JOB_PLACEHOLDERS = Array.from({ length: 27 }, () => "?").join(", ");
+
+function insertJob(
+  mock: MockD1Database,
+  input: {
+    jobId: string;
+    displayName: string;
+    status: string;
+    payload: unknown;
+    result?: unknown;
+    error?: string | null;
+    createdAt: string;
+    completedAt?: string | null;
+    parentJobId?: string | null;
+    jobKind?: string | null;
+    stage: string;
+    chainId?: string | null;
+    stuckAlertedAt?: string | null;
+  },
+): void {
+  mock.sqlite.prepare(
+    `INSERT INTO agent_async_jobs (${D1_JOB_COLUMNS}) VALUES (${D1_JOB_PLACEHOLDERS})`,
+  ).run(
+    input.jobId,
+    "primary",
+    "session-1",
+    "http.request",
+    input.displayName,
+    input.status,
+    JSON.stringify(input.payload),
+    input.result === undefined ? null : JSON.stringify(input.result),
+    null,
+    input.error ?? null,
+    null,
+    input.createdAt,
+    input.createdAt,
+    input.createdAt,
+    input.completedAt ?? null,
+    input.parentJobId ?? null,
+    input.jobKind ?? "main",
+    null,
+    null,
+    input.stage,
+    input.chainId ?? null,
+    input.stuckAlertedAt ?? null,
+    null,
+    null,
+    null,
+    null,
+    Date.now(),
+  );
 }
 
 function outcomeRow(overrides: Partial<JobOutcomeRow> = {}): JobOutcomeRow {
@@ -180,50 +180,32 @@ function outcomeRow(overrides: Partial<JobOutcomeRow> = {}): JobOutcomeRow {
   };
 }
 
-const JOB_COLUMNS =
-  "job_id, session_id, capability, display_name, status, payload_json, result_json, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at";
-const JOB_PLACEHOLDERS = "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?";
+/** Seed one outcome through the real fold (the production D1 write path, #6101). */
+async function foldOutcome(mock: MockD1Database, outcome: JobOutcomeRow): Promise<void> {
+  const store = new D1JobRunRecordStore(createD1JobRunRecordDb(mock as never));
+  const folded = await store.foldJobOutcome(toFoldInput(outcome), "primary", Date.now());
+  expect(folded.landed).toBe(true);
+  expect(folded.created).toBe(true);
+}
 
-function insertJob(
-  sql: MockSqlStorage,
-  input: {
-    jobId: string;
-    displayName: string;
-    status: string;
-    payload: unknown;
-    result?: unknown;
-    error?: string | null;
-    createdAt: string;
-    completedAt?: string | null;
-    parentJobId?: string | null;
-    jobKind?: string | null;
-    stage: string;
-    chainId?: string | null;
-    stuckAlertedAt?: string | null;
-  },
-): void {
-  sql.exec(
-    `INSERT INTO mas_async_jobs (${JOB_COLUMNS}) VALUES (${JOB_PLACEHOLDERS})`,
-    input.jobId,
-    "session-1",
-    "http.request",
-    input.displayName,
-    input.status,
-    JSON.stringify(input.payload),
-    input.result === undefined ? null : JSON.stringify(input.result),
-    input.error ?? null,
-    input.createdAt,
-    input.createdAt,
-    input.createdAt,
-    input.completedAt ?? null,
-    input.parentJobId ?? null,
-    input.jobKind ?? "main",
-    null,
-    null,
-    input.stage,
-    input.chainId ?? null,
-    input.stuckAlertedAt ?? null,
-  );
+/** A JobOutcomeRow as a fold input: null facts become absent (never wiped), never null. */
+function toFoldInput(outcome: JobOutcomeRow): JobOutcomeInput {
+  return {
+    id: outcome.id,
+    kind: outcome.kind,
+    trigger: outcome.trigger,
+    status: outcome.status,
+    ...(outcome.scanned != null ? { scanned: outcome.scanned } : {}),
+    ...(outcome.matched != null ? { matched: outcome.matched } : {}),
+    ...(outcome.codedError != null ? { codedError: outcome.codedError } : {}),
+    ...(outcome.reportUrl != null ? { reportUrl: outcome.reportUrl } : {}),
+    ...(outcome.pdfKey != null ? { pdfKey: outcome.pdfKey } : {}),
+    ...(outcome.xlsxKey != null ? { xlsxKey: outcome.xlsxKey } : {}),
+    ...(outcome.csvKey != null ? { csvKey: outcome.csvKey } : {}),
+    deliveryStates: outcome.deliveryStates ?? {},
+    origin: outcome.origin,
+    createdAt: outcome.createdAt,
+  };
 }
 
 function ctxFor(
@@ -242,7 +224,7 @@ describe("GET /workflow-runs", () => {
   it("returns one run per job chain with ordered stages and recorded reasons", async () => {
     const { mock, env } = await setupD1();
     const sql = new MockSqlStorage();
-    insertJob(sql, {
+    insertJob(mock, {
       jobId: "job-main",
       displayName: "Stock screen — NASDAQ100",
       status: "completed",
@@ -257,7 +239,7 @@ describe("GET /workflow-runs", () => {
       createdAt: "2026-10-27T13:00:00.000Z",
       completedAt: "2026-10-27T13:01:00.000Z",
     });
-    insertJob(sql, {
+    insertJob(mock, {
       jobId: "job-deliver",
       displayName: "Deliver by Slack",
       status: "failed",
@@ -270,7 +252,6 @@ describe("GET /workflow-runs", () => {
       createdAt: "2026-10-27T13:01:00.000Z",
       completedAt: "2026-10-27T13:01:05.000Z",
     });
-    await projectJobs(env, sql);
     // Issue #6103 — no screening-activity seed: stage transitions
     // are not read at all anymore, so there is nothing to record
     // the deliver failure's reason through; the job row's own
@@ -301,7 +282,7 @@ describe("GET /workflow-runs", () => {
     // fold rows are carried by the outcomes input, not the engine
     // records read (one run, one row).
     expect(body.count).toBe(2);
-    expect(body.storeErrors.jobs).toBeUndefined();
+    expect(body.storeErrors.jobs).toMatch(FROZEN_JOBS);
     expect(body.storeErrors.outcomes).toBeUndefined();
     expect(body.storeErrors.runs).toBeUndefined();
     expect(body.storeErrors.stages).toMatch("not projected");
@@ -359,11 +340,11 @@ describe("GET /workflow-runs", () => {
   });
 
   it("never returns raw payloads or secret values", async () => {
-    const { env } = await setupD1();
+    const { mock, env } = await setupD1();
     const sql = new MockSqlStorage();
     const secretName = ["api", "Key"].join("");
     const secretValue = ["place", "holder"].join("-");
-    insertJob(sql, {
+    insertJob(mock, {
       jobId: "job-secret",
       displayName: "Tool run",
       status: "completed",
@@ -373,14 +354,13 @@ describe("GET /workflow-runs", () => {
       createdAt: "2026-10-27T12:00:00.000Z",
       completedAt: "2026-10-27T12:00:01.000Z",
     });
-    await projectJobs(env, sql);
     const res = await handleWorkflowRunsRoutes(request(), new URL("https://agent.internal/workflow-runs"), "/workflow-runs", "session-1", ctxFor(sql, "analyst", env));
     const text = await res!.text();
     expect(text).not.toContain(secretValue);
     // The whitelisted fields still render; the secret field is simply absent.
     expect(text).toContain("toolName");
     const body = JSON.parse(text) as any;
-    expect(body.storeErrors.jobs).toBeUndefined();
+    expect(body.storeErrors.jobs).toMatch(FROZEN_JOBS);
     expect(body.runs.find((r: any) => r.id === "job-secret")).toBeDefined();
   });
 
@@ -412,8 +392,12 @@ describe("GET /workflow-runs", () => {
 
   it("clamps the limit and rejects non-GET", async () => {
     const sql = new MockSqlStorage();
+    // Issue #6101 — the rows land in D1, but the handler is still
+    // called with no env, so they stay unread (as the DO rows did
+    // before: seeded, never projected, never served).
+    const { mock } = await setupD1();
     for (let i = 0; i < 3; i++) {
-      insertJob(sql, {
+      insertJob(mock, {
         jobId: `job-${i}`,
         displayName: `Run ${i}`,
         status: "completed",
@@ -449,9 +433,9 @@ describe("GET /workflow-runs", () => {
   });
 
   it("carries the stuck flag through to a running chain (#3784)", async () => {
-    const { env } = await setupD1();
+    const { mock, env } = await setupD1();
     const sql = new MockSqlStorage();
-    insertJob(sql, {
+    insertJob(mock, {
       jobId: "job-stuck",
       displayName: "MCP etrade_preview_order",
       status: "running",
@@ -460,10 +444,9 @@ describe("GET /workflow-runs", () => {
       createdAt: "2026-11-08T15:29:00.000Z",
       stuckAlertedAt: "2026-11-08T15:59:00.000Z",
     });
-    await projectJobs(env, sql);
     const res = await handleWorkflowRunsRoutes(request(), new URL("https://agent.internal/workflow-runs"), "/workflow-runs", "session-1", ctxFor(sql, "analyst", env));
     const body = (await res!.json()) as any;
-    expect(body.storeErrors.jobs).toBeUndefined();
+    expect(body.storeErrors.jobs).toMatch(FROZEN_JOBS);
     const run = body.runs.find((r: any) => r.id === "job-stuck");
     expect(run).toBeDefined();
     expect(run.status).toBe("running");

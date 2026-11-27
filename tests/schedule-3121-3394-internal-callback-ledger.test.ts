@@ -29,8 +29,21 @@
 import { describe, it, expect } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
+import { MockD1Database } from "./mock-d1";
 import { recordScheduleCallbackRun } from "../src/agents/orchestrator/scheduleCallbackRunRecords";
+
+/** Issue #6101 — the D1 run ledger over a fresh in-memory mock binding. */
+function ledgerD1() {
+  const d1 = new MockD1Database();
+  const store = new D1JobRunRecordStore(
+    createD1JobRunRecordDb(d1 as unknown as D1Database),
+  );
+  return { d1, store };
+}
 
 /** node:sqlite double for the SqlStorage seam (same shape as #2337 / #2964). */
 class SqliteTestStorage {
@@ -62,6 +75,7 @@ describe("internal-callback SDK firings record a ledger row (#3394)", () => {
   for (const callback of INTERNAL_CALLBACKS) {
     it(`3394-P01: an SDK firing of ${callback} joins the schedule to its row`, async () => {
       const storage = new SqliteTestStorage();
+      const { d1, store } = ledgerD1();
       const scheduleId = `sched-3394-${callback}`;
       await recordScheduleCallbackRun(
         storage.sql as never,
@@ -69,9 +83,10 @@ describe("internal-callback SDK firings record a ledger row (#3394)", () => {
         {},
         { id: scheduleId },
         async () => ({ outcome: "success", descriptor: `${callback} complete` }),
+        // Issue #6101 — the recorder resolves the D1 store from env.
+        { env: { AGENT_DB: d1 } },
       );
-      const store = new SqlJobRunRecordStore(storage.sql as never);
-      const rows = store.listByJob(scheduleId);
+      const rows = await store.listByJob(scheduleId);
       expect(rows).toHaveLength(1);
       const row = rows[0];
       expect(row.operation).toBe(callback);
@@ -90,15 +105,17 @@ describe("internal-callback SDK firings record a ledger row (#3394)", () => {
   it("3394-P02: a firing with no originating schedule records explicit nulls", async () => {
     for (const callback of INTERNAL_CALLBACKS) {
       const storage = new SqliteTestStorage();
+      const { d1, store } = ledgerD1();
       await recordScheduleCallbackRun(
         storage.sql as never,
         callback,
         {},
         undefined,
         async () => ({ outcome: "success", descriptor: `${callback} complete` }),
+        // Issue #6101 — the recorder resolves the D1 store from env.
+        { env: { AGENT_DB: d1 } },
       );
-      const store = new SqlJobRunRecordStore(storage.sql as never);
-      const rows = store.listByJob(`callback:${callback}`);
+      const rows = await store.listByJob(`callback:${callback}`);
       expect(rows).toHaveLength(1);
       const row = rows[0];
       expect(row.operation).toBe(callback);

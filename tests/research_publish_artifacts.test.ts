@@ -13,6 +13,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 import { listScheduledReports } from "../src/services/scheduledReports";
 import { generateAndStoreResearchReport } from "../src/agents/orchestrator/researchPublish";
 import { generateReportStage } from "../src/services/unifiedReportPipeline";
@@ -41,9 +42,14 @@ function report() {
   } as any;
 }
 
+// #6101 step 8: the research publish seam stores through the D1
+// canonical seam via ctx.env, so the context binds a fresh
+// MockD1Database (the DO mas_reports table is frozen).
 function ctxFor(sql: MockSqlStorage) {
+  const mock = new MockD1Database();
+  const env = { AGENT_DB: mock as unknown as never };
   return {
-    env: {},
+    env,
     ensureTables: () => sql as any,
     getOrm: () => ({}) as any,
   } as any;
@@ -69,8 +75,9 @@ describe("generateAndStoreResearchReport (#2167)", () => {
       })),
     };
     const sql = new MockSqlStorage();
+    const ctx = ctxFor(sql);
 
-    const result = await generateAndStoreResearchReport(ctxFor(sql), agent as any, report(), {
+    const result = await generateAndStoreResearchReport(ctx, agent as any, report(), {
       trigger: "manual",
       userLogin: "tester",
     });
@@ -83,7 +90,7 @@ describe("generateAndStoreResearchReport (#2167)", () => {
       csvKey: "report:csv:research:abc12345",
     });
 
-    const rows = listScheduledReports(sql as any, { userLogin: "tester" });
+    const rows = await listScheduledReports(ctx.env, { userLogin: "tester" });
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ source: "options_research", runId: "run-1" });
     expect(JSON.parse(String(rows[0].body))).toMatchObject({
@@ -96,7 +103,7 @@ describe("generateAndStoreResearchReport (#2167)", () => {
     });
 
     // The row belongs to its owner only.
-    expect(listScheduledReports(sql as any, { userLogin: "someone-else" })).toHaveLength(0);
+    expect(await listScheduledReports(ctx.env, { userLogin: "someone-else" })).toHaveLength(0);
   });
 
   it("records a failed PDF while the workbook and CSV still land", async () => {
@@ -115,8 +122,9 @@ describe("generateAndStoreResearchReport (#2167)", () => {
       })),
     };
     const sql = new MockSqlStorage();
+    const ctx = ctxFor(sql);
 
-    const result = await generateAndStoreResearchReport(ctxFor(sql), agent as any, report(), {
+    const result = await generateAndStoreResearchReport(ctx, agent as any, report(), {
       trigger: "scheduled",
       userLogin: "tester",
     });
@@ -124,7 +132,7 @@ describe("generateAndStoreResearchReport (#2167)", () => {
     expect(result.artifacts.pdfStatus).toBe("failed");
     expect(result.artifacts.pdfError).toContain("FAILURE_REPORT_PDF_GENERATION");
     expect(result.artifacts.xlsxKey).toBe("report:xlsx:research:def");
-    const body = JSON.parse(String(listScheduledReports(sql as any, { userLogin: "tester" })[0].body));
+    const body = JSON.parse(String((await listScheduledReports(ctx.env, { userLogin: "tester" }))[0].body));
     expect(body.pdfStatus).toBe("failed");
     expect(body.pdfError).toContain("FAILURE_REPORT_PDF_GENERATION");
     expect(body.xlsxKey).toBe("report:xlsx:research:def");
@@ -138,8 +146,9 @@ describe("generateAndStoreResearchReport (#2167)", () => {
       }),
     };
     const sql = new MockSqlStorage();
+    const ctx = ctxFor(sql);
 
-    const result = await generateAndStoreResearchReport(ctxFor(sql), agent as any, report(), {
+    const result = await generateAndStoreResearchReport(ctx, agent as any, report(), {
       trigger: "manual",
       userLogin: "tester",
     });
@@ -150,7 +159,7 @@ describe("generateAndStoreResearchReport (#2167)", () => {
       xlsxStatus: "failed",
       csvStatus: "failed",
     });
-    const rows = listScheduledReports(sql as any, { userLogin: "tester" });
+    const rows = await listScheduledReports(ctx.env, { userLogin: "tester" });
     expect(rows).toHaveLength(1);
     const body = JSON.parse(String(rows[0].body));
     expect(body.pdfStatus).toBe("failed");

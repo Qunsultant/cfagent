@@ -80,7 +80,11 @@ import {
   handleSchedulesRoutes,
   type SchedulesRouteContext,
 } from "../src/agents/routes/schedules";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
+import { MockD1Database } from "./mock-d1";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
 import {
@@ -502,8 +506,12 @@ function doCtx(overrides: Partial<SchedulesRouteContext> = {}): {
   orm: DatabaseORM;
   audits: Array<{ type: string; agent: string; payload: Record<string, unknown> }>;
   submitted: Array<Record<string, unknown>>;
+  d1: MockD1Database;
 } {
   const sql = new SqliteTestStorage();
+  // Issue #6101 — the mint ledger row lands in D1: the route
+  // resolves the store from ctx.env.AGENT_DB.
+  const d1 = new MockD1Database();
   // Issue #4223: the DO route claims the durable idempotency key
   // through ctx.getOrm(), so the harness provides a real ORM (not the
   // bare {} stub) — the same MockSqlStorage-backed ORM the replay
@@ -519,7 +527,7 @@ function doCtx(overrides: Partial<SchedulesRouteContext> = {}): {
     // would 403 with no grant. They pin minting/idempotency, not
     // PDP (the PDP-denial test below sets the flag on explicitly),
     // so PDP stays off here.
-    env: { SESSION_STORE: namespace, IAAA_PDP_ENABLED: "0" },
+    env: { SESSION_STORE: namespace, AGENT_DB: d1, IAAA_PDP_ENABLED: "0" },
     agentCtx: { storage: { sql } },
     audit: (type: string, agent: string, payload: Record<string, unknown>) => {
       audits.push({ type, agent, payload });
@@ -541,7 +549,7 @@ function doCtx(overrides: Partial<SchedulesRouteContext> = {}): {
     }),
     ...overrides,
   } as unknown as SchedulesRouteContext;
-  return { ctx, sql, orm, audits, submitted };
+  return { ctx, sql, orm, audits, submitted, d1 };
 }
 
 const doReq = (body: unknown, headers: Record<string, string> = {}) =>
@@ -559,7 +567,7 @@ describe("handleSchedulesRoutes — POST /schedules/webhook/followup (#3311)", (
   });
 
   it("mints the follow-up, writes the ledger row, and audits both the call and the mint", async () => {
-    const { ctx, sql, audits, submitted } = doCtx();
+    const { ctx, d1, audits, submitted } = doCtx();
     const res = await handleSchedulesRoutes(
       doReq(validBody({ workflowId: "wf-3311-do" })),
       urlOf("/schedules/webhook/followup"),
@@ -577,8 +585,11 @@ describe("handleSchedulesRoutes — POST /schedules/webhook/followup (#3311)", (
     expect(submitted[0].capability).toBe("followup.report");
     expect(submitted[0].trigger).toBe("webhook");
     expect(submitted[0].runAt).toBe(RUN_AT);
-    // The mint ledger row round-trips with the correlation ID.
-    const rows = new SqlJobRunRecordStore(sql as never).listByJob("job-minted-3311-1");
+    // The mint ledger row round-trips with the correlation ID (D1, #6101).
+    const store = new D1JobRunRecordStore(
+      createD1JobRunRecordDb(d1 as unknown as D1Database),
+    );
+    const rows = await store.listByJob("job-minted-3311-1");
     expect(rows).toHaveLength(1);
     expect(rows[0].operation).toBe("schedule.webhook.followup_minted");
     expect(rows[0].trigger).toBe("async-chain");
@@ -657,6 +668,10 @@ describe("handleSchedulesRoutes — POST /schedules/webhook/followup (#3311)", (
     const { ctx, audits, submitted } = doCtx({
       agentCtx: { storage: { sql: throwingSql } },
     } as Partial<SchedulesRouteContext>);
+    // Issue #6101 — the ledger write fails because the D1 binding
+    // is unbound (the DO sql failure above no longer drives the
+    // ledger); the mint still lands and the failure is audited.
+    (ctx.env as Record<string, unknown>).AGENT_DB = undefined;
     const res = await handleSchedulesRoutes(
       doReq(validBody({ workflowId: "wf-3311-badledger" })),
       urlOf("/schedules/webhook/followup"),

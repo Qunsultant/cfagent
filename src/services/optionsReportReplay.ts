@@ -37,7 +37,7 @@ export interface ReplayOptionsReportDeps {
   sql: SqlStorage;
   orm: OptionsCanonicalStore;
   env?: Record<string, unknown>;
-  findSourceReport: (sourceRunId: string, userLogin: string) => ScheduledReportHit | null;
+  findSourceReport: (sourceRunId: string, userLogin: string) => Promise<ScheduledReportHit | null>;
   listCaptures?: (tenantId: string, runId: string) => DataCaptureRecord[];
   resolveBody?: (hit: ScheduledReportHit) => Promise<string | null>;
 }
@@ -66,7 +66,7 @@ export async function replayOptionsReport(
   input: ReplayOptionsReportInput,
 ): Promise<ReplayOptionsReportResult> {
   const sourceRunId = input.sourceRunId.trim();
-  const hit = deps.findSourceReport(sourceRunId, input.userLogin);
+  const hit = await deps.findSourceReport(sourceRunId, input.userLogin);
   if (!hit) {
     return {
       ok: false,
@@ -138,7 +138,7 @@ export async function replayOptionsReport(
     bodyR2Key: r2Pointer,
   };
 
-  const recorded = recordUnifiedOptionsRun(
+  const recorded = await recordUnifiedOptionsRun(
     deps.orm,
     {
       runId: replayRunId,

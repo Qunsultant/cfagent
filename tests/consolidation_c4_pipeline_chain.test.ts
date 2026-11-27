@@ -214,7 +214,7 @@ describe("C4 pipeline stage split (#1329)", () => {
     expect(out.pdfStatus).toBe("generated");
   });
 
-  it("storeReportStage writes the canonical row and returns its id", () => {
+  it("storeReportStage writes the canonical row and returns its id", async () => {
     const recorded: any[] = [];
     const orm = {
       storeCanonicalReport: (input: any) => {
@@ -222,7 +222,7 @@ describe("C4 pipeline stage split (#1329)", () => {
         return { reportId: "rep-c4-1", created: true };
       },
     };
-    const res = storeReportStage(orm as any, {
+    const res = await storeReportStage(orm as any, {
       runId: "discovery:run-1",
       generationId: "discovery:run-1",
       title: "Strategy discovery — no-view",
@@ -236,9 +236,9 @@ describe("C4 pipeline stage split (#1329)", () => {
     expect(recorded[0].body.discoveryRunId).toBe("run-1");
   });
 
-  it("storeReportStage without an ORM returns null, never throws", () => {
+  it("storeReportStage without an ORM returns null, never throws", async () => {
     expect(
-      storeReportStage(undefined as any, {
+      await storeReportStage(undefined as any, {
         runId: "x",
         generationId: "x",
         title: "t",

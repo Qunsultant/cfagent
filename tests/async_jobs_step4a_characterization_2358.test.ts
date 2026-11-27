@@ -44,6 +44,8 @@ import { chainRowsFromSql } from "../src/services/shardJobs";
 import { readWorkflowRunJobs } from "../src/agents/routes/workflowRuns";
 import { handleMaintenanceRoutes } from "../src/agents/routes/maintenance";
 import { createChainLegExecutor } from "../src/agentic/chainExecutor";
+import { MockD1Database } from "./mock-d1";
+import { createJobRunRecordAdapter } from "../src/data/createJobRunRecordPorts";
 
 // Issue #6503 step 8b — the platform-admin identity stubs for the
 // one gated clear in this file (mas_job_outcomes); same shape as
@@ -476,6 +478,10 @@ describe("characterization 4a: retry", () => {
 describe("characterization 4a: screener-run bridge", () => {
   it("records a terminal main-job row and a job-outcome for a finished run", async () => {
     const h = makeHarness();
+    // #6101: this bridge folds the outcome onto D1 — bind a fresh
+    // D1 on this test's ctx only.
+    const d1 = new MockD1Database();
+    h.ctx.env = { AGENT_DB: d1 };
     const jobId = await recordScreenerRunMainJob(
       h.ctx,
       {
@@ -493,12 +499,11 @@ describe("characterization 4a: screener-run bridge", () => {
     expect(row.capability).toBe("screener.run");
     expect(row.status).toBe("completed");
     expect(row.job_kind).toBe("main");
-    const outcomes = h.db.prepare("SELECT id, status, origin FROM mas_job_outcomes").all() as Array<{
-      id: string;
-      status: string;
-      origin: string;
-    }>;
-    expect(outcomes).toEqual([{ id: jobId, status: "completed", origin: "job-tree" }]);
+    // #6101: the outcome folds onto D1 (the DO mas_job_outcomes
+    // table receives no new writes).
+    const outcome = await createJobRunRecordAdapter({ AGENT_DB: d1 } as never)!.latestByJob(jobId);
+    expect(outcome).toBeDefined();
+    expect(outcome).toMatchObject({ jobId, operation: "stock", outcome: "success", origin: "job-tree" });
     expect(h.audits.some((a) => a.type === "screener.run_bridged")).toBe(true);
   });
 });

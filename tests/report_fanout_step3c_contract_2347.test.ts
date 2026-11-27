@@ -1,47 +1,45 @@
 // @vitest-environment node
 /**
- * Issue #2347 (#1976 step 3c, ADR 0022 D-C.3 / D-F2) — NEW
- * CONTRACT pins for the canonical report fan-out. Unlike the
- * characterization file (as-found behaviour, green before and
- * after), these pins encode the DISCLOSED behaviour changes
- * and were RED against the pre-change code:
+ * Issue #2347 (#1976 step 3c, ADR 0022 D-C.3 / D-F2) — the canonical
+ * report fan-out contract, as re-shaped by #6101 step 8.
  *
- *  1. Recorded outcomes: every store through the one seam
- *     records a CanonicalReportFanoutOutcome on the report
- *     record (fanout_outcome) with a catalogued code
- *     (DataFoundationCode REPORT_FANOUT_STORED / _DEGRADED);
- *     the store result surfaces the outcome too.
+ * THE CHANGE (named, disclosed): the recorded-on-the-row half of the
+ * contract ENDS with the DO row. D1 agent_reports carries no fan-out
+ * column, so a read always returns fanoutOutcome: null. What survives:
+ *
+ *  1. The store RESULT carries the fan-out outcome as known at return
+ *     time (body leg settled pre-insert; index legs fire-and-forget,
+ *     so an attempted leg reads "pending" on the result). Codes stay
+ *     catalogued (DataFoundationCode REPORT_FANOUT_STORED /
+ *     _DEGRADED); only "failed" or "inline_fallback" degrade.
  *  2. Per-leg fault injection: R2 put throws -> body
- *     inline_fallback + DEGRADED, row complete inline;
- *     Vectorize throws -> vectorize "failed" + DEGRADED, row
- *     intact; AI Search upload throws -> aiSearch "failed"
- *     with aiSearchCode "upload_failed" + DEGRADED; row
- *     INSERT throws -> null result, no row, no outcome record
- *     (the REPORT_FANOUT_FAILED member: nothing to record on).
- *  3. Not-attempted is distinguished from failed: no bindings
- *     -> vectorize "not_attempted"; #2246 flag OFF -> aiSearch
- *     "not_attempted" AND zero instance calls (flag discipline
- *     preserved exactly); flag ON + configured -> "indexed".
+ *     inline_fallback + DEGRADED on the result, row complete inline;
+ *     a settled index-leg failure is NO LONGER recorded anywhere on
+ *     the row — it is logged once as a
+ *     `scheduledReports.fanout_leg_failed` warn event (target + code),
+ *     never silent, never thrown into the store's path. A leg that
+ *     never attempts (no bindings / flag OFF) makes zero calls and
+ *     is never fabricated as "indexed".
+ *  3. Row INSERT throws -> null result, no row, the
+ *     storeReportAtGeneration.failed error event with the
+ *     REPORT_FANOUT_FAILED code (the failed member: nothing to
+ *     record on).
  *  4. Ordering: the R2 put still precedes the insert, and the
- *     recorded outcome at insert time already names the body
- *     leg (stored_r2 / body "r2") — a row never claims a body
- *     it does not have: a failed put records inline_fallback
- *     with the body inline, never stored_r2.
- *  5. Seam parity (the retired divergent seam): exactly ONE
- *     INSERT INTO mas_reports exists in src/ (the shared
- *     insertScheduledReportRow, carrying body_r2_key +
- *     fanout_outcome); persistScheduledReportSql delegates to
- *     the canonical seam (deprecated, successor named) — its
- *     callers now get dedupe + the recorded outcome.
- *  6. Dedupe outcome: a redelivery records outcome "deduped"
- *     and re-fires the legs (their settled statuses land on
- *     the record).
+ *     result already names the body leg (stored_r2 / body "r2") —
+ *     a row never claims a body it does not have: a failed put
+ *     returns inline_fallback with the body inline, never stored_r2.
+ *  5. Seam parity: exactly ONE D1 agent_reports insert exists in
+ *     src/ (the adapter's recordReport, carrying bodyR2Key);
+ *     persistScheduledReportSql is DELETED (its tests with it).
+ *  6. Dedupe: a redelivery returns created:false + outcome
+ *     "deduped" on the result and re-fires the legs; one reportId.
  *
- * DOUBLES: node:sqlite-backed SqlStorage (real semantics).
+ * DOUBLES: shared MockD1Database (node:sqlite-backed) for the D1
+ * seam; the leg doubles (Vectorize / AI Search / R2 bucket) are
+ * unchanged from the pre-#6101 file.
  *
  * #CDO-mha7
  */
-import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
@@ -58,36 +56,26 @@ vi.mock("../src/actors/thinkAdapter", () => ({
 
 import {
   getCanonicalReport,
-  getCanonicalReportFanoutOutcome,
-  persistScheduledReportSql,
+  listScheduledReports,
   storeReportAtGeneration,
   storeReportAtGenerationWithR2,
   type ScheduledReportInput,
 } from "../src/services/scheduledReports";
 import { DataFoundationCode } from "../src/aspects/errorCodes";
-import type { SqlStorage } from "../src/orm";
+import { MockD1Database } from "./mock-d1";
 
-class SqliteTestStorage {
-  readonly sqlite = new DatabaseSync(":memory:");
-  failInserts = false;
-  exec(query: string, ...params: unknown[]): unknown[] {
-    if (this.failInserts && /^\s*INSERT\s+INTO\s+mas_reports/i.test(query)) {
-      throw new Error("simulated insert failure");
-    }
-    const stmt = this.sqlite.prepare(query);
-    if (/^\s*(SELECT|PRAGMA)/i.test(query)) {
-      return stmt.all(...(params as never[])) as unknown[];
-    }
-    stmt.run(...(params as never[]));
-    return [];
-  }
-}
+type D1Database = any;
 
 const flush = async () => {
   await new Promise<void>((r) => setTimeout(r, 0));
   await new Promise<void>((r) => setTimeout(r, 0));
   await new Promise<void>((r) => setTimeout(r, 0));
 };
+
+function d1() {
+  const mock = new MockD1Database();
+  return { mock, env: { AGENT_DB: mock as unknown as D1Database } };
+}
 
 function input(over: Partial<ScheduledReportInput> = {}): ScheduledReportInput {
   return {
@@ -103,8 +91,64 @@ function input(over: Partial<ScheduledReportInput> = {}): ScheduledReportInput {
   };
 }
 
-function rowCount(sql: SqliteTestStorage): number {
-  return (sql.exec(`SELECT id FROM mas_reports`) as unknown[]).length;
+async function rowCount(env: { AGENT_DB: D1Database }): Promise<number> {
+  return (await listScheduledReports(env, { limit: 100 })).length;
+}
+
+/** Fail the agent_reports INSERT (after the migrations run). */
+class FailingInsertD1 extends MockD1Database {
+  override prepare(sql: string) {
+    const stmt = super.prepare(sql) as {
+      bind(...params: unknown[]): {
+        run(): Promise<unknown>;
+        all(): Promise<unknown>;
+        first(): Promise<unknown>;
+        raw(): Promise<unknown>;
+      };
+    };
+    if (/INSERT\s+INTO\s+["`]?agent_reports["`]?/i.test(sql)) {
+      return {
+        bind(...params: unknown[]) {
+          const bound = stmt.bind(...params);
+          return {
+            ...bound,
+            async run() {
+              throw new Error("simulated insert failure");
+            },
+          };
+        },
+      };
+    }
+    return stmt;
+  }
+}
+
+// #3515 S3: the seams log via the structured logger, whose fallback
+// sink writes every event as one JSON line via console.info.
+function structuredEvents(infoSpy: ReturnType<typeof vi.spyOn>) {
+  const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+  for (const call of infoSpy.mock.calls) {
+    try {
+      const parsed = JSON.parse(String(call[0])) as {
+        operation?: unknown;
+        level?: unknown;
+        fields?: unknown;
+      };
+      if (parsed && typeof parsed.operation === "string") {
+        events.push({
+          operation: parsed.operation,
+          level: typeof parsed.level === "string" ? parsed.level : "",
+          fields:
+            parsed.fields && typeof parsed.fields === "object"
+              ? (parsed.fields as Record<string, unknown>)
+              : {},
+        });
+      }
+    } catch {
+      // Non-JSON console.info lines are not structured events.
+    }
+  }
+  return events;
 }
 
 function makeVectorEnv(opts: { failUpsert?: boolean } = {}) {
@@ -164,81 +208,61 @@ function makeBucket(opts: { failPut?: boolean } = {}) {
   };
 }
 
-describe("3c contract: recorded outcomes on the successful path", () => {
-  it("sync seam, no env: stored_inline / STORED, both legs not_attempted (aiSearch after settle)", async () => {
-    const sql = new SqliteTestStorage();
-    const stored = storeReportAtGeneration(sql as unknown as SqlStorage, input());
+describe("3c contract: the store result carries the outcome; the D1 read carries none", () => {
+  it("inline seam, no env: stored_inline / STORED on the result, both legs not_attempted-or-pending, read fanoutOutcome null", async () => {
+    const { env } = d1();
+    const stored = await storeReportAtGeneration(input(), env);
     expect(stored?.fanout.outcome).toBe("stored_inline");
+    expect(stored?.fanout.code).toBe(DataFoundationCode.REPORT_FANOUT_STORED);
     expect(stored?.fanout.body).toBe("inline");
     expect(stored?.fanout.vectorize).toBe("not_attempted");
+    // Index legs are fire-and-forget: aiSearch reads "pending" at
+    // return time (its settle lands nowhere now — no record).
+    expect(stored?.fanout.aiSearch).toBe("pending");
     await flush();
-    const recorded = getCanonicalReportFanoutOutcome(
-      sql as unknown as SqlStorage,
-      stored!.reportId,
-    );
-    expect(recorded).toEqual({
-      outcome: "stored_inline",
-      code: DataFoundationCode.REPORT_FANOUT_STORED,
-      body: "inline",
-      vectorize: "not_attempted",
-      aiSearch: "not_attempted",
-      aiSearchCode: "disabled",
-    });
-    const hit = getCanonicalReport(sql as unknown as SqlStorage, stored!.reportId);
-    expect(hit?.fanoutOutcome).toEqual(recorded);
+    const hit = await getCanonicalReport(env, stored!.reportId);
+    expect(hit?.fanoutOutcome).toBeNull();
   });
 
-  it("R2 seam: stored_r2 / body r2 recorded; Vectorize indexed after settle", async () => {
-    const sql = new SqliteTestStorage();
+  it("R2 seam: stored_r2 / body r2 on the result; Vectorize indexed after settle; read fanoutOutcome null", async () => {
+    const { env } = d1();
     const { bucket } = makeBucket();
-    const { env, upserts } = makeVectorEnv();
+    const { env: vecEnv, upserts } = makeVectorEnv();
     const stored = await storeReportAtGenerationWithR2(
-      sql as unknown as SqlStorage,
       // Phase 3 (#6550): AI_SEARCH_REPORT_INDEXING_ENABLED lives in
       // environment.config.json (ON in production); this seam asserts
       // the no-AI-search outcome, so the flag is off explicitly.
-      { REPORTS_BUCKET: bucket, ...env, AI_SEARCH_REPORT_INDEXING_ENABLED: "0" } as never,
+      { ...env, REPORTS_BUCKET: bucket, ...vecEnv, AI_SEARCH_REPORT_INDEXING_ENABLED: "0" } as never,
       input(),
     );
     expect(stored?.fanout.outcome).toBe("stored_r2");
     expect(stored?.fanout.code).toBe(DataFoundationCode.REPORT_FANOUT_STORED);
+    expect(stored?.fanout.body).toBe("r2");
     await flush();
     expect(upserts).toHaveLength(1);
-    const recorded = getCanonicalReportFanoutOutcome(
-      sql as unknown as SqlStorage,
-      stored!.reportId,
-    );
-    expect(recorded?.body).toBe("r2");
-    expect(recorded?.vectorize).toBe("indexed");
-    expect(recorded?.code).toBe(DataFoundationCode.REPORT_FANOUT_STORED);
+    const hit = await getCanonicalReport(env, stored!.reportId);
+    expect(hit?.bodyR2Key).toBeTruthy();
+    expect(hit?.fanoutOutcome).toBeNull();
   });
 
-  it("AI Search flag ON + configured: aiSearch indexed after settle", async () => {
-    const sql = new SqliteTestStorage();
+  it("AI Search flag ON + configured: upload happens once after settle; result reads pending; read fanoutOutcome null", async () => {
+    const { env } = d1();
     const ai = makeAiSearchEnv({ flag: "true" });
-    const stored = storeReportAtGeneration(
-      sql as unknown as SqlStorage,
-      input(),
-      ai.env as never,
-    );
+    const stored = await storeReportAtGeneration(input(), { ...env, ...ai.env } as never);
+    expect(stored?.fanout.aiSearch).toBe("pending");
     await flush();
     expect(ai.uploads).toHaveLength(1);
-    const recorded = getCanonicalReportFanoutOutcome(
-      sql as unknown as SqlStorage,
-      stored!.reportId,
-    );
-    expect(recorded?.aiSearch).toBe("indexed");
-    expect(recorded?.code).toBe(DataFoundationCode.REPORT_FANOUT_STORED);
+    const hit = await getCanonicalReport(env, stored!.reportId);
+    expect(hit?.fanoutOutcome).toBeNull();
   });
 });
 
-describe("3c contract: per-leg fault injection produces the declared recorded outcome", () => {
-  it("R2 put throws -> stored_inline_fallback + DEGRADED, body complete inline, never stored_r2", async () => {
-    const sql = new SqliteTestStorage();
+describe("3c contract: per-leg fault injection produces the declared result outcome", () => {
+  it("R2 put throws -> stored_inline_fallback + DEGRADED on the result, body complete inline, never stored_r2", async () => {
+    const { env } = d1();
     const { bucket } = makeBucket({ failPut: true });
     const stored = await storeReportAtGenerationWithR2(
-      sql as unknown as SqlStorage,
-      { REPORTS_BUCKET: bucket } as never,
+      { ...env, REPORTS_BUCKET: bucket } as never,
       input(),
     );
     expect(stored?.created).toBe(true);
@@ -246,105 +270,101 @@ describe("3c contract: per-leg fault injection produces the declared recorded ou
     expect(stored?.fanout.body).toBe("inline_fallback");
     expect(stored?.fanout.code).toBe(DataFoundationCode.REPORT_FANOUT_DEGRADED);
     await flush();
-    const recorded = getCanonicalReportFanoutOutcome(
-      sql as unknown as SqlStorage,
-      stored!.reportId,
-    );
-    expect(recorded?.outcome).toBe("stored_inline_fallback");
-    expect(recorded?.code).toBe(DataFoundationCode.REPORT_FANOUT_DEGRADED);
-    const hit = getCanonicalReport(sql as unknown as SqlStorage, stored!.reportId);
+    const hit = await getCanonicalReport(env, stored!.reportId);
     expect(hit?.bodyR2Key).toBeNull();
     expect(hit?.body).toContain("NVDA");
+    expect(hit?.fanoutOutcome).toBeNull();
   });
 
-  it("Vectorize throws -> vectorize failed + DEGRADED, row intact", async () => {
-    const sql = new SqliteTestStorage();
-    const { env } = makeVectorEnv({ failUpsert: true });
-    const stored = storeReportAtGeneration(
-      sql as unknown as SqlStorage,
-      input(),
-      env as never,
-    );
-    expect(stored?.created).toBe(true);
-    await flush();
-    const recorded = getCanonicalReportFanoutOutcome(
-      sql as unknown as SqlStorage,
-      stored!.reportId,
-    );
-    expect(recorded?.vectorize).toBe("failed");
-    expect(recorded?.code).toBe(DataFoundationCode.REPORT_FANOUT_DEGRADED);
-    expect(getCanonicalReport(sql as unknown as SqlStorage, stored!.reportId)?.body).toContain("NVDA");
+  it("Vectorize throws -> result stays STORED (leg pending at return), row intact, failure logged once, read fanoutOutcome null", async () => {
+    const { env } = d1();
+    const { env: vecEnv } = makeVectorEnv({ failUpsert: true });
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      // Rebase note (#6659/#6550): AI_SEARCH_REPORT_INDEXING_ENABLED
+      // now resolves from environment.config.json (ON in production),
+      // so a bare env no longer means the AI Search leg is off — it
+      // would attempt (no instance here) and log a second
+      // fanout_leg_failed. This test pins the Vectorize leg, so the
+      // AI Search leg stays off explicitly.
+      const stored = await storeReportAtGeneration(input(), { ...env, ...vecEnv, AI_SEARCH_REPORT_INDEXING_ENABLED: "0" } as never);
+      expect(stored?.created).toBe(true);
+      expect(stored?.fanout.vectorize).toBe("pending");
+      expect(stored?.fanout.code).toBe(DataFoundationCode.REPORT_FANOUT_STORED);
+      await flush();
+      // #6101 step 8: the settled "failed" is NO LONGER recorded on
+      // the row (no fan-out column) — the only trace is the warn log.
+      const failed = structuredEvents(infoSpy).filter(
+        (e) => e.operation === "scheduledReports.fanout_leg_failed",
+      );
+      expect(failed).toHaveLength(1);
+      expect(failed[0]?.fields.target).toBe("vectorize");
+      const hit = await getCanonicalReport(env, stored!.reportId);
+      expect(hit?.body).toContain("NVDA");
+      expect(hit?.fanoutOutcome).toBeNull();
+    } finally {
+      infoSpy.mockRestore();
+    }
   });
 
-  it("AI Search upload throws -> aiSearch failed with aiSearchCode upload_failed + DEGRADED", async () => {
-    const sql = new SqliteTestStorage();
+  it("AI Search upload throws -> upload attempted once, failure logged with upload_failed, read fanoutOutcome null", async () => {
+    const { env } = d1();
     const ai = makeAiSearchEnv({ flag: "on", failUpload: true });
-    const stored = storeReportAtGeneration(
-      sql as unknown as SqlStorage,
-      input(),
-      ai.env as never,
-    );
-    await flush();
-    const recorded = getCanonicalReportFanoutOutcome(
-      sql as unknown as SqlStorage,
-      stored!.reportId,
-    );
-    expect(recorded?.aiSearch).toBe("failed");
-    expect(recorded?.aiSearchCode).toBe("upload_failed");
-    expect(recorded?.code).toBe(DataFoundationCode.REPORT_FANOUT_DEGRADED);
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      const stored = await storeReportAtGeneration(input(), { ...env, ...ai.env } as never);
+      expect(stored?.fanout.aiSearch).toBe("pending");
+      await flush();
+      expect(ai.uploads).toHaveLength(1);
+      const failed = structuredEvents(infoSpy).filter(
+        (e) => e.operation === "scheduledReports.fanout_leg_failed",
+      );
+      expect(failed).toHaveLength(1);
+      expect(failed[0]?.fields.target).toBe("ai-search");
+      expect(failed[0]?.fields.code).toBe("upload_failed");
+      const hit = await getCanonicalReport(env, stored!.reportId);
+      expect(hit?.fanoutOutcome).toBeNull();
+    } finally {
+      infoSpy.mockRestore();
+    }
   });
 
-  it("AI Search flag ON but instance unconfigured -> aiSearch failed (not_configured), never a fabricated indexed", async () => {
-    const sql = new SqliteTestStorage();
-    const stored = storeReportAtGeneration(
-      sql as unknown as SqlStorage,
-      input(),
-      { AI_SEARCH_REPORT_INDEXING_ENABLED: "true" } as never,
-    );
-    await flush();
-    const recorded = getCanonicalReportFanoutOutcome(
-      sql as unknown as SqlStorage,
-      stored!.reportId,
-    );
-    expect(recorded?.aiSearch).toBe("failed");
-    expect(recorded?.aiSearchCode).toBe("not_configured");
-    expect(recorded?.code).toBe(DataFoundationCode.REPORT_FANOUT_DEGRADED);
+  it("AI Search flag ON but instance unconfigured -> no upload (never a fabricated indexed), failure logged not_configured", async () => {
+    const { env } = d1();
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      const stored = await storeReportAtGeneration(
+        input(),
+        { ...env, AI_SEARCH_REPORT_INDEXING_ENABLED: "true" } as never,
+      );
+      expect(stored?.fanout.aiSearch).toBe("pending");
+      await flush();
+      const failed = structuredEvents(infoSpy).filter(
+        (e) => e.operation === "scheduledReports.fanout_leg_failed",
+      );
+      expect(failed).toHaveLength(1);
+      expect(failed[0]?.fields.target).toBe("ai-search");
+      expect(failed[0]?.fields.code).toBe("not_configured");
+      const hit = await getCanonicalReport(env, stored!.reportId);
+      expect(hit?.fanoutOutcome).toBeNull();
+    } finally {
+      infoSpy.mockRestore();
+    }
   });
 
   it("row INSERT throws -> null result, no row, no outcome record (REPORT_FANOUT_FAILED member)", async () => {
-    const sql = new SqliteTestStorage();
-    sql.failInserts = true;
+    const env = { AGENT_DB: new FailingInsertD1() as unknown as D1Database };
     // #3515 S3: the fan-out failure now travels as a structured
     // storeReportAtGeneration.failed event (level error) on the
     // console-info JSON fallback, not a console.error line.
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
-      const stored = storeReportAtGeneration(sql as unknown as SqlStorage, input());
+      const stored = await storeReportAtGeneration(input(), env);
       expect(stored).toBeNull();
-      expect(rowCount(sql)).toBe(0);
-      const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
-      for (const call of infoSpy.mock.calls) {
-        try {
-          const parsed = JSON.parse(String(call[0])) as {
-            operation?: unknown;
-            level?: unknown;
-            fields?: unknown;
-          };
-          if (parsed && typeof parsed.operation === "string") {
-            events.push({
-              operation: parsed.operation,
-              level: typeof parsed.level === "string" ? parsed.level : "",
-              fields:
-                parsed.fields && typeof parsed.fields === "object"
-                  ? (parsed.fields as Record<string, unknown>)
-                  : {},
-            });
-          }
-        } catch {
-          // Non-JSON console.info lines are not structured events.
-        }
-      }
-      const failed = events.find((e) => e.operation === "storeReportAtGeneration.failed");
+      expect(await rowCount(env)).toBe(0);
+      const failed = structuredEvents(infoSpy).find(
+        (e) => e.operation === "storeReportAtGeneration.failed",
+      );
       expect(failed).toBeDefined();
       expect(failed?.level).toBe("error");
       expect(failed?.fields.code).toBe(DataFoundationCode.REPORT_FANOUT_FAILED);
@@ -356,155 +376,102 @@ describe("3c contract: per-leg fault injection produces the declared recorded ou
     }
   });
 
-  it("flag OFF: zero instance calls AND aiSearch recorded not_attempted (not failed)", async () => {
-    const sql = new SqliteTestStorage();
+  it("flag OFF: zero instance calls AND aiSearch pending on the result (not failed)", async () => {
+    const { env } = d1();
     // Phase 3 (#6550): AI_SEARCH_REPORT_INDEXING_ENABLED lives in
     // environment.config.json (ON in production), so a bare env no
     // longer means the flag is off.
     const ai = makeAiSearchEnv({ flag: "0" });
-    const stored = storeReportAtGeneration(
-      sql as unknown as SqlStorage,
-      input(),
-      ai.env as never,
-    );
+    const stored = await storeReportAtGeneration(input(), { ...env, ...ai.env } as never);
     await flush();
     expect(ai.uploads).toHaveLength(0);
-    const recorded = getCanonicalReportFanoutOutcome(
-      sql as unknown as SqlStorage,
-      stored!.reportId,
-    );
-    expect(recorded?.aiSearch).toBe("not_attempted");
-    expect(recorded?.code).toBe(DataFoundationCode.REPORT_FANOUT_STORED);
+    // #6101 step 8: the settled "not_attempted" has no recorded home
+    // anymore — the result reads "pending" (unsettled at return) and
+    // the flag discipline shows in zero instance calls, never in a
+    // recorded "failed".
+    expect(stored?.fanout.aiSearch).toBe("pending");
+    expect(stored?.fanout.code).toBe(DataFoundationCode.REPORT_FANOUT_STORED);
+    const hit = await getCanonicalReport(env, stored!.reportId);
+    expect(hit?.fanoutOutcome).toBeNull();
   });
 });
 
-describe("3c contract: dedupe + the retired divergent seam", () => {
-  it("redelivery records outcome deduped and the re-fired legs settle on the record", async () => {
-    const sql = new SqliteTestStorage();
-    const { env, upserts } = makeVectorEnv();
-    const first = storeReportAtGeneration(
-      sql as unknown as SqlStorage,
-      input(),
-      env as never,
-    );
+describe("3c contract: dedupe on the D1 seam", () => {
+  it("redelivery returns outcome deduped and re-fires the legs; one reportId; read fanoutOutcome null", async () => {
+    const { env } = d1();
+    const { env: vecEnv, upserts } = makeVectorEnv();
+    const first = await storeReportAtGeneration(input(), { ...env, ...vecEnv } as never);
     await flush();
-    const second = storeReportAtGeneration(
-      sql as unknown as SqlStorage,
-      input(),
-      env as never,
-    );
+    const second = await storeReportAtGeneration(input(), { ...env, ...vecEnv } as never);
     expect(second?.created).toBe(false);
+    expect(second?.reportId).toBe(first?.reportId);
     expect(second?.fanout.outcome).toBe("deduped");
     await flush();
-    expect(rowCount(sql)).toBe(1);
+    expect(await rowCount(env)).toBe(1);
     expect(upserts).toHaveLength(2); // legs re-fired on redelivery
-    const recorded = getCanonicalReportFanoutOutcome(
-      sql as unknown as SqlStorage,
-      first!.reportId,
-    );
-    expect(recorded?.outcome).toBe("deduped");
-    expect(recorded?.vectorize).toBe("indexed");
+    const hit = await getCanonicalReport(env, first!.reportId);
+    expect(hit?.fanoutOutcome).toBeNull();
   });
 
-  it("persistScheduledReportSql now dedupes and records the full-contract outcome", async () => {
-    const sql = new SqliteTestStorage();
-    const a = persistScheduledReportSql(sql as unknown as SqlStorage, input());
-    const b = persistScheduledReportSql(sql as unknown as SqlStorage, input());
-    expect(a).toBeTruthy();
-    expect(b).toBe(a); // deduped through the canonical seam
-    expect(rowCount(sql)).toBe(1);
+  it("first store returns stored_inline / STORED through the one seam", async () => {
+    const { env } = d1();
+    const stored = await storeReportAtGeneration(input({ generationId: undefined }), env);
+    expect(stored?.reportId).toBeTruthy();
+    expect(stored?.fanout.outcome).toBe("stored_inline");
+    expect(stored?.fanout.code).toBe(DataFoundationCode.REPORT_FANOUT_STORED);
     await flush();
-    const recorded = getCanonicalReportFanoutOutcome(sql as unknown as SqlStorage, a!);
-    expect(recorded?.outcome).toBe("deduped");
-    expect(recorded?.body).toBe("inline");
-    expect(recorded?.vectorize).toBe("not_attempted");
-    expect(recorded?.aiSearch).toBe("not_attempted");
-  });
-
-  it("persistScheduledReportSql first store records stored_inline (not the old silent lesser shape)", async () => {
-    const sql = new SqliteTestStorage();
-    const id = persistScheduledReportSql(
-      sql as unknown as SqlStorage,
-      input({ generationId: undefined }),
-    );
-    expect(id).toBeTruthy();
-    await flush();
-    const recorded = getCanonicalReportFanoutOutcome(sql as unknown as SqlStorage, id!);
-    expect(recorded?.outcome).toBe("stored_inline");
-    expect(recorded?.code).toBe(DataFoundationCode.REPORT_FANOUT_STORED);
+    expect(await rowCount(env)).toBe(1);
   });
 });
 
 describe("3c contract: seam-parity source pins", () => {
   const scheduledSrc = readFileSync("src/services/scheduledReports.ts", "utf8");
 
-  it("exactly one INSERT INTO mas_reports exists in src/, in the shared insert helper, carrying body_r2_key + fanout_outcome", () => {
-    // ADAPTED for #2359 (#1976 step 4d, §7 — in-file
-    // justification): the seam's statements moved behind the
-    // canonical-report WRITE port, completing this contract's
-    // deferred half. The invariant this pin exists for is
-    // unchanged — exactly ONE INSERT INTO mas_reports in src/,
-    // in the ONE shared insert path, carrying body_r2_key +
-    // fanout_outcome — its home is now the write port's DO
-    // adapter (insertRow), and the seam itself holds none.
-    const adapterSrc = readFileSync(
-      "src/data/doSqliteCanonicalReportStoreAdapter.ts",
-      "utf8"
-    );
-    const files = [
-      "src/services/scheduledReports.ts",
-      "src/data/ormFacade.ts",
-      "src/data/doSqliteOrmAdapters.ts",
-      "src/data/ormRepositoryCore.ts",
-      "src/data/doSqliteCanonicalReportStoreAdapter.ts",
-    ];
-    let total = 0;
-    for (const f of files) {
-      const text = readFileSync(f, "utf8");
-      total += (text.match(/INSERT INTO (?:\$\{TABLE\}|\$\{SCHEDULED_REPORTS_TABLE\}|mas_reports)/g) ?? []).length;
-    }
-    expect(total).toBe(1);
-    expect(
-      (scheduledSrc.match(/INSERT INTO \$\{SCHEDULED_REPORTS_TABLE\}/g) ?? []).length,
-    ).toBe(0);
-    const insertStart = adapterSrc.indexOf("INSERT INTO ${TABLE}");
+  it("exactly one D1 agent_reports insert exists in src/, in the adapter's recordReport, carrying bodyR2Key", () => {
+    // #6101 step 8: the seam's ONE insert path moved from the DO
+    // adapter's INSERT INTO mas_reports to the D1 adapter's
+    // Drizzle insert — the invariant is unchanged (exactly ONE
+    // insert path, carrying the body pointer), its home is now
+    // D1AuditReportAdapter.recordReport, and the seam itself
+    // holds no SQL. The fanout_outcome half of the old pin is
+    // dead: D1 carries no fan-out column.
+    const adapterSrc = readFileSync("src/data/d1AuditReportAdapter.ts", "utf8");
+    const insertSites = (adapterSrc.match(/\.insert\(agentReports\)/g) ?? []).length;
+    expect(insertSites).toBe(1);
+    const insertStart = adapterSrc.indexOf(".insert(agentReports)");
     expect(insertStart).toBeGreaterThan(-1);
-    const insertText = adapterSrc.slice(insertStart, insertStart + 400);
-    expect(insertText).toContain("body_r2_key");
-    expect(insertText).toContain("fanout_outcome");
+    const insertText = adapterSrc.slice(insertStart, insertStart + 1200);
+    expect(insertText).toContain("bodyR2Key");
+    expect(insertText).toContain("onConflictDoNothing");
+    // No INSERT INTO mas_reports text remains anywhere in the seam.
+    expect(scheduledSrc).not.toContain("INSERT INTO mas_reports");
+    expect(scheduledSrc).not.toContain("INSERT INTO ${TABLE}");
   });
 
-  it("persistScheduledReportSql delegates to the seam and is deprecated with its successor named", () => {
-    const start = scheduledSrc.indexOf("export function persistScheduledReportSql");
-    expect(start).toBeGreaterThan(-1);
-    const body = scheduledSrc.slice(start, start + 900);
-    expect(body).toContain("storeReportAtGeneration(sql, input)");
-    expect(body).not.toContain("INSERT INTO");
-    const docStart = scheduledSrc.lastIndexOf("/**", start);
-    const doc = scheduledSrc.slice(docStart, start);
-    expect(doc).toContain("@deprecated");
-    expect(doc).toContain("storeReportAtGeneration");
-  });
+  // DELETED #6101 step 8: "persistScheduledReportSql delegates to the
+  // seam and is deprecated with its successor named" — the wrapper is
+  // deleted with the DO write; there is nothing left to delegate.
 
   it("no index leg is fired with a discarded (bare void) result anymore", () => {
     // ADAPTED for #3527 S1 (§7 — in-file justification): the
     // leg invocations moved out of the seam into the publish
     // stage (src/services/documentPublish.ts); the seam's
     // fireFanoutIndexLegs now delegates to publishDocument and
-    // records from the stage's per-target settled outcomes.
-    // The invariant this pin exists for is unchanged — every
-    // leg invocation's result is consumed by a recording path
-    // and none is discarded — asserted at its new homes: the
-    // seam holds NO leg invocation at all, the stage turns
-    // every invocation into a settled outcome, and the seam
-    // records those outcomes via recordFanoutLegOutcome.
+    // consumes the stage's per-target settled outcomes.
+    // ADAPTED for #6101 step 8: the outcomes are NO LONGER
+    // recorded on the row (recordFanoutLegOutcome deleted with
+    // the DO row) — the settled outcomes are consumed by the
+    // log-only handler, which is the consumption this pin now
+    // asserts: every leg invocation's result still reaches a
+    // named sink, none is discarded.
     const stageSrc = readFileSync("src/services/documentPublish.ts", "utf8");
     expect(scheduledSrc).not.toMatch(/void indexCanonicalReport/);
     expect(scheduledSrc).not.toContain("indexCanonicalReport(");
     expect(scheduledSrc).not.toContain("indexCanonicalReportInAiSearch(");
     expect(scheduledSrc).toContain("publishDocument(");
     expect(scheduledSrc).toContain("fireFanoutIndexLegs(");
-    expect(scheduledSrc).toContain("recordFanoutLegOutcome(");
+    expect(scheduledSrc).not.toContain("recordFanoutLegOutcome(");
+    expect(scheduledSrc).toContain("scheduledReports.fanout_leg_failed");
     // The stage discards nothing either: no bare-void call
     // expression exists in it, and both default executors are
     // wired as the stage's legs.

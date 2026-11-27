@@ -4,8 +4,7 @@
  * CHARACTERIZATION pins for the canonical report fan-out
  * (src/services/scheduledReports.ts), written against the
  * UNMODIFIED code before the fan-out contract change. They pin
- * the as-found behaviour of BOTH store seams plus the divergent
- * third seam (persistScheduledReportSql):
+ * the as-found behaviour of BOTH store seams:
  *
  *  - sync seam (storeReportAtGeneration): inline row, NULL
  *    body_r2_key, generation-id dedupe, owner refusal, the
@@ -20,25 +19,23 @@
  *  - a failing index leg (as-found): the store still succeeds
  *    and the row stays intact — the failure is recorded
  *    NOWHERE on the row (that gap is what the new-contract
- *    pins in report_fanout_step3c_contract_2347.test.ts close);
- *  - persistScheduledReportSql (as-found divergence): its own
- *    INSERT populates generation_id + user_login but NOT
- *    body_r2_key, fires no index legs (it takes no env), and
- *    does not dedupe on generation id.
+ *    pins in report_fanout_step3c_contract_2347.test.ts close).
  *
- * These pins must be green before the change and green after
- * it — the contract slice records outcomes and retires the
- * divergent seam INTO the canonical seam without changing
- * the successful-path behaviour pinned here (the retired
- * seam's own divergence pins live in the contract file,
- * because that behaviour intentionally changes).
+ * Issue #6101 (step 8): the seams write/read D1 agent_reports
+ * now — the DO mas_reports table is frozen at cutover and
+ * receives no new writes. "Exactly one row" is pinned as
+ * exactly one report id through the D1 readers, and a failing
+ * Vectorize leg leaves fanoutOutcome NULL on the read-back
+ * (TRUE BY DESIGN now: D1 carries no fan-out column — the
+ * named loss). The third seam (persistScheduledReportSql) is
+ * DELETED, so its "divergent seam" describe block was deleted
+ * with it (3 tests: inline row with generation_id + user_login,
+ * no-dedupe two rows, null on a broken store).
  *
- * DOUBLES: node:sqlite-backed SqlStorage (real SQLite
- * semantics, the step-3a/3b characterization precedent).
+ * DOUBLES: shared MockD1Database over node:sqlite.
  *
  * #CDO-mha7
  */
-import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 
 // The AI Search leg pulls the Think-coupled module graph; mock
@@ -55,25 +52,26 @@ vi.mock("../src/actors/thinkAdapter", () => ({
 }));
 
 import {
-  ensureScheduledReportsTable,
   getCanonicalReport,
-  persistScheduledReportSql,
+  listScheduledReports,
   storeReportAtGeneration,
   storeReportAtGenerationWithR2,
   type ScheduledReportInput,
 } from "../src/services/scheduledReports";
-import type { SqlStorage } from "../src/orm";
+import { MockD1Database } from "./mock-d1";
 
-class SqliteTestStorage {
-  readonly sqlite = new DatabaseSync(":memory:");
-  exec(query: string, ...params: unknown[]): unknown[] {
-    const stmt = this.sqlite.prepare(query);
-    if (/^\s*(SELECT|PRAGMA)/i.test(query)) {
-      return stmt.all(...(params as never[])) as unknown[];
-    }
-    stmt.run(...(params as never[]));
-    return [];
-  }
+type D1Database = any;
+
+function d1Env() {
+  const mock = new MockD1Database();
+  const env = { AGENT_DB: mock as unknown as D1Database, IAAA_TENANT_ID: "tenant-2347" };
+  return { mock, env };
+}
+
+/** Distinct D1 report ids visible through the Reports-route list. */
+async function reportIds(env: { AGENT_DB: D1Database }): Promise<string[]> {
+  const hits = await listScheduledReports(env, { limit: 100 });
+  return [...new Set(hits.map((h) => h.id))];
 }
 
 const flush = async () => {
@@ -93,10 +91,6 @@ function input(over: Partial<ScheduledReportInput> = {}): ScheduledReportInput {
     userLogin: "tenant@example.com",
     ...over,
   };
-}
-
-function rows(sql: SqliteTestStorage): Array<Record<string, unknown>> {
-  return sql.exec(`SELECT * FROM mas_reports`) as Array<Record<string, unknown>>;
 }
 
 function makeVectorEnv(opts: { failUpsert?: boolean } = {}) {
@@ -158,98 +152,85 @@ function makeBucket(opts: { failPut?: boolean; onPut?: () => void } = {}) {
 }
 
 describe("3c characterization: sync seam (storeReportAtGeneration)", () => {
-  it("fresh store writes one inline row (body inline, body_r2_key NULL)", () => {
-    const sql = new SqliteTestStorage();
-    const stored = storeReportAtGeneration(sql as unknown as SqlStorage, input());
+  it("fresh store writes one inline row (body inline, bodyR2Key null)", async () => {
+    const { env } = d1Env();
+    const stored = await storeReportAtGeneration(input(), env);
     expect(stored?.created).toBe(true);
-    const all = rows(sql);
-    expect(all).toHaveLength(1);
-    expect(all[0].id).toBe(stored!.reportId);
-    expect(all[0].body_r2_key).toBeNull();
-    expect(JSON.parse(String(all[0].body))).toEqual({
+    expect(await reportIds(env)).toHaveLength(1);
+    const hit = await getCanonicalReport(env, stored!.reportId);
+    expect(hit).not.toBeNull();
+    expect(hit!.id).toBe(stored!.reportId);
+    expect(hit!.bodyR2Key).toBeNull();
+    expect(JSON.parse(String(hit!.body))).toEqual({
       opportunities: [{ symbol: "NVDA", structure: "call spread" }],
     });
-    expect(all[0].generation_id).toBe("gen-3c-char");
-    expect(all[0].user_login).toBe("tenant@example.com");
+    expect(hit!.generationId).toBe("gen-3c-char");
+    expect(hit!.userLogin).toBe("tenant@example.com");
   });
 
-  it("redelivery dedupes on (generation_id, owner): created:false, one row", () => {
-    const sql = new SqliteTestStorage();
-    const first = storeReportAtGeneration(sql as unknown as SqlStorage, input());
-    const second = storeReportAtGeneration(sql as unknown as SqlStorage, input());
+  it("redelivery dedupes on (generation_id, owner): created:false, one row", async () => {
+    const { env } = d1Env();
+    const first = await storeReportAtGeneration(input(), env);
+    const second = await storeReportAtGeneration(input(), env);
     expect(first?.created).toBe(true);
     expect(second?.created).toBe(false);
     expect(second?.reportId).toBe(first!.reportId);
-    expect(rows(sql)).toHaveLength(1);
+    expect(await reportIds(env)).toHaveLength(1);
   });
 
   it("ownerless input is refused (null, no row) on every seam", async () => {
-    const sql = new SqliteTestStorage();
-    ensureScheduledReportsTable(sql as unknown as SqlStorage);
+    const { env } = d1Env();
     const noOwner = input({ userLogin: "" });
-    expect(storeReportAtGeneration(sql as unknown as SqlStorage, noOwner)).toBeNull();
-    await expect(
-      storeReportAtGenerationWithR2(sql as unknown as SqlStorage, {}, noOwner),
-    ).resolves.toBeNull();
-    expect(persistScheduledReportSql(sql as unknown as SqlStorage, noOwner)).toBeNull();
-    expect(rows(sql)).toHaveLength(0);
+    expect(await storeReportAtGeneration(noOwner, env)).toBeNull();
+    expect(await storeReportAtGenerationWithR2(env, noOwner)).toBeNull();
+    expect(await reportIds(env)).toHaveLength(0);
   });
 
   it("without env bindings the Vectorize leg does not fire", async () => {
-    const sql = new SqliteTestStorage();
-    const { env, upserts } = makeVectorEnv();
-    const stored = storeReportAtGeneration(sql as unknown as SqlStorage, input());
+    const { env } = d1Env();
+    const { upserts } = makeVectorEnv();
+    const stored = await storeReportAtGeneration(input(), env);
     expect(stored?.created).toBe(true);
     await flush();
     expect(upserts).toHaveLength(0);
-    void env;
   });
 
   it("with env bindings the Vectorize leg upserts report:<id> once", async () => {
-    const sql = new SqliteTestStorage();
-    const { env, upserts } = makeVectorEnv();
-    const stored = storeReportAtGeneration(
-      sql as unknown as SqlStorage,
-      input(),
-      env as never,
-    );
+    const { env } = d1Env();
+    const { env: vecEnv, upserts } = makeVectorEnv();
+    const stored = await storeReportAtGeneration(input(), { ...env, ...vecEnv });
     await flush();
     expect(upserts).toHaveLength(1);
     expect(upserts[0].id).toBe(`report:${stored!.reportId}`);
   });
 
-  it("a failing Vectorize leg leaves the stored row intact (as-found: failure recorded nowhere on the row)", async () => {
-    const sql = new SqliteTestStorage();
-    const { env } = makeVectorEnv({ failUpsert: true });
-    const stored = storeReportAtGeneration(
-      sql as unknown as SqlStorage,
-      input(),
-      env as never,
-    );
+  it("a failing Vectorize leg leaves the stored row intact (failure recorded nowhere on the row — fanoutOutcome null by design)", async () => {
+    const { env } = d1Env();
+    const { env: vecEnv } = makeVectorEnv({ failUpsert: true });
+    const stored = await storeReportAtGeneration(input(), { ...env, ...vecEnv });
     expect(stored?.created).toBe(true);
     await flush();
-    const hit = getCanonicalReport(sql as unknown as SqlStorage, stored!.reportId);
+    const hit = await getCanonicalReport(env, stored!.reportId);
     expect(hit?.title).toBe("Fan-out characterization report");
     expect(hit?.body).toContain("NVDA");
+    // D1 carries no fan-out column: the failure is recorded nowhere
+    // on the row — true by design on the D1 seam (#6101 step 8).
+    expect(hit?.fanoutOutcome).toBeNull();
   });
 
   it("AI Search leg: flag OFF makes zero instance uploads; flag ON uploads once", async () => {
-    const sqlOff = new SqliteTestStorage();
+    const { env: envOff } = d1Env();
     // Phase 3 (#6550): AI_SEARCH_REPORT_INDEXING_ENABLED lives in
     // environment.config.json (ON in production), so a bare env no
     // longer means the flag is off.
     const off = makeAiSearchEnv({ flag: "0" });
-    storeReportAtGeneration(sqlOff as unknown as SqlStorage, input(), off.env as never);
+    await storeReportAtGeneration(input(), { ...envOff, ...off.env });
     await flush();
     expect(off.uploads).toHaveLength(0);
 
-    const sqlOn = new SqliteTestStorage();
+    const { env: envOn } = d1Env();
     const on = makeAiSearchEnv({ flag: "true" });
-    const stored = storeReportAtGeneration(
-      sqlOn as unknown as SqlStorage,
-      input(),
-      on.env as never,
-    );
+    const stored = await storeReportAtGeneration(input(), { ...envOn, ...on.env });
     await flush();
     expect(on.uploads).toHaveLength(1);
     expect(on.uploads[0].name).toBe(`report:${stored!.reportId}`);
@@ -258,111 +239,60 @@ describe("3c characterization: sync seam (storeReportAtGeneration)", () => {
 
 describe("3c characterization: R2 seam (storeReportAtGenerationWithR2)", () => {
   it("ordering: the R2 put happens BEFORE the row insert that references its key", async () => {
-    const sql = new SqliteTestStorage();
+    const { mock, env: baseEnv } = d1Env();
     let rowsAtPutTime = -1;
     const { bucket, objects } = makeBucket({
       onPut: () => {
-        rowsAtPutTime = rows(sql).length;
+        rowsAtPutTime = Number(
+          (
+            mock.sqlite
+              .prepare("SELECT COUNT(*) AS c FROM agent_reports")
+              .get() as { c: number }
+          ).c,
+        );
       },
     });
-    const stored = await storeReportAtGenerationWithR2(
-      sql as unknown as SqlStorage,
-      { REPORTS_BUCKET: bucket } as never,
-      input(),
-    );
+    const env = { ...baseEnv, REPORTS_BUCKET: bucket };
+    const stored = await storeReportAtGenerationWithR2(env, input());
     expect(stored?.created).toBe(true);
     expect(rowsAtPutTime).toBe(0);
-    const all = rows(sql);
-    expect(all).toHaveLength(1);
-    expect(all[0].body).toBe("");
-    expect(all[0].body_r2_key).toBe(`reports/${stored!.reportId}.json`);
+    expect(await reportIds(env)).toHaveLength(1);
+    const hit = await getCanonicalReport(env, stored!.reportId);
+    expect(hit!.body).toBe("");
+    expect(hit!.bodyR2Key).toBe(`reports/${stored!.reportId}.json`);
     expect(objects.get(`reports/${stored!.reportId}.json`)).toContain("NVDA");
   });
 
   it("a failed R2 put falls back to the inline shape (report never lost)", async () => {
-    const sql = new SqliteTestStorage();
+    const { env: baseEnv } = d1Env();
     const { bucket } = makeBucket({ failPut: true });
-    const stored = await storeReportAtGenerationWithR2(
-      sql as unknown as SqlStorage,
-      { REPORTS_BUCKET: bucket } as never,
-      input(),
-    );
+    const env = { ...baseEnv, REPORTS_BUCKET: bucket };
+    const stored = await storeReportAtGenerationWithR2(env, input());
     expect(stored?.created).toBe(true);
-    const all = rows(sql);
-    expect(all).toHaveLength(1);
-    expect(all[0].body_r2_key).toBeNull();
-    expect(String(all[0].body)).toContain("NVDA");
+    expect(await reportIds(env)).toHaveLength(1);
+    const hit = await getCanonicalReport(env, stored!.reportId);
+    expect(hit!.bodyR2Key).toBeNull();
+    expect(String(hit!.body)).toContain("NVDA");
   });
 
   it("an unbound bucket is the plain inline write", async () => {
-    const sql = new SqliteTestStorage();
-    const stored = await storeReportAtGenerationWithR2(
-      sql as unknown as SqlStorage,
-      {} as never,
-      input(),
-    );
+    const { env } = d1Env();
+    const stored = await storeReportAtGenerationWithR2(env, input());
     expect(stored?.created).toBe(true);
-    expect(rows(sql)[0].body_r2_key).toBeNull();
-    expect(String(rows(sql)[0].body)).toContain("NVDA");
+    const hit = await getCanonicalReport(env, stored!.reportId);
+    expect(hit!.bodyR2Key).toBeNull();
+    expect(String(hit!.body)).toContain("NVDA");
   });
 
   it("dedupe never rewrites the R2 object and never duplicates the row", async () => {
-    const sql = new SqliteTestStorage();
+    const { env: baseEnv } = d1Env();
     const { bucket, objects } = makeBucket();
-    const first = await storeReportAtGenerationWithR2(
-      sql as unknown as SqlStorage,
-      { REPORTS_BUCKET: bucket } as never,
-      input(),
-    );
-    const second = await storeReportAtGenerationWithR2(
-      sql as unknown as SqlStorage,
-      { REPORTS_BUCKET: bucket } as never,
-      input({ body: { changed: true } }),
-    );
+    const env = { ...baseEnv, REPORTS_BUCKET: bucket };
+    const first = await storeReportAtGenerationWithR2(env, input());
+    const second = await storeReportAtGenerationWithR2(env, input({ body: { changed: true } }));
     expect(second?.created).toBe(false);
     expect(second?.reportId).toBe(first!.reportId);
-    expect(rows(sql)).toHaveLength(1);
+    expect(await reportIds(env)).toHaveLength(1);
     expect(objects.get(`reports/${first!.reportId}.json`)).toContain("NVDA");
-  });
-});
-
-describe("3c characterization: divergent seam (persistScheduledReportSql, as-found)", () => {
-  it("writes an inline row with generation_id + user_login but body_r2_key NULL", () => {
-    const sql = new SqliteTestStorage();
-    const id = persistScheduledReportSql(sql as unknown as SqlStorage, input());
-    expect(id).toBeTruthy();
-    const all = rows(sql);
-    expect(all).toHaveLength(1);
-    expect(all[0].id).toBe(id);
-    expect(all[0].generation_id).toBe("gen-3c-char");
-    expect(all[0].user_login).toBe("tenant@example.com");
-    // The divergence: no body_r2_key value, ever, on this seam.
-    expect(all[0].body_r2_key).toBeNull();
-    expect(String(all[0].body)).toContain("NVDA");
-  });
-
-  it("does not dedupe: two calls without a generation id write two rows", () => {
-    const sql = new SqliteTestStorage();
-    const a = persistScheduledReportSql(
-      sql as unknown as SqlStorage,
-      input({ generationId: undefined }),
-    );
-    const b = persistScheduledReportSql(
-      sql as unknown as SqlStorage,
-      input({ generationId: undefined }),
-    );
-    expect(a).toBeTruthy();
-    expect(b).toBeTruthy();
-    expect(a).not.toBe(b);
-    expect(rows(sql)).toHaveLength(2);
-  });
-
-  it("returns null (never throws) on a broken store", () => {
-    const broken = {
-      exec: () => {
-        throw new Error("boom");
-      },
-    } as unknown as SqlStorage;
-    expect(persistScheduledReportSql(broken, input())).toBeNull();
   });
 });
