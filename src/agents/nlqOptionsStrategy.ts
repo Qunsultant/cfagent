@@ -803,7 +803,7 @@ async function runComparisonAction(
     // control action can address it; absent, in-memory stores
     // (the #4069 accepted-absent discipline).
     ...(deps.engineSql
-      ? { engineStores: optionsEngineStoresFromSql(deps.engineSql) }
+      ? { engineStores: optionsEngineStoresFromSql(deps.engineSql, deps.env) }
       : {}),
   });
   if (!outcome.ok || !outcome.result) {
@@ -967,7 +967,7 @@ export async function runOptionsStrategyAction(
       // copilot turn can address it; absent, in-memory stores
       // (the #4069 accepted-absent discipline).
       ...(deps?.engineSql
-        ? { engineStores: optionsEngineStoresFromSql(deps.engineSql) }
+        ? { engineStores: optionsEngineStoresFromSql(deps.engineSql, deps.env) }
         : {}),
     },
   );
@@ -1209,7 +1209,7 @@ async function runDiscoveryAction(
     // later per-stage control action can address them; absent,
     // in-memory stores (the #4069 accepted-absent discipline).
     ...(deps.engineSql
-      ? { engineStores: optionsEngineStoresFromSql(deps.engineSql) }
+      ? { engineStores: optionsEngineStoresFromSql(deps.engineSql, deps.env) }
       : {}),
   });
   return {
@@ -1599,7 +1599,7 @@ async function runOpportunityScan(
         // engine run durably in the host DO for later per-stage
         // control; absent, in-memory stores.
         ...(deps?.engineSql
-          ? { engineStores: optionsEngineStoresFromSql(deps.engineSql) }
+          ? { engineStores: optionsEngineStoresFromSql(deps.engineSql, deps.env) }
           : {}),
       },
     );

@@ -15,11 +15,11 @@
  */
 import { vocabularyDefaults } from "../config/vocabulary";
 
-import { DoSqliteJobOutcomeStore } from "../data/doSqliteJobOutcomeAdapter";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
-import { projectJobOutcomeBestEffort } from "./runLedgerProjectionHooks";
 import type { Env } from "../types";
+import { createJobRunRecordAdapter } from "../data/createJobRunRecordPorts";
+import { resolveIaaaTenant } from "../security/iaaaGithubEndToEnd";
 import type { SqlStorage } from "../orm";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
@@ -94,63 +94,66 @@ export function tradingRunOutcomeId(orderId: string): string {
 export async function recordTradingRunOutcome(
   sql: SqlStorage | null | undefined,
   input: TradingRunOutcomeInput,
-  // Issue #6006 — when the caller passes `project` (its env + owning
-  // login), the outcome facts also fold into the one run source (D1)
-  // through the shared projector; best-effort, never fails the run.
+  // Issue #6101 — when the caller passes `project` (its env), the
+  // outcome facts fold directly onto the D1 run ledger; best-effort,
+  // never fails the run.
   project?: { env: Partial<Env>; userLogin?: string | null },
 ): Promise<void> {
-  if (!sql) return;
+  // Issue #6101 — `sql` is kept for call compatibility only; the
+  // outcome no longer touches the DO. The fold runs when the caller
+  // passes `project` (its env).
+  void sql;
   try {
-    // The production adapter, not the deprecated re-export shim: new code
-    // takes the port, never the shim.
-    const store = new DoSqliteJobOutcomeStore(sql);
-    store.ensureTables();
-    store.record({
-      id: tradingRunOutcomeId(input.orderId),
-      kind: "trading",
-      trigger: "manual",
-      status: input.status,
-      // One order attempt is one unit: scanned=1, matched=1 only when the
-      // broker accepted the draft/order. A refusal records matched=0. A
-      // batch cancel supplies its own counts (#3884/#3885).
-      scanned: input.scanned ?? 1,
-      matched: input.matched ?? (input.status === "completed" ? 1 : 0),
-      ...(input.codedError ? { codedError: input.codedError } : {}),
-      deliveryStates: {
-        broker: input.broker ?? vocabularyDefaults().broker,
-        mode: input.mode ?? vocabularyDefaults().mode,
-        action: input.action,
-        symbol: input.symbol ?? "",
-        quantity: input.quantity !== undefined ? String(input.quantity) : "",
-        orderType: input.orderType ?? "",
-        orderClass: input.orderClass ?? "",
-        ...(input.priceSource ? { priceSource: input.priceSource } : {}),
-        ...(input.takeProfitPercent !== undefined
-          ? { takeProfitPercent: String(input.takeProfitPercent) }
-          : {}),
-        ...(input.stopLossPercent !== undefined
-          ? { stopLossPercent: String(input.stopLossPercent) }
-          : {}),
-        ...(input.takeProfitPrice !== undefined
-          ? { takeProfitPrice: String(input.takeProfitPrice) }
-          : {}),
-        ...(input.stopLossPrice !== undefined
-          ? { stopLossPrice: String(input.stopLossPrice) }
-          : {}),
-        ...(input.slackNotification ? { slackNotification: input.slackNotification } : {}),
-        ...(input.emailNotification ? { emailNotification: input.emailNotification } : {}),
-        ...(input.cancelOutcome ? { outcome: input.cancelOutcome } : {}),
-        ...(input.brokerStatus ? { brokerStatus: input.brokerStatus } : {}),
-      },
-      origin: input.origin,
-    });
+    // Issue #6101 — the outcome folds directly onto D1 (no DO row,
+    // no projection); best-effort, never fails the run.
     if (project?.env) {
-      await projectJobOutcomeBestEffort({
-        env: project.env,
-        sql,
-        outcomeId: tradingRunOutcomeId(input.orderId),
-        userLogin: project.userLogin ?? null,
-      });
+      const ledgerStore = createJobRunRecordAdapter(project.env);
+      if (!ledgerStore) {
+        throw new Error("[run-ledger] D1 run-ledger binding unbound (AGENT_DB) (#6101).");
+      }
+      await ledgerStore.foldJobOutcome(
+        {
+          id: tradingRunOutcomeId(input.orderId),
+          kind: "trading",
+          trigger: "manual",
+          status: input.status,
+        // One order attempt is one unit: scanned=1, matched=1 only when the
+        // broker accepted the draft/order. A refusal records matched=0. A
+        // batch cancel supplies its own counts (#3884/#3885).
+        scanned: input.scanned ?? 1,
+        matched: input.matched ?? (input.status === "completed" ? 1 : 0),
+        ...(input.codedError ? { codedError: input.codedError } : {}),
+        deliveryStates: {
+          broker: input.broker ?? vocabularyDefaults().broker,
+          mode: input.mode ?? vocabularyDefaults().mode,
+          action: input.action,
+          symbol: input.symbol ?? "",
+          quantity: input.quantity !== undefined ? String(input.quantity) : "",
+          orderType: input.orderType ?? "",
+          orderClass: input.orderClass ?? "",
+          ...(input.priceSource ? { priceSource: input.priceSource } : {}),
+          ...(input.takeProfitPercent !== undefined
+            ? { takeProfitPercent: String(input.takeProfitPercent) }
+            : {}),
+          ...(input.stopLossPercent !== undefined
+            ? { stopLossPercent: String(input.stopLossPercent) }
+            : {}),
+          ...(input.takeProfitPrice !== undefined
+            ? { takeProfitPrice: String(input.takeProfitPrice) }
+            : {}),
+          ...(input.stopLossPrice !== undefined
+            ? { stopLossPrice: String(input.stopLossPrice) }
+            : {}),
+          ...(input.slackNotification ? { slackNotification: input.slackNotification } : {}),
+          ...(input.emailNotification ? { emailNotification: input.emailNotification } : {}),
+          ...(input.cancelOutcome ? { outcome: input.cancelOutcome } : {}),
+          ...(input.brokerStatus ? { brokerStatus: input.brokerStatus } : {}),
+        },
+          origin: input.origin,
+        },
+        resolveIaaaTenant(project.env),
+        Date.now(),
+      );
     }
   } catch (error) {
     structuredLog.warn("tradingRunOutcome.record_failed", {

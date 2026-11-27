@@ -596,9 +596,16 @@ describe("S0-P23 keyless options runs (B-T4-05): a keyless run is recorded, neve
 
 describe("S0-P24 ledger gap (B-L-01/02/03): S1 closes B-L-01 on job_run_records; #3314 closes B-L-03 on mas_opportunity_scans; B-L-02 remains", () => {
   it("pins job_run_records as carrying the four §4 linkage columns (B-L-01 closed by S1)", () => {
-    const adapter = read("src/data/doSqliteJobRunRecordAdapter.ts");
-    for (const col of ["trigger_text", "schedule_id", "async_job_id", "workflow_id"]) {
-      expect(adapter).toContain(col);
+    // Issue #6101 — the DO adapter is deleted; the linkage columns
+    // live on the D1 writer now.
+    const adapter = read("src/data/d1JobRunRecordAdapter.ts");
+    for (const mapping of [
+      "triggerText: record.trigger ?? null",
+      "scheduleId: record.scheduleId ?? null",
+      "asyncJobId: record.asyncJobId ?? null",
+      "workflowId: record.workflowId ?? null",
+    ]) {
+      expect(adapter).toContain(mapping);
     }
   });
 

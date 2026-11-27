@@ -2,6 +2,12 @@ import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import { buildReplayFromRecord } from "../src/workflows/reportReplay";
 import { getScheduledReportByRunId } from "../src/services/scheduledReports";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditReportDb,
+  D1AuditReportAdapter,
+  ensureAuditReportSchema,
+} from "../src/data/d1AuditReportAdapter";
 
 const FULL_BODY = {
   timestamp: "2026-10-30T09:30:00.000Z",
@@ -122,38 +128,46 @@ describe("report replay #2863", () => {
     expect(env.charged).toBe(false);
   });
 
-  it("getScheduledReportByRunId resolves by stored run_id, owner-scoped", () => {
-    const row = {
-      id: "rep-1",
-      run_id: "screener:2026-10-30T09:30:00.000Z",
+  it("getScheduledReportByRunId resolves by stored run_id, owner-scoped", async () => {
+    // #6101: the lookup reads D1 now (first arg is env, async) —
+    // seed the row there with an explicit reportId; the DO fake
+    // is gone. Owner scoping is the D1 adapter's userLogin filter.
+    const d1 = new MockD1Database();
+    const auditDb = createD1AuditReportDb(d1 as never);
+    await ensureAuditReportSchema(auditDb);
+    const audit = new D1AuditReportAdapter(auditDb);
+    const createdAtMs = Date.parse("2026-10-30T09:30:00.000Z");
+    await audit.recordReport({
+      tenantId: "primary",
+      workspaceId: "primary",
+      reportId: "rep-1",
+      runId: "screener:2026-10-30T09:30:00.000Z",
+      generationId: "screener:2026-10-30T09:30:00.000Z",
       title: "Market screen — TECH",
       source: "screener",
       summary: "",
       body: JSON.stringify(FULL_BODY),
-      created_at: "2026-10-30T09:30:00.000Z",
-      body_r2_key: "",
-      fanout_outcome: "",
-    };
-    const sql = {
-      exec: (query: string, ...params: unknown[]) => {
-        if (String(query).includes("FROM mas_reports WHERE run_id")) {
-          // Simulate the owner filter: only the owning login sees the row.
-          if (params[1] && params[1] !== "alice") return [];
-          return [row];
-        }
-        return [];
-      },
-    };
-    const hit = getScheduledReportByRunId(sql as never, "screener:2026-10-30T09:30:00.000Z", {
+      createdAtMs,
+      updatedAtMs: createdAtMs,
+      version: 1,
+      provenanceWriter: "test-d1-seed",
+      provenanceSourceDo: "test",
+      provenanceSourceVersion: "1",
+      linkedJobRunId: null,
+      userLogin: "alice",
+      bodyR2Key: null,
+    });
+    const env = { AGENT_DB: d1 };
+    const hit = await getScheduledReportByRunId(env, "screener:2026-10-30T09:30:00.000Z", {
       userLogin: "alice",
     });
     expect(hit?.id).toBe("rep-1");
     expect(hit?.runId).toBe("screener:2026-10-30T09:30:00.000Z");
     expect(
-      getScheduledReportByRunId(sql as never, "screener:2026-10-30T09:30:00.000Z", {
+      await getScheduledReportByRunId(env, "screener:2026-10-30T09:30:00.000Z", {
         userLogin: "mallory",
       }),
     ).toBeNull();
-    expect(getScheduledReportByRunId(sql as never, "", { userLogin: "alice" })).toBeNull();
+    expect(await getScheduledReportByRunId(env, "", { userLogin: "alice" })).toBeNull();
   });
 });

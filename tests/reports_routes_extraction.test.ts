@@ -13,6 +13,8 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
 import { handleReportsRoutes, type ReportsRouteContext } from "../src/agents/routes/reports";
+import { MockD1Database as SharedMockD1Database } from "./mock-d1";
+import { storeReportAtGeneration } from "../src/services/scheduledReports";
 
 const src = (rel: string) => readFileSync(`src/${rel}`, "utf8");
 
@@ -350,13 +352,24 @@ describe("handleReportsRoutes behavior", () => {
   });
 
   it("GET /reports lists the stored canonical reports", async () => {
+    // #6101: the list reads D1 now (listScheduledReports) — seed
+    // the canonical row there; the DO mas_reports seed is gone.
+    const d1 = new SharedMockD1Database();
+    await storeReportAtGeneration(
+      {
+        runId: "g1",
+        generationId: "g1",
+        title: "T1",
+        source: "research_report",
+        summary: "s",
+        body: {},
+        userLogin: "tester",
+      } as never,
+      { AGENT_DB: d1 },
+    );
     const ctx = baseCtx({
-      ensureTables: () =>
-        makeSql({
-          mas_reports: [
-            { id: "r1", runId: "g1", title: "T1", source: "research_report", summary: "s", createdAt: "2026-10-19T00:00:00Z" },
-          ],
-        }),
+      env: { AGENT_DB: d1 },
+      ensureTables: () => makeSql({}),
     });
     const url = new URL("https://agent.internal/api/reports");
     const res = await handleReportsRoutes(req("GET", "/api/reports"), url, "/api/reports", "sess", ctx);

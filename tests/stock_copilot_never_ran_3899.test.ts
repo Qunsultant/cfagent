@@ -137,7 +137,10 @@ import { introspectStockCopilot } from "../src/services/stockCopilotIntrospectio
 import { handleStockCopilotRoutes } from "../src/agents/routes/stockCopilot";
 import { InMemoryCommercialAdapter } from "../src/data/inMemoryCommercialAdapter";
 import { resolveIaaaTenant } from "../src/security/iaaaGithubEndToEnd";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
 import { buildJobRunRecord } from "../src/services/jobRunRecords";
 import {
   declareStockCopilotTasks,
@@ -150,6 +153,40 @@ import { InMemoryIndexListStore } from "../src/data/inMemoryIndexListAdapter";
 import { PRESET_UNIVERSES } from "../src/services/stockCopilotConfiguration";
 import { BROKER_ENVIRONMENT_SETTING_KEY } from "../src/agents/routes/brokerEnvironment";
 import type { IndexMember } from "../src/trading";
+
+/** Minimal D1Database stand-in over node:sqlite (the #6101 double). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: { changes: info.changes, last_row_id: info.lastInsertRowid },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+}
 
 /** A Wednesday inside market hours (15:00 UTC = 10:00 ET, EST). */
 const MARKET_OPEN_NOW = () => new Date("2026-11-04T15:00:00Z");
@@ -397,6 +434,9 @@ async function emptyCommercial(): Promise<InMemoryCommercialAdapter> {
 function makeDoorCtx(
   sql: SqliteTestStorage,
   overrides: Partial<StockCopilotDoorContext> = {},
+  // Issue #6101 — the door reads the D1 ledger: pass the mock
+  // binding and the seeded row becomes visible to the status read.
+  d1?: MockD1Database,
 ): StockCopilotDoorContext {
   const settings = new Map<string, string>([
     ["stock_copilot:sessions", "pre_market,regular,after_hours,exto"],
@@ -405,6 +445,7 @@ function makeDoorCtx(
     env: {
       STOCK_COPILOT_PAPER_ENABLED: "1",
       STOCK_COPILOT_AROUND_THE_CLOCK: "true",
+      ...(d1 ? { AGENT_DB: d1 } : {}),
     } as any,
     sql: sql as any,
     readSettingRaw: (k: string) => settings.get(k) ?? null,
@@ -507,9 +548,10 @@ describe("Issue #3899 RC3 — status reads the real broker selection", () => {
   // ledger outcome (skipped → inactive).
   it("a cycle ledger row without activity yields a ledger-derived lastCycle", async () => {
     const sql = new SqliteTestStorage();
-    const store = new SqlJobRunRecordStore(sql as any);
+    const d1 = new MockD1Database();
+    const store = new D1JobRunRecordStore(createD1JobRunRecordDb(d1 as unknown as D1Database));
     const nowIso = new Date().toISOString();
-    store.record(
+    await store.record(
       buildJobRunRecord({
         system: "orchestrator-schedule",
         jobId: STOCK_COPILOT_TASK_ID,
@@ -525,7 +567,7 @@ describe("Issue #3899 RC3 — status reads the real broker selection", () => {
         detail: "seeded firing",
       }),
     );
-    const ctx = makeDoorCtx(sql, { commercial: await emptyCommercial() });
+    const ctx = makeDoorCtx(sql, { commercial: await emptyCommercial() }, d1);
     const status = await getStockCopilotStatusViaDoor(ctx, "owner");
     expect(status.neverExecuted).toBe(false);
     expect(status.lastCycle).not.toBeNull();
@@ -757,6 +799,8 @@ describe("Issue #3899 RC4 — NASDAQ100 resolves to the stored 100-member list",
       env: {
         STOCK_COPILOT_PAPER_ENABLED: "1",
         STOCK_COPILOT_AROUND_THE_CLOCK: "true",
+        // Issue #6101 — the firing records its ledger row in D1.
+        AGENT_DB: new MockD1Database(),
       } as any,
       agentCtx: { storage: { sql: sql as any } } as any,
       getScreenerExecutionContext: async () => ({

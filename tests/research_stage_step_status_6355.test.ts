@@ -25,6 +25,8 @@ import {
 } from "../src/services/jobPipelineEngine";
 import { JobStepRegistry } from "../src/services/jobPipelineSteps";
 import { readResearchStages } from "../src/workflows/researchScreenEngine";
+import { MockD1Database } from "./mock-d1";
+import { createD1JobStageEventStore } from "../src/data/d1JobStageEventAdapter";
 import type { JobExecutionMode } from "../src/data/jobPipelinePorts";
 
 const MODE: JobExecutionMode = {
@@ -111,12 +113,15 @@ describe("6355 the stage read surfaces the step status and the attempt count", (
       new InMemoryJobRunRecordStore(),
     );
     const rows = await stageEvents.listByRun(RUN);
+    const d1 = new MockD1Database();
+    const d1Events = createD1JobStageEventStore(d1);
+    for (const row of rows) await d1Events.record(row);
 
     const read = await readResearchStages({
       runId: RUN,
       stores,
       runRecorder,
-      sql: fakeSql(rows) as never,
+      d1,
     });
     const feed = read.stages.find((stage) => stage.stageId === "feed")!;
     expect(feed.status).toBe("completed");
@@ -126,65 +131,3 @@ describe("6355 the stage read surfaces the step status and the attempt count", (
   });
 });
 
-/**
- * The smallest SqlStorage double the stage store needs: catalogue DDL is
- * accepted and ignored, `PRAGMA table_info` reports the full column set, and
- * the run read answers the given rows.
- */
-function fakeSql(
-  rows: Awaited<
-    ReturnType<ReturnType<typeof createInMemoryJobStageEventStore>["listByRun"]>
-  >,
-) {
-  return {
-    exec: (statement: string, ...params: unknown[]) => {
-      const text = String(statement);
-      if (text.startsWith("PRAGMA table_info")) {
-        return [
-          { name: "event_key" },
-          { name: "claim_key" },
-          { name: "run_id" },
-          { name: "job_id" },
-          { name: "stage_id" },
-          { name: "unit_id" },
-          { name: "action" },
-          { name: "at" },
-          { name: "started_at" },
-          { name: "ended_at" },
-          { name: "detail" },
-          { name: "stage_status" },
-          { name: "duration_ms" },
-          { name: "unit_count" },
-          { name: "failed_unit_count" },
-          { name: "result_ref" },
-          { name: "definition_version" },
-        ];
-      }
-      if (text.includes("SELECT event_key")) {
-        const runId = String(params[0] ?? "");
-        return rows
-          .filter((row) => row.runId === runId)
-          .map((row) => ({
-            event_key: row.eventKey,
-            claim_key: row.claimKey,
-            run_id: row.runId,
-            job_id: row.jobId,
-            stage_id: row.stageId,
-            unit_id: row.unitId,
-            action: row.action,
-            at: row.at,
-            started_at: row.startedAt,
-            ended_at: row.endedAt,
-            detail: row.detail,
-            stage_status: row.stageStatus ?? null,
-            duration_ms: row.durationMs ?? null,
-            unit_count: row.unitCount ?? null,
-            failed_unit_count: row.failedUnitCount ?? null,
-            result_ref: row.resultRef ?? null,
-            definition_version: row.definitionVersion ?? null,
-          }));
-      }
-      return [];
-    },
-  };
-}

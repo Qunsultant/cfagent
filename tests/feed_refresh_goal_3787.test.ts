@@ -68,6 +68,7 @@ import { DEFAULT_SCHEDULES } from "../src/schedule";
 import { MockD1Database } from "./mock-d1";
 import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import { goalToRecord } from "../src/services/unifiedScheduleManagement";
+import { makeLedgerStub } from "./ledger-stub";
 
 // #6503 — the "goals" KV key is dead: goals live in the D1 unified
 // store only (fail-closed without AGENT_DB). Fixtures plant via D1.
@@ -87,6 +88,11 @@ function makeEnv() {
     // #6503 — goals live in the D1 unified store only (fail-closed
     // without AGENT_DB); the agent never reads the "goals" KV key.
     AGENT_DB: new MockD1Database(),
+    // #6101 step 9 — the KV "jobRunRecords" key is retired: the
+    // tick's failure run lands via the ledger post on
+    // ORCHESTRATOR_AGENT (the shared stub), and listJobRuns reads
+    // it back from there.
+    ORCHESTRATOR_AGENT: makeLedgerStub().namespace,
     PAYMENTS_AGENT: {
       idFromName: () => "default",
       get: () => ({ budgetCheck: async () => ({ allowed: true }) }),

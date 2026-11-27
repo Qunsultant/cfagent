@@ -40,14 +40,14 @@
  *     shows once, as the ledger run, with the scan's documents
  *     attached; an unclaimed scan still shows as its own run.
  *  6. Detail: /api/runs/details resolves an absorbed run by its
- *     scan id, so the old deep link keeps working. Issue #6103
+ *     scan id, so the old deep link keeps working. Issue #6101
  *     (D1-only): the scan store is gone — the scan id now rides the
- *     projected canonical report row (its body carries scanRunId),
- *     and the detail handler still matches scanRunId over the D1
- *     lists; the twin D1 job-run-record row is absorbed into the
- *     report, so the detail resolves to the ledger-backed report row.
+ *     canonical report row in D1 (its body carries scanRunId),
+ *     seeded directly through the D1 audit adapter, and the detail
+ *     handler still matches scanRunId over the D1 lists; the twin
+ *     D1 job-run-record row is absorbed into the report, so the
+ *     detail resolves to the ledger-backed report row.
  */
-import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { buildJobRunRecord, type JobRunRecord } from "../src/services/jobRunRecords";
 import {
@@ -60,6 +60,7 @@ import {
 import { resolveScanBackfillLinkage } from "../src/data/scanRunPorts";
 import type { ScanRunSummary } from "../src/data/scanRunPorts";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 import { handleReportsRoutes } from "../src/agents/routes/reports";
 import { handleWorkflowRunsRoutes } from "../src/agents/routes/workflowRuns";
 import { d1JobRunRecordId } from "../src/services/jobRunRecordReads";
@@ -68,10 +69,9 @@ import {
   D1JobRunRecordStore,
   ensureJobRunRecordsSchema,
 } from "../src/data/d1JobRunRecordAdapter";
-import { createRunLedgerAdapter, ensureRunLedgerTables } from "../src/data/createRunLedgerPorts";
 import { createAuditReportAdapter } from "../src/data/createAuditReportPorts";
-import { postRunLedgerBestEffort } from "../src/services/runLedgerProjectionPosting";
-import { listScheduledReports, storeReportAtGeneration } from "../src/services/scheduledReports";
+import { ensureAuditReportSchema } from "../src/data/d1AuditReportAdapter";
+import { storeReportAtGeneration } from "../src/services/scheduledReports";
 import { OpportunityScanner, type ScanRequestTemplate } from "../src/trading/options/opportunityScanner";
 import { OptionsDataAgent } from "../src/trading/options/optionsDataAgent";
 import { StrategyRiskAgent } from "../src/trading/options/strategyRiskAgent";
@@ -519,66 +519,28 @@ describe("GET /workflow-runs folds a scan into its ledger row (#4259)", () => {
 /* ------------------------------------------------------------------ */
 
 /** Minimal D1Database stand-in over node:sqlite (the J1 suite's double). */
-class MockD1Database {
-  readonly sqlite = new DatabaseSync(":memory:");
-  prepare(sql: string) {
-    const db = this.sqlite;
-    return {
-      bind(...params: unknown[]) {
-        return {
-          async run() {
-            const info = db.prepare(sql).run(...(params as any[]));
-            return {
-              success: true,
-              meta: { changes: info.changes, last_row_id: info.lastInsertRowid },
-              results: [],
-            };
-          },
-          async all() {
-            return { results: db.prepare(sql).all(...(params as any[])) };
-          },
-          async first() {
-            return db.prepare(sql).get(...(params as any[])) ?? null;
-          },
-          async raw() {
-            return db
-              .prepare(sql)
-              .all(...(params as any[]))
-              .map((row: any) => Object.values(row));
-          },
-        };
-      },
-    };
-  }
-  async batch(statements: any[]) {
-    const results: any[] = [];
-    this.sqlite.exec("BEGIN");
-    try {
-      for (const stmt of statements) results.push(await stmt.run());
-      this.sqlite.exec("COMMIT");
-    } catch (err) {
-      this.sqlite.exec("ROLLBACK");
-      throw err;
-    }
-    return results;
-  }
-}
 
-describe("GET /api/runs/details resolves an absorbed run by scan id (#4259, D1-only #6103)", () => {
+describe("GET /api/runs/details resolves an absorbed run by scan id (#4259, D1-only #6101)", () => {
   it("finds the ledger-backed detail when asked for the scan id", async () => {
-    // Issue #6103 — the scan store is gone, so there is no scan row
-    // to save: the D1 row carrying the scan id is the projected
-    // canonical report (its body carries scanRunId, folded into the
-    // report summary), and the twin D1 job-run-record row is
-    // absorbed into it by the projector's twin link. The detail
-    // handler still matches scanRunId over the D1 lists, so the old
-    // deep link resolves to the ledger-backed report detail.
+    // Issue #6101 — the #6099 projector is deleted, so there is
+    // no projection path to seed through: the D1 rows are seeded
+    // directly — the ledger row through the D1 store, the
+    // canonical report through the D1 audit adapter's
+    // recordReport, carrying the twin link (linkedJobRunId) the
+    // projector used to resolve. The scan store is gone: the
+    // scan id rides the report body's scanRunId, and the detail
+    // handler still matches scanRunId over the D1 lists, so the
+    // old deep link resolves to the ledger-backed report detail.
     const mock = new MockD1Database();
     const sql = new MockSqlStorage();
     const jobDb = createD1JobRunRecordDb(mock as never);
     await ensureJobRunRecordsSchema(jobDb);
     await new D1JobRunRecordStore(jobDb).record(ledgerRecord());
-    const stored = storeReportAtGeneration(sql as never, {
+    // #6101 step 8: seed through the D1 seam (the old
+    // storeReportAtGeneration(sql, input) shape is gone; the
+    // seam writes the v1 row into D1 directly).
+    const env = { AGENT_DB: mock as never, IAAA_TENANT_ID: "primary" };
+    const stored = await storeReportAtGeneration({
       runId: "options-screen",
       generationId: "options-screen",
       title: "Options scan — best_trade (Growth)",
@@ -602,48 +564,48 @@ describe("GET /api/runs/details resolves an absorbed run by scan id (#4259, D1-o
         },
       },
       createdAt: "2026-11-11T10:00:00.000Z",
-    });
+    }, env);
     expect(stored).not.toBeNull();
-    const adapter = createRunLedgerAdapter({ AGENT_DB: mock as never })!;
-    await ensureRunLedgerTables(adapter);
-    await adapter.setTenantProjectionCarriers(
-      "primary",
-      { queues: true, orm: true, sweep: true },
-      "merged",
-      Date.now(),
-    );
-    const env = { AGENT_DB: mock as never, IAAA_TENANT_ID: "primary" };
     const nowMs = Date.now();
-    for (const hit of listScheduledReports(sql as never, { limit: 100 })) {
-      const createdAtMs = Date.parse(hit.createdAt);
-      const posted = await postRunLedgerBestEffort(
-        env,
-        "primary",
-        {
-          ledger: "reports",
-          row: {
-            reportId: hit.id,
-            tenantId: "primary",
-            workspaceId: "primary",
-            runId: hit.runId,
-            generationId: hit.generationId,
-            title: hit.title,
-            source: hit.source,
-            summary: hit.summary,
-            body: hit.body,
-            createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : nowMs,
-            updatedAtMs: Number.isFinite(createdAtMs) ? createdAtMs : nowMs,
-            userLogin: hit.userLogin,
-            bodyR2Key: hit.bodyR2Key,
+    const audit = createAuditReportAdapter({ AGENT_DB: mock as never })!;
+    await ensureAuditReportSchema(audit.db);
+    await audit.recordReport({
+      tenantId: "primary",
+      workspaceId: "primary",
+      reportId: stored!.reportId,
+      runId: "options-screen",
+      generationId: "options-screen",
+      title: "Options scan — best_trade (Growth)",
+      source: "options_scanner",
+      summary: "Gate: 3 fit, 2 borderline, 5 no fit across 10 evaluated.",
+      body: JSON.stringify({
+        trigger: "scheduled",
+        success: true,
+        pdfKey: "pdf-4259",
+        xlsxKey: "xlsx-4259",
+        csvKey: "csv-4259",
+        report: {
+          result: {
+            scanRunId: "scan-4259",
+            withTrades: 4,
+            pdfKey: "pdf-4259",
+            xlsxKey: "xlsx-4259",
+            csvKey: "csv-4259",
           },
         },
-        nowMs,
-      );
-      expect(posted.projected).toBe(true);
-    }
-    // The projector stamped the twin link: the ledger row is
+      }),
+      createdAtMs: Date.parse("2026-11-11T10:00:00.000Z"),
+      updatedAtMs: nowMs,
+      version: 2,
+      provenanceWriter: "test:#6101",
+      provenanceSourceDo: "Orchestrator",
+      provenanceSourceVersion: "1",
+      linkedJobRunId: d1JobRunRecordId(ledgerRecord()),
+      userLogin: "alice",
+      bodyR2Key: null,
+    });
+    // The D1 report carries the twin link: the ledger row is
     // absorbed into the report, one run one row.
-    const audit = createAuditReportAdapter({ AGENT_DB: mock as never })!;
     const projected = await audit.listReports("primary", { limit: 10 });
     expect(projected).toHaveLength(1);
     expect(projected[0].linkedJobRunId).toBe(d1JobRunRecordId(ledgerRecord()));

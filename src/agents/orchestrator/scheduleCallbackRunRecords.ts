@@ -21,7 +21,13 @@
  * Recording itself never breaks the callback: store failures are
  * swallowed.
  */
-import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
+import {
+  createJobRunRecordAdapter,
+  recordLedgerRunD1,
+  resolveLedgerAttribution,
+  type D1JobRunRecordStore,
+  type LedgerAttribution,
+} from "../../data/createJobRunRecordPorts";
 import type { SqlStorage } from "../../orm";
 import { normalizeRunProvenance, type JobRunProvenance } from "../../data/jobPipelinePorts";
 import {
@@ -33,7 +39,6 @@ import {
   resolveScheduleRunTrigger,
   type JobRunRecord,
 } from "../../services/jobRunRecords";
-import { recordLedgerRun } from "../../services/unifiedLedger";
 import { buildLedgerLinkage } from "../../services/consolidatedScheduling";
 import type { ScheduledCallbackOutcome } from "./scheduledCallbacks";
 import { createStructuredLogger } from "../../observability/structuredLogger";
@@ -166,14 +171,23 @@ export function nameLedgerWriteFailure(
   };
 }
 
-function storeRecord(
-  sql: SqlStorage,
+async function storeRecord(
+  ledger: D1JobRunRecordStore | null,
+  attribution: LedgerAttribution,
   record: Omit<JobRunRecord, "system">,
   onRecordFailure?: RecordScheduleCallbackRunOptions["onRecordFailure"],
-): void {
+): Promise<void> {
   try {
-    const store = new SqlJobRunRecordStore(sql);
-    recordLedgerRun(store, { system: "orchestrator-schedule", ...record });
+    if (!ledger) {
+      throw new Error(
+        "[run-ledger] D1 run-ledger binding unbound (AGENT_DB): the schedule callback run cannot be recorded; configure the binding rather than recording nowhere (#6101).",
+      );
+    }
+    await recordLedgerRunD1(
+      ledger,
+      { system: "orchestrator-schedule", ...record },
+      attribution,
+    );
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     // Recording never breaks the callback — but a swallowed store
@@ -210,22 +224,27 @@ function storeRecord(
  * Issue #3121 S5 — record one Worker cron dispatch. The entry
  * points report their dispatch (success / failure / skipped) back
  * through the background-gated record route; this helper builds the
- * row via `buildCronDispatchRecord` and stores it with the same
- * `SqlJobRunRecordStore` the callback recorder uses. A build or
- * store failure throws so the route can answer 500 — the
- * Worker-side poster logs that and moves on; a failed record must
- * never silently read as a stored one.
+ * row via `buildCronDispatchRecord` and stores it with the D1
+ * writer. A build or store failure throws so the route can answer
+ * 500 — the Worker-side poster logs that and moves on; a failed
+ * record must never silently read as a stored one. An unbound D1
+ * throws the same way (named, never a silent no-op).
  */
-export function recordCronDispatchRun(
-  sql: SqlStorage,
+export async function recordCronDispatchRun(
+  ledger: D1JobRunRecordStore | null,
   parsed: CronDispatchRecordInput,
-): void {
-  const store = new SqlJobRunRecordStore(sql);
+  attribution?: Partial<LedgerAttribution>,
+): Promise<void> {
+  if (!ledger) {
+    throw new Error(
+      "[run-ledger] D1 run-ledger binding unbound (AGENT_DB): the cron dispatch run cannot be recorded; configure the binding rather than recording nowhere (#6101).",
+    );
+  }
   // Issue #3121 Phase 2 (#3123): the dispatch row is pre-built by
   // buildCronDispatchRecord (which validates through the same
   // builder, then restamps the system to "worker-cron"); it records
   // through the one entry, which re-validates the built row.
-  recordLedgerRun(store, buildCronDispatchRecord(parsed));
+  await recordLedgerRunD1(ledger, buildCronDispatchRecord(parsed), attribution);
 }
 
 /**
@@ -300,6 +319,16 @@ export async function recordScheduleCallbackRun(
   options?: RecordScheduleCallbackRunOptions,
 ): Promise<void> {
   const started = new Date().toISOString();
+  // Issue #6101 — the ledger is D1: the store resolves from the
+  // caller's env (AGENT_DB + the ledger attribution), built
+  // synchronously with a lazily-ensured schema. The DO `sql` below
+  // stays for the kill-switch + firing-rate settings reads only.
+  const ledgerEnv = options?.env as
+    | { AGENT_DB?: unknown; IAAA_TENANT_ID?: unknown; PLATFORM_ID?: unknown }
+    | null
+    | undefined;
+  const ledgerStore = createJobRunRecordAdapter(ledgerEnv);
+  const ledgerAttribution = resolveLedgerAttribution(ledgerEnv);
   // Issue #3121 S1 — the §4 consolidated-ledger linkage, stamped at
   // this write site: the trigger resolves from the firing payload
   // (the trigger route stamps `trigger: "triggered"` + `scheduleId`
@@ -345,8 +374,9 @@ export async function recordScheduleCallbackRun(
     if (!firingEnabled) {
       const haltDetail =
         "Schedule firing halted by the kill-switch (schedule.firingEnabled off): the armed schedule stays armed but does not run. Turn firing on in the schedules home to resume.";
-      storeRecord(
-        sql,
+      await storeRecord(
+        ledgerStore,
+        ledgerAttribution,
         {
           jobId,
           operation: callback,
@@ -411,8 +441,9 @@ export async function recordScheduleCallbackRun(
       const pauseDetail =
         `Schedule firing skipped: the stored schedule '${pausedRecord.id}' is ${pausedRecord.state} — resume it to fire on schedule. ` +
         `A stale live alarm fired this callback after the pause cancelled the alarm; the stored state, not the alarm, decides.`;
-      storeRecord(
-        sql,
+      await storeRecord(
+        ledgerStore,
+        ledgerAttribution,
         {
           jobId,
           operation: callback,
@@ -443,7 +474,7 @@ export async function recordScheduleCallbackRun(
   }
   try {
     const outcome = normalize(await run());
-    storeRecord(sql, {
+    await storeRecord(ledgerStore, ledgerAttribution, {
       jobId,
       operation: callback,
       started,
@@ -472,7 +503,7 @@ export async function recordScheduleCallbackRun(
     // the audit sink (at most once per window). It runs after a real
     // run only — halted firings never re-alert.
     try {
-      const rate = checkScheduleFiringRate(sql, options?.env, Date.now(), (type, body) => {
+      const rate = await checkScheduleFiringRate(sql, options?.env, Date.now(), (type, body) => {
         if (options?.audit) options.audit(type, "orchestrator", body);
       });
       if (rate.exceeded && rate.alerted) {
@@ -487,7 +518,7 @@ export async function recordScheduleCallbackRun(
       // The guardrail never breaks the firing.
     }
   } catch (err) {
-    storeRecord(sql, {
+    await storeRecord(ledgerStore, ledgerAttribution, {
       jobId,
       operation: callback,
       started,

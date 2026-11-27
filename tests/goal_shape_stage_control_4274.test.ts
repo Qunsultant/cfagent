@@ -45,6 +45,7 @@ import {
 } from "../src/workflows/optionsStageControl";
 import { createGoalOptionsLegDelivery } from "../src/workflows/goalOptionsLeg";
 import { DynamicOptionsScreener } from "../src/trading/optionsScreener";
+import { MockD1Database } from "./mock-d1";
 import type { ETradeOptionChain, ETradeOptionExpireDate } from "../src/types";
 
 function expiryAtDte(dte: number): ETradeOptionExpireDate {
@@ -136,6 +137,7 @@ async function dispatchGoal(
   sql: SqlStorage,
   storage: OptionsStageStorage,
   runId: string,
+  d1: MockD1Database,
 ) {
   const request = {
     assetClass: "options",
@@ -158,7 +160,9 @@ async function dispatchGoal(
       }),
       claims: memoryStageClaims(),
       queue: null,
-      engineStores: optionsEngineStoresFromSql(sql),
+      // #6101: the engine settlement records the run to D1;
+      // without AGENT_DB the recorder fails closed.
+      engineStores: optionsEngineStoresFromSql(sql, { AGENT_DB: d1 }),
     },
   );
   return outcome;
@@ -169,8 +173,9 @@ describe("goal-shape stage control (#4274, decided-not-to)", () => {
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: makeChain("AAPL") });
     try {
       const { sql, storage } = makeDoStorage();
+      const d1 = new MockD1Database();
       const runId = "control-goal:1";
-      const outcome = await dispatchGoal(sql, storage, runId);
+      const outcome = await dispatchGoal(sql, storage, runId, d1);
       expect(outcome.outcome).toBe("completed");
       // The goal leg's shapeReport ran: its report section is the
       // shapeReport artifact, carrying the goal run id + the leg.
@@ -189,12 +194,14 @@ describe("goal-shape stage control (#4274, decided-not-to)", () => {
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: makeChain("AAPL") });
     try {
       const { sql, storage } = makeDoStorage();
+      const d1 = new MockD1Database();
       const runId = "control-goal:2";
-      expect((await dispatchGoal(sql, storage, runId)).outcome).toBe("completed");
+      expect((await dispatchGoal(sql, storage, runId, d1)).outcome).toBe("completed");
       for (const operation of ["run", "rerun", "resume"] as const) {
         const error = await expectControlError(
           controlOptionsStage({
             sql,
+            env: { AGENT_DB: d1 },
             storage,
             runId,
             stage: "screen",
@@ -211,6 +218,7 @@ describe("goal-shape stage control (#4274, decided-not-to)", () => {
       const error = await expectControlError(
         controlOptionsStage({
           sql,
+          env: { AGENT_DB: d1 },
           storage,
           runId,
           stage: "shapeReport",
@@ -229,8 +237,9 @@ describe("goal-shape stage control (#4274, decided-not-to)", () => {
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: makeChain("AAPL") });
     try {
       const { sql, storage } = makeDoStorage();
+      const d1 = new MockD1Database();
       const runId = "control-goal:3";
-      expect((await dispatchGoal(sql, storage, runId)).outcome).toBe("completed");
+      expect((await dispatchGoal(sql, storage, runId, d1)).outcome).toBe("completed");
       // The goal guard gates execution ops only. Stop/cancel need no
       // ports, so they reach the engine — on a completed run the
       // engine refuses with its own codes (the stage is terminal),
@@ -238,6 +247,7 @@ describe("goal-shape stage control (#4274, decided-not-to)", () => {
       const stopped = await expectControlError(
         controlOptionsStage({
           sql,
+          env: { AGENT_DB: d1 },
           storage,
           runId,
           stage: "screen",
@@ -250,6 +260,7 @@ describe("goal-shape stage control (#4274, decided-not-to)", () => {
       await expectControlError(
         controlOptionsStage({
           sql,
+          env: { AGENT_DB: d1 },
           storage,
           runId,
           stage: "screen",

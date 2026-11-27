@@ -34,6 +34,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
+import { makeLedgerStub, type LedgerStub } from "./ledger-stub";
 
 vi.mock("agents", () => ({
   routeAgentRequest: async () => null,
@@ -147,6 +148,20 @@ function makeEnv(
   // the D1 unified store, never the ctx "goals" KV key, so every
   // env binds a fresh MockD1 as AGENT_DB (fail-closed without it).
   const mockD1 = new MockD1Database();
+  // Issue #6101 (step 9) — the KV "jobRunRecords" key is retired:
+  // fired goals' runs land only through the ledger post, so every
+  // env binds a fresh ledger stub as ORCHESTRATOR_AGENT. With an
+  // audit capture, the stub answers the ledger channel itself and
+  // the capture stays the fallback for the audit sink (it only
+  // reads `.status`, so its plain-object answer still applies).
+  const ledger = makeLedgerStub(
+    opts.audit
+      ? {
+          fallback: (req: Request) =>
+            (opts.audit!.namespace as any).get("shared").fetch(req) as unknown as Response,
+        }
+      : {},
+  );
   const env: any = {
     PAYMENTS_AGENT: {
       idFromName: () => "default",
@@ -154,9 +169,9 @@ function makeEnv(
     },
     SESSION_STORE: null,
     AGENT_DB: mockD1,
+    ORCHESTRATOR_AGENT: ledger.namespace,
   };
-  if (opts.audit) env.ORCHESTRATOR_AGENT = opts.audit.namespace;
-  return { env, budgetCheck, mockD1 };
+  return { env, budgetCheck, mockD1, ledger };
 }
 
 /**
@@ -188,10 +203,10 @@ async function plantedAgent(
     audit?: AuditCapture | null;
   } = {},
 ) {
-  const { env, budgetCheck, mockD1 } = makeEnv(envOpts);
+  const { env, budgetCheck, mockD1, ledger } = makeEnv(envOpts);
   await plantGoals(mockD1, goals);
   const agent = new ScheduledAgent(makeCtx() as never, env as never);
-  return { agent, env, budgetCheck, mockD1 };
+  return { agent, env, budgetCheck, mockD1, ledger };
 }
 
 function testGoal(overrides: Record<string, unknown> = {}) {
@@ -680,9 +695,12 @@ describe("S3-P05 #3312 — the DO-side audit sink covers every entry path (#3121
     });
     expect(created2.id).toBe("g-throwing");
 
-    // No ORCHESTRATOR_AGENT binding at all: the stub build throws inside
-    // the sink and is swallowed — the mutation still lands.
+    // No ORCHESTRATOR_AGENT binding at all: makeEnv binds the
+    // ledger stub by default, so the bare case deletes it
+    // explicitly — the sink's stub build throws inside and is
+    // swallowed, and the mutation still lands.
     const { env: envBare } = makeEnv();
+    delete (envBare as any).ORCHESTRATOR_AGENT;
     const agentBare = new ScheduledAgent(makeCtx() as never, envBare as never);
     const created3 = await agentBare.addGoal({
       id: "g-bare",

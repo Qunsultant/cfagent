@@ -28,7 +28,6 @@ import {
   ensureScheduledAgentPipelineJobs,
   type ScheduledTasksPipelineContext,
 } from "../src/agents/scheduledTasksPipeline";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
 import {
   createD1JobRunRecordDb,
   D1JobRunRecordStore,
@@ -240,8 +239,22 @@ describe("feed run visibility (#6235)", () => {
     expect(d1Records[0].error ?? "").toContain("FEED_JOB_NOT_CONFIGURED");
 
     // Direct D1 recording, not a DO copy waiting on a carrier.
-    const doStore = new SqlJobRunRecordStore(sql as unknown as SqlStorage);
-    expect(doStore.listByJob("etrade-nasdaq100-quotes", 5)).toHaveLength(0);
+    // #6101 — the DO run-record adapter is retired (frozen stub, no
+    // exports), so there is no DO store to query. The host must hold
+    // no DO copy: the DO table is absent from this host's storage,
+    // or empty if anything ever creates it.
+    const doTables = sql.exec(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'job_run_records'",
+    ) as Array<{ name: string }>;
+    const doRowCount =
+      doTables.length === 0
+        ? 0
+        : (
+            sql.exec("SELECT COUNT(*) AS n FROM job_run_records") as Array<{
+              n: number;
+            }>
+          )[0]?.n ?? -1;
+    expect(doRowCount).toBe(0);
 
     const view = await control.getJob("etrade-nasdaq100-quotes");
     expect(view.latestRun?.workflowId).toBe(dispatch.runId);

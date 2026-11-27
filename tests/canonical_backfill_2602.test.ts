@@ -1,49 +1,56 @@
-﻿/**
- * Issue #2602 (slice 6, #2528; #2533 item 1) â€” canonical first-write-win
+/**
+ * Issue #2602 (slice 6, #2528; #2533 item 1) — canonical first-write-win
  * backfill, with the RCA v2b acceptance list as the pins:
- *   monotonic per format Â· generated never overwritten or downgraded Â·
- *   owner re-checked Â· R2 fail-closed Â· identical replay a no-op Â·
- *   artifact fields never truncated Â· parity across PDF/XLSX/CSV Â·
+ *   monotonic per format · generated never overwritten or downgraded ·
+ *   owner re-checked · R2 fail-closed · identical replay a no-op ·
+ *   artifact fields never truncated · parity across PDF/XLSX/CSV ·
  *   every record that cannot be backfilled is NAMED, never guessed.
+ *
+ * Issue #6101 (step 8): the seam reads/writes D1 agent_reports now —
+ * the DO mas_reports table is frozen and receives no new writes. The
+ * planArtifactBackfill pins are unchanged (pure function); the seam
+ * tests go through the D1 seam over the shared MockD1Database, and
+ * read back through getCanonicalReport. D1 rows are versioned: a
+ * backfill merge lands as a new version, never an in-place rewrite.
  */
 import { describe, expect, it } from "vitest";
-import { DatabaseSync } from "node:sqlite";
+import { MockD1Database } from "./mock-d1";
 import {
-  backfillArtifactKeys,
   getCanonicalReport,
+  listScheduledReports,
   planArtifactBackfill,
   storeReportAtGeneration,
   storeReportAtGenerationWithR2,
 } from "../src/services/scheduledReports";
 
-/** Minimal SqlStorage shim over better-sqlite3 (same shape as #2528's harness). */
-class SqliteTestStorage {
-  readonly sqlite = new DatabaseSync(":memory:");
-  exec(query: string, ...params: unknown[]) {
-    const stmt = this.sqlite.prepare(query);
-    if (/^\s*(SELECT|PRAGMA)/i.test(query)) {
-      return stmt.all(...(params as never[])) as unknown[];
-    }
-    const info = stmt.run(...(params as never[]));
-    const out = [] as unknown[] & { rowsWritten?: number };
-    out.rowsWritten = Number(info.changes);
-    return out;
-  }
+type D1Database = any;
+
+function d1Env(extra: Record<string, unknown> = {}) {
+  const mock = new MockD1Database();
+  const env = {
+    AGENT_DB: mock as unknown as D1Database,
+    IAAA_TENANT_ID: "tenant-2602",
+    ...extra,
+  };
+  return { mock, env };
 }
 
 const base = (over: Record<string, unknown> = {}) => ({
   runId: "run-1",
   generationId: "gen-1",
   userLogin: "alice",
-  title: "Options scanner â€” bullish",
+  title: "Options scanner — bullish",
   source: "options_scanner",
   summary: "12 scanned",
   body: { trigger: "scheduled" },
   ...over,
 });
 
-function bodyOf(sql: never, reportId: string) {
-  return JSON.parse(getCanonicalReport(sql, reportId)!.body) as Record<string, unknown>;
+async function bodyOf(env: Record<string, unknown>, reportId: string) {
+  return JSON.parse((await getCanonicalReport(env as never, reportId))!.body) as Record<
+    string,
+    unknown
+  >;
 }
 
 describe("backfill parity per format (#2602)", () => {
@@ -101,7 +108,7 @@ describe("first-write-win monotonicity (#2602)", () => {
     expect(outcome.status).toBe("noop");
   });
 
-  it("upgrades failed â†’ generated, but never downgrades generated â†’ failed", () => {
+  it("upgrades failed → generated, but never downgrades generated → failed", () => {
     const up = planArtifactBackfill(
       JSON.stringify({ pdfStatus: "failed", pdfKey: "keep" }),
       { pdfStatus: "generated", pdfKey: "new" },
@@ -177,61 +184,52 @@ describe("records that cannot be backfilled are named (#2602)", () => {
 });
 
 describe("storeReportAtGeneration: first-write-win on redelivery (#2602)", () => {
-  it("fills a keyless row and keeps exactly one row", () => {
-    const sql = new SqliteTestStorage() as never;
-    const first = storeReportAtGeneration(sql, base());
-    const second = storeReportAtGeneration(
-      sql,
+  it("fills a keyless row and keeps exactly one row", async () => {
+    const { env } = d1Env();
+    const first = await storeReportAtGeneration(base(), env as never);
+    const second = await storeReportAtGeneration(
       base({ body: { trigger: "scheduled", pdfKey: "p", pdfStatus: "generated" } }),
+      env as never,
     );
     expect(second?.created).toBe(false);
     expect(second?.reportId).toBe(first?.reportId);
-    expect(bodyOf(sql, first!.reportId).pdfKey).toBe("p");
+    expect((await bodyOf(env, first!.reportId)).pdfKey).toBe("p");
+    // D1 rows are versioned: the backfill is a new version of the
+    // same report — exactly one reportId, not one row.
+    expect(await listScheduledReports(env as never)).toHaveLength(1);
   });
 
-  it("leaves the stored body untouched on an identical replay", () => {
-    const sql = new SqliteTestStorage() as never;
-    const first = storeReportAtGeneration(
-      sql,
+  it("leaves the stored body untouched on an identical replay", async () => {
+    const { env } = d1Env();
+    const first = await storeReportAtGeneration(
       base({ body: { trigger: "scheduled", pdfKey: "p", pdfStatus: "generated" } }),
+      env as never,
     );
-    const before = getCanonicalReport(sql, first!.reportId)!.body;
-    storeReportAtGeneration(
-      sql,
+    const before = (await getCanonicalReport(env as never, first!.reportId))!.body;
+    await storeReportAtGeneration(
       base({ body: { trigger: "scheduled", pdfKey: "p", pdfStatus: "generated" } }),
+      env as never,
     );
-    expect(getCanonicalReport(sql, first!.reportId)!.body).toBe(before);
+    expect((await getCanonicalReport(env as never, first!.reportId))!.body).toBe(before);
   });
 
   it("does not backfill an R2-pointer row (fail-closed, named)", async () => {
-    const sql = new SqliteTestStorage() as never;
-    const env = { REPORTS_BUCKET: { put: async () => undefined } as never };
+    const { env } = d1Env({
+      REPORTS_BUCKET: { put: async () => undefined } as never,
+    });
     const first = await storeReportAtGenerationWithR2(
-      sql,
-      env,
+      env as never,
       base({ body: { trigger: "scheduled" } }),
     );
-    const stored = getCanonicalReport(sql, first!.reportId)!;
-    expect(stored.bodyR2Key).toBeTruthy();
-    const before = stored.body;
+    const stored = await getCanonicalReport(env as never, first!.reportId);
+    expect(stored!.bodyR2Key).toBeTruthy();
+    const before = stored!.body;
     await storeReportAtGenerationWithR2(
-      sql,
-      env,
+      env as never,
       base({ body: { trigger: "scheduled", pdfKey: "should-not-land" } }),
     );
-    const after = getCanonicalReport(sql, first!.reportId)!;
-    expect(after.body).toBe(before);
-    expect(after.body).not.toContain("should-not-land");
-  });
-
-  it("keeps the compatibility wrapper's contract (merged json or null)", () => {
-    expect(
-      backfillArtifactKeys(JSON.stringify({}), { pdfKey: "k" }),
-    ).toBe(JSON.stringify({ pdfKey: "k" }));
-    expect(
-      backfillArtifactKeys(JSON.stringify({ pdfKey: "k" }), { pdfKey: "other" }),
-    ).toBeNull();
-    expect(backfillArtifactKeys("not-json{", { pdfKey: "k" })).toBeNull();
+    const after = await getCanonicalReport(env as never, first!.reportId);
+    expect(after!.body).toBe(before);
+    expect(after!.body).not.toContain("should-not-land");
   });
 });
-
