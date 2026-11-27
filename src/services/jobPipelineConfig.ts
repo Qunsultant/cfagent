@@ -107,7 +107,10 @@ export type JobPipelineErrorCode =
   //  - the stamped version is no longer resolvable.
   | "resume_pre_retention_run"
   | "resume_definition_version_unresolved"
-  | "stage_port_unavailable";
+  | "stage_port_unavailable"
+  // Issue #6554 (F1) — the async mode refuses a capability outside
+  // the registered domain by name, before any run is recorded.
+  | "async_capability_unknown";
 
 export class JobPipelineError extends Error {
   readonly code: JobPipelineErrorCode;

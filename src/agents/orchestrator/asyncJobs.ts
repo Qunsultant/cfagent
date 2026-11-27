@@ -91,6 +91,22 @@ import { maybeAlertServeFailure } from "../../observability/alertingList";
 import { postSlackText } from "../resourceGoals";
 import { fetchSlackPost, type SlackDeliveryEnv } from "../social/delivery";
 import { createAsyncJobPorts, type AsyncJobPorts } from "../../data/createAsyncJobPorts";
+import { createInMemoryJobPipelineStores } from "../../data/inMemoryJobPipelineAdapter";
+import { InMemoryJobRunRecordStore } from "../../data/inMemoryJobRunRecordAdapter";
+import type { JobPipelineStores } from "../../data/jobPipelinePorts";
+import type { JobRunTrigger } from "../../data/jobRunRecordPorts";
+import { createJobPipelineControl } from "../../services/jobPipelineControlFactory";
+import {
+  jobRunRecorderFromStore,
+  type JobPipelineControl,
+} from "../../services/jobPipelineEngine";
+import {
+  createAsyncCapabilityStepRegistry,
+  type AsyncCapability,
+  type AsyncCapabilityExecution,
+  type AsyncCapabilityStepHandler,
+  type AsyncCapabilityStepResult,
+} from "../../services/asyncCapabilitySteps";
 import {
   createDeliverySuppressor,
   deliveryDestinationFor,
@@ -169,6 +185,13 @@ export interface AsyncJobsContext {
     envelope?: AttributionEnvelopeOverride,
   ) => void;
   getOrm: () => DatabaseORM;
+  /**
+   * Issue #6554 (F1) — the engine the async capability executes
+   * through. The orchestrator builder wires its DO-backed control;
+   * a context without one falls back to an in-process control
+   * inside executeAsyncJob (the queue row stays the durable truth).
+   */
+  engine?: JobPipelineControl;
   routeRequest: (request: Request) => Promise<Response>;
   nlqSchedulingPort: () => NLQSchedulingPort;
   nlqStockScreenPort: () => NLQStockScreenPort;
@@ -2334,6 +2357,864 @@ async function recordKeylessOptionsServe(
   );
 }
 
+/**
+ * Issue #6554 (F1) — the capability legs, as registered engine
+ * steps (`async.capability.<capability>`). Moved verbatim from
+ * executeAsyncJob's capability if/else (behavior unchanged); the
+ * executor now reaches them only through the engine's async mode
+ * (`runAsyncUnit`), which resolves the step by name from its
+ * registry. Each handler receives the execution carrier and
+ * returns the leg's outcome; the executor's claim, heartbeat,
+ * deadline, and terminal row still wrap the call.
+ */
+async function executeHttpRequestCapability(
+  execution: AsyncCapabilityExecution,
+): Promise<AsyncCapabilityStepResult> {
+  const { ctx, job, jobId, payload } = execution;
+  const executionDeadline = execution.deadline;
+  let result: unknown;
+  let responseStatus: number | undefined;
+// Issue #1123 S4: a screener main job announces its start on Slack
+// + email as tracked notification sub-jobs. Planned exactly once —
+// only the executor that won the claim reaches this point.
+if (job.capability === "http.request") {
+  const kind = screenerKindForPath(typeof payload.pathAndQuery === "string" ? payload.pathAndQuery : "");
+  if (kind) {
+    try {
+      const startHeaders = (payload.headers ?? {}) as Record<string, unknown>;
+      const startUserLogin = typeof startHeaders["x-user-login"] === "string" ? startHeaders["x-user-login"] : ctx.sessionKey();
+      await submitLifecycleNotifications(
+        ctx,
+        "started",
+        { kind, trigger: "manual", success: true, pdfKeys: [] },
+        jobId,
+        startUserLogin,
+      );
+    } catch (notifyError) {
+      structuredLog.error("asyncJobs.start_notification_schedule_failed", {
+        message: `[OrchestratorAgent] Start notification scheduling failed for job ${jobId}:`,
+        jobId,
+        error: notifyError instanceof Error ? notifyError.message : String(notifyError),
+      });
+    }
+  }
+}
+
+  const pathAndQuery = String(payload.pathAndQuery || "");
+  const method = String(payload.method || "GET");
+  const headers = new Headers(payload.headers as HeadersInit);
+  // Issue #1123: the harmonization seam — a route executed as a job
+  // can see its main-job id and defer follow-ups (report, delivery,
+  // notifications) to the tracked pipeline instead of firing its
+  // own untracked publishers.
+  headers.set("x-async-job-id", jobId);
+  const body = typeof payload.body === "string" ? payload.body : undefined;
+  const response = await Promise.race([
+    ctx.routeRequest(new Request(new URL(pathAndQuery, "https://agent.internal"), {
+      method,
+      headers,
+      body: method === "GET" || method === "HEAD" ? undefined : body,
+    })),
+    executionDeadline.promise,
+  ]);
+  const responseBody = await response.text();
+  if (new TextEncoder().encode(responseBody).byteLength > 5_000_000) {
+    throw new Error("Async API response exceeds the 5 MB job-result limit.");
+  }
+  responseStatus = response.status;
+  result = {
+    body: responseBody,
+    headers: Object.fromEntries(response.headers.entries()),
+  };
+  return { result, ...(responseStatus !== undefined ? { responseStatus } : {}) };
+}
+
+async function executeMcpToolCapability(
+  execution: AsyncCapabilityExecution,
+): Promise<AsyncCapabilityStepResult> {
+  const { ctx, job, jobId, payload } = execution;
+  const executionDeadline = execution.deadline;
+  let result: unknown;
+  let responseStatus: number | undefined;
+  // #2428 (Agent Mesh S17): the execution hop — recorded when
+  // the job's payload carries the turn's stamped traceparent;
+  // an unstamped job executes untraced (the recorded break),
+  // never under a minted-after-the-fact trace.
+  const traceChild = childContextOfTraceparent(payload.traceparent);
+  if (traceChild) {
+    const executeHop: import("../../data/meshTracePorts").MeshTraceHop = {
+      traceId: traceChild.traceId,
+      spanId: traceChild.spanId,
+      parentSpanId: traceChild.parentSpanId,
+      kind: "job-execute",
+      operation: String(payload.toolName || ""),
+      timestampMs: Date.now(),
+      caller:
+        typeof payload.actingLogin === "string" ? payload.actingLogin : undefined,
+      jobId,
+    };
+    await recordTraceHopBestEffort(ctx.env, executeHop);
+  }
+  const toolName = String(payload.toolName || "");
+  const args = (payload.arguments || {}) as Record<string, unknown>;
+  result = await Promise.race([
+    executeMCPTool(toolName, args, {
+      env: ctx.env,
+      orm: ctx.getOrm(),
+    sessionId: ctx.sessionKey(),
+    // Issue #4357 — the join key: this job's id, so doors
+    // that open a bridge row stamp it as the bridge row's
+    // parent (wrapper ↔ bridge link).
+    asyncJobId: jobId,
+    audit: (type, agent, detail) => ctx.audit(type, agent, detail),
+    // #1744: job-executor call — the external gate already ran
+    // at queue time for /mcp-queued jobs; this gate is the
+    // second layer at execution time.
+    principal: { kind: "system", login: null },
+    // #2341 (Agent Mesh S5): re-supply the acting identity the
+    // turn adapter stamped into this job's payload at queue
+    // time (server-side only — a payload without the stamp
+    // resolves to no identity, and identity-gated tools fail
+    // closed). The stamp is payload data, so it is re-read per
+    // call rather than captured.
+    actingLogin: () =>
+      typeof payload.actingLogin === "string" ? payload.actingLogin : undefined,
+    // #2428 (Agent Mesh S17): re-supply the traceparent the
+    // turn adapter stamped into this job's payload at queue
+    // time (server-side only — a payload without the stamp
+    // resolves to no trace, and the execution records no
+    // trace hops rather than fabricating one).
+    traceparent: () =>
+      typeof payload.traceparent === "string" ? payload.traceparent : undefined,
+    // Issue #1686: async-job MCP scans capture like turn-tool scans.
+    // The scan mechanism itself is executing-pinned via the MCP leg
+    // pin; this literal is source-pinned below (see the pin file).
+    storage: ctx.agentCtx.storage,
+    // Issue #3922: the settings reader carrier (see the
+    // AsyncJobsContext field) for the ND gate's stored layer.
+    ...(ctx.readSettingRaw ? { readSettingRaw: ctx.readSettingRaw } : {}),
+    }),
+    executionDeadline.promise,
+  ]);
+  return { result, ...(responseStatus !== undefined ? { responseStatus } : {}) };
+}
+
+async function executeTaskDraftCapability(
+  execution: AsyncCapabilityExecution,
+): Promise<AsyncCapabilityStepResult> {
+  const { payload } = execution;
+  let result: unknown;
+  let responseStatus: number | undefined;
+  result = {
+    taskId: `task_${crypto.randomUUID().slice(0, 8)}`,
+    status: "draft",
+    requiresConfirmation: true,
+    ...payload,
+    message: "Task draft created. Awaiting human confirmation.",
+  };
+  return { result, ...(responseStatus !== undefined ? { responseStatus } : {}) };
+}
+
+async function executeFollowupReportCapability(
+  execution: AsyncCapabilityExecution,
+): Promise<AsyncCapabilityStepResult> {
+  const { ctx, job, payload } = execution;
+  const executionDeadline = execution.deadline;
+  let result: unknown;
+  let responseStatus: number | undefined;
+  // Issue #1123 S2: secure the run's report artifact for the
+  // pipeline. The run generates the PDF once (inside the screening
+  // pipeline); this sub-job verifies and adopts the stored artifact
+  // so S3's deliveries all share the same bytes. A failed run
+  // generation completes as 'skipped' with the reason — never a
+  // stale-PDF fallback (the #822 honesty rule).
+  const outcome = payload.outcome as import("../../services/screenerFollowups").ScreenerRunOutcome;
+  const userLogin = typeof payload.userLogin === "string" ? payload.userLogin : ctx.sessionKey();
+  if (!outcome || typeof outcome !== "object") throw new Error("followup.report job requires an outcome payload.");
+  // Issue #2599 (F4): serve is per format, not per PDF. A
+  // failed PDF leg skips serve ONLY when no tabular format
+  // survived with it; when XLSX and/or CSV generated, serve
+  // adopts those (status ready, perFormat pdf: failed, coded
+  // pdfNote) and the options serve record is still written,
+  // so a PDF failure no longer suppresses successful XLSX/CSV
+  // delivery. The PDF failure itself stays coded and visible
+  // (pdfNote + the serve record's pdfError), never silent.
+  const tabularAdoptable =
+    (outcome.xlsxKey && outcome.xlsxStatus !== "failed") ||
+    (outcome.csvKey && outcome.csvStatus !== "failed");
+  if (outcome.pdfStatus === "failed" && !tabularAdoptable) {
+    // Issue #3264: the run is still recorded (canonical +
+    // history + outcome rows, per-format failures named) before
+    // the serve job skips — a failed run must not vanish.
+    const reason = codedMessage("FAILURE_REPORT_PDF_GENERATION", outcome.pdfError || undefined);
+    await recordKeylessOptionsServe(ctx, outcome, reason);
+    result = { status: "skipped", reason };
+  } else if (outcome.canonicalReportId) {
+    // Consolidation C4 (#1329): serve's schedulable content for
+    // runs whose artifact is a canonical row (discovery, goal) —
+    // verify the row exists via the serve stage. A missing row
+    // fails the serve job explicitly (the chain's stop point),
+    // exactly like a missing PDF key below.
+    const { serveReportStage } = await import("../../services/unifiedReportPipeline");
+    const checked = await Promise.race([
+      serveReportStage({
+        canonicalReportId: outcome.canonicalReportId,
+        findCanonicalReport: (id: string) => ctx.getOrm().reports.findById(id),
+      }),
+      executionDeadline.promise,
+    ]);
+    if (!checked.verified) {
+      throw new Error(codedMessage("FAILURE_REPORT_ARTIFACT_MISSING", checked.reason));
+    }
+    result = { status: "ready", artifacts: [], canonicalReportId: outcome.canonicalReportId };
+  } else if ((!outcome.pdfKeys || outcome.pdfKeys.length === 0) && !tabularAdoptable) {
+    // Issue #3264: same record-before-skip as the PDF-failed
+    // branch above — a keyless run still lands its rows.
+    const reason = codedMessage("FAILURE_REPORT_ARTIFACT_MISSING", "The run produced no report artifact key.");
+    await recordKeylessOptionsServe(ctx, outcome, reason);
+    result = { status: "skipped", reason };
+  } else {
+    const port = ctx.followupReportPort();
+    const artifacts: Array<{ key: string; fileName: string; kind?: "pdf" | "xlsx" | "csv" }> = [];
+    const missing: string[] = [];
+    for (const key of outcome.pdfKeys ?? []) {
+      const pdf = outcome.kind === "stock"
+        ? await port.getStockPdf(userLogin, key)
+        : await port.getOptionsPdf(userLogin, key);
+      if (pdf) artifacts.push({ key, fileName: pdf.fileName, kind: "pdf" });
+      else missing.push(key);
+    }
+    // Issue #1191 (#1173 R3): adopt the run's XLSX alongside the
+    // PDF so deliveries carry text + PDF + XLSX. persistRun only
+    // stamps the key after a successful store, so the outcome's
+    // word is the adoption evidence (the delivery port's byte
+    // fetch is the verification — a missing XLSX is reported in
+    // the delivery detail, never fabricated). A failed XLSX
+    // generation is recorded on the result, not silent.
+    let xlsxNote: string | undefined;
+    if (outcome.xlsxKey && outcome.xlsxStatus !== "failed") {
+      artifacts.push({ key: outcome.xlsxKey, fileName: "screener-report.xlsx", kind: "xlsx" });
+    } else if (outcome.xlsxStatus === "failed") {
+      xlsxNote = codedMessage("FAILURE_REPORT_XLSX_GENERATION", outcome.xlsxError || undefined);
+    }
+    // Issue #1346: adopt the run's CSV on the same terms as the
+    // XLSX (outcome's word is the evidence; the delivery port's
+    // byte fetch verifies). perFormat records each format's
+    // adoption so a missing format is visible, not silent.
+    let csvNote: string | undefined;
+    if (outcome.csvKey && outcome.csvStatus !== "failed") {
+      artifacts.push({ key: outcome.csvKey, fileName: "screener-report.csv", kind: "csv" });
+    } else if (outcome.csvStatus === "failed") {
+      // Issue #2599 (F4): a CSV failure carries the CSV code
+      // (single outcome catalog), not the PDF code this line
+      // previously reused — per-format failures must name
+      // their own format.
+      csvNote = codedMessage("FAILURE_REPORT_CSV_GENERATION", outcome.csvError || undefined);
+    }
+    // Issue #2599 (F4): the no-artifact throw moves here,
+    // after tabular adoption — a run whose PDF failed but
+    // whose XLSX/CSV adopted has artifacts and must not
+    // throw for its missing PDF. A run with nothing adopted
+    // still fails explicitly, as before.
+    if (artifacts.length === 0) {
+      throw new Error(codedMessage("FAILURE_REPORT_ARTIFACT_MISSING", `Report artifact(s) referenced by the run are missing from storage: ${missing.join(", ")}`));
+    }
+    const pdfNote = outcome.pdfStatus === "failed"
+      ? codedMessage("FAILURE_REPORT_PDF_GENERATION", outcome.pdfError || undefined)
+      : undefined;
+    const perFormat: Record<string, string> = {
+      pdf: artifacts.some((a) => a.kind === "pdf")
+        ? "adopted"
+        : outcome.pdfStatus === "failed"
+          ? "failed"
+          : "missing",
+      xlsx: outcome.xlsxKey && outcome.xlsxStatus !== "failed"
+        ? "adopted"
+        : outcome.xlsxStatus === "failed"
+          ? "failed"
+          : "missing",
+      csv: outcome.csvKey && outcome.csvStatus !== "failed"
+        ? "adopted"
+        : outcome.csvStatus === "failed"
+          ? "failed"
+          : "missing",
+    };
+    result = { status: "ready", artifacts, missingKeys: missing, perFormat, ...(pdfNote ? { pdfNote } : {}), ...(xlsxNote ? { xlsxNote } : {}), ...(csvNote ? { csvNote } : {}) };
+    // Issue #2091: sharded options runs produced blobs but no
+    // record — the serve stage now writes the canonical row +
+    // history row so Docs and Reports can list the run. Record
+    // failures warn inside the helper and never fail the job.
+    if (outcome.kind === "options" && outcome.timestamp) {
+      const { recordOptionsServeReport } = await import("../../services/optionsServeRecord");
+      await recordOptionsServeReport(
+        { orm: ctx.getOrm() as never, storage: ctx.agentCtx.storage },
+        { ...outcome, userLogin },
+      );
+    }
+  }
+  return { result, ...(responseStatus !== undefined ? { responseStatus } : {}) };
+}
+
+async function executeFollowupDeliverCapability(
+  execution: AsyncCapabilityExecution,
+): Promise<AsyncCapabilityStepResult> {
+  const { ctx, job, jobId, payload } = execution;
+  const executionDeadline = execution.deadline;
+  let result: unknown;
+  let responseStatus: number | undefined;
+  // Issue #1123 S3: deliver the shared report artifact on one
+  // channel. Policy lives here (skip passthrough, the Assessment's
+  // email allowlist); transport lives behind the delivery port.
+  const channel = payload.channel as AsyncJobChannel;
+  const outcome = payload.outcome as import("../../services/screenerFollowups").ScreenerRunOutcome;
+  const artifacts = (payload.artifacts ?? []) as Array<{ key: string; fileName: string; kind?: "pdf" | "xlsx" | "csv" }>;
+  const userLogin = typeof payload.userLogin === "string" ? payload.userLogin : ctx.sessionKey();
+  // Issue #1191 (#1173 R3): the pipeline policy gates deliveries
+  // per channel + event — an operator's explicit off switch
+  // completes the job as 'skipped' with the reason recorded,
+  // instead of the pre-R3 behavior where coverage depended on
+  // incidental config.
+  // Issue #4782 S3 — the per-login settings map rides the
+  // gate: an operator's `pipeline.*` tuning takes effect on
+  // deliveries. Absent reader → env-only, as before.
+  const pipelinePolicy = resolvePipelinePolicy(
+    ctx.env as unknown as Record<string, unknown>,
+    ctx.readSettingRaw ? readPipelineSettings(ctx.readSettingRaw) : undefined,
+  );
+  if (typeof payload.skipReason === "string" && payload.skipReason) {
+    // Issue #1228 (#1209 F2): the 'completed' notify job was
+    // suppressed on this channel because the delivery was to be
+    // the completion message — so a delivery that has nothing to
+    // attach must still SPEAK (completion text + the reason) or
+    // the channel hears nothing about a completed run. Policy
+    // gates it exactly like a completed notification; best-effort.
+    let noticeSent = false;
+    if (channel !== "webhook" && shouldNotify(pipelinePolicy, "completed", channel)) {
+      try {
+        const notice = await Promise.race([
+          ctx.followupDeliveryPort().notify({
+          channel,
+          userLogin,
+          text: formatUndeliverableNotification(outcome, payload.skipReason),
+          ...(channel === "email" && outcome.emailTo ? { emailTo: outcome.emailTo } : {}),
+          ...(channel === "slack" && outcome.slackChannel ? { slackChannel: outcome.slackChannel } : {}),
+          }),
+          executionDeadline.promise,
+        ]);
+        noticeSent = notice.ok;
+      } catch (noticeError) {
+        structuredLog.warn("asyncJobs.undeliverable_notice_failed", {
+          message: "[asyncJobs] undeliverable-notice failed:",
+          error: noticeError instanceof Error ? noticeError.message : String(noticeError),
+        });
+      }
+    }
+    result = { status: "skipped", reason: payload.skipReason, channel, noticeSent };
+  } else if (!shouldNotify(pipelinePolicy, "completed", channel)) {
+    result = { status: "skipped", reason: `Pipeline policy disables completed-run deliveries on ${channel}.`, channel };
+  // Issue #1347 (owner ruling 2026-10-24, reversing #277 for
+  // RUN deliveries): screener follow-up deliveries send
+  // immediately — no confirmation hold, no held announcement.
+  // The research-report dispatch gate is untouched: it lives
+  // in reportDispatch / the reports routes, not this executor.
+  } else {
+    // Issue #2867: (runId, destination) delivery suppression,
+    // checked after the policy gates above and before any
+    // send — a deliver job that sent and then failed to
+    // complete must not send the same run to the same
+    // destination again on retry. The claim completes the
+    // job as skipped with the reason on the job, never a
+    // silent drop and never a second send.
+    const suppressor =
+      ctx.deliverySuppressor ?? (ctx.deliverySuppressor = createDeliverySuppressor());
+    const resolvedTenantId =
+      job.tenant_id ??
+      outcome.tenantId ??
+      inferTenantFromDeliveryId(outcome.deliveryId ?? jobId);
+    const deliveryRunId = scopedDeliveryClaimRunId(
+      outcome.deliveryId ?? jobId,
+      resolvedTenantId,
+    );
+    const deliveryDestination = deliveryDestinationFor(channel, outcome.emailTo);
+    if (!suppressor.tryClaim(deliveryRunId, deliveryDestination)) {
+      ctx.audit("followup.delivery_suppressed", "orchestrator", {
+        jobId,
+        runId: deliveryRunId,
+        destination: deliveryDestination,
+        channel,
+      });
+      result = {
+        status: "skipped",
+        reason: `Duplicate delivery suppressed for run ${deliveryRunId} to ${deliveryDestination}.`,
+        channel,
+      };
+    } else {
+      const config = resolveScreenerFollowupConfig(ctx.env as unknown as Record<string, unknown>);
+      const effectiveRecipient =
+        channel === "email"
+          ? outcome.emailTo ?? config.channels.email.to
+          : channel === "slack"
+            ? outcome.slackChannel ?? config.channels.slack.channel
+            : outcome.webhookUrl ?? config.channels.webhook.url;
+      const runScope = {
+        tenantId: resolvedTenantId,
+        runId: outcome.deliveryId ?? jobId,
+        scheduleId: outcome.scheduleId ?? null,
+        userLogin,
+      };
+      const binding =
+        outcome.recipientBinding ?? resolveEnvChannelRecipientBinding(ctx.env, runScope);
+      const recipientCheck =
+        channel === "email"
+          ? await verifyEmailRecipientAtDelivery({
+              recipient: effectiveRecipient,
+              env: ctx.env,
+              run: runScope,
+              ownerEmail: outcome.ownerEmail,
+              binding,
+              layer: "executor.deliver",
+              audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
+            })
+          : channel === "slack"
+            ? await resolveAndVerifySlackRecipientAtDelivery({
+                requestedChannel: outcome.slackChannel,
+                envFallbackChannel: config.channels.slack.channel,
+                env: ctx.env,
+                run: runScope,
+                binding,
+                layer: "executor.deliver",
+                audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
+              })
+            : await resolveAndVerifyWebhookRecipientAtDelivery({
+                requestedUrl: outcome.webhookUrl,
+                envFallbackUrl: config.channels.webhook.url,
+                env: ctx.env,
+                run: runScope,
+                binding,
+                layer: "executor.deliver",
+                audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
+              });
+      if (!recipientCheck.allowed) {
+        suppressor.release(deliveryRunId, deliveryDestination);
+        throw new Error(recipientCheck.error);
+      }
+      if (channel === "webhook" && "url" in recipientCheck && typeof recipientCheck.url === "string" && recipientCheck.url) {
+        outcome.webhookUrl = recipientCheck.url;
+      }
+      if (channel === "email") {
+        // Per-task override wins over the env recipient (S5b); the
+        // allowlist applies to the effective recipient either way.
+        const to = outcome.emailTo ?? config.channels.email.to;
+        if (!to) {
+          suppressor.release(deliveryRunId, deliveryDestination);
+          throw new Error("Email delivery is not configured (SCREENER_EMAIL_TO is unset).");
+        }
+        if (!isEmailAllowed(config, to, outcome)) {
+          const error = codedMessage("FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED", `recipient ${to}`);
+          ctx.audit("delivery.recipient_refused", "orchestrator", {
+            jobId,
+            channel: "email",
+            recipient: to,
+            tenantId: resolvedTenantId,
+            runId: outcome.deliveryId ?? jobId,
+            scheduleId: outcome.scheduleId ?? null,
+            userLogin,
+            reason: "recipient_not_in_tenant_run",
+            detail: `recipient ${to}`,
+            error,
+            layer: "executor.deliver",
+          });
+          suppressor.release(deliveryRunId, deliveryDestination);
+          throw new Error(error);
+        }
+      }
+      // Issue #2867: a failed send releases the claim, so
+      // a retry may send (the recipient holds nothing). A
+      // post-send failure below does NOT release — the
+      // recipient already holds the artifact, so the retry
+      // is the duplicate this suppressor exists to stop.
+      let delivery: { ok: boolean; error?: string; detail?: string };
+      try {
+        delivery = await Promise.race([
+          ctx.followupDeliveryPort().deliver({ channel, userLogin, outcome, artifacts }),
+          executionDeadline.promise,
+        ]);
+        if (!delivery.ok) throw new Error(codedMessage("FAILURE_DELIVERY_CHANNEL_FAILED", delivery.error || `Delivery via ${channel} failed.`));
+      } catch (sendErr) {
+        suppressor.release(deliveryRunId, deliveryDestination);
+        throw sendErr;
+      }
+      // Issue #2178 (Q7 S2): the delivery claim is consequential —
+      // audit it through the blocking helper before the job can
+      // complete as sent. A throwing store propagates to the
+      // executor's catch, which marks the job failed: the recipient
+      // may already hold the artifact, but the system never reports
+      // an unrecorded delivery as success.
+      // #6102: the blocking claim writes to D1 now; a null port
+      // (AGENT_DB unbound) throws — the job fails, never reports
+      // an unrecorded delivery as success.
+      await recordBlockingAuditAsync(await auditEventPort(ctx.env as unknown as { AGENT_DB?: unknown }), {
+        id: crypto.randomUUID(),
+        sessionId: userLogin,
+        type: "followup.delivered",
+        agent: "orchestrator",
+        payload: { jobId, channel, userLogin, detail: delivery.detail },
+        createdAt: new Date().toISOString(),
+      });
+      result = { status: "sent", channel, detail: delivery.detail };
+    }
+  }
+  return { result, ...(responseStatus !== undefined ? { responseStatus } : {}) };
+}
+
+async function executeFollowupNotifyCapability(
+  execution: AsyncCapabilityExecution,
+): Promise<AsyncCapabilityStepResult> {
+  const { ctx, job, jobId, payload } = execution;
+  const executionDeadline = execution.deadline;
+  let result: unknown;
+  let responseStatus: number | undefined;
+  // Issue #1123 S4: one lifecycle notification on one channel.
+  // Text-only; the email allowlist applies exactly as for
+  // deliveries (Assessment cross-channel rule).
+  const channel = payload.channel as AsyncJobChannel;
+  const event = payload.event as FollowupLifecycleEvent;
+  const outcome = payload.outcome as ScreenerRunOutcome;
+  const userLogin = typeof payload.userLogin === "string" ? payload.userLogin : ctx.sessionKey();
+  // Issue #1191 (#1173 R3): pipeline policy gate, mirroring the
+  // deliver branch — a policy-off event/channel completes as
+  // 'skipped' with the reason on the job, never a silent drop.
+  // Issue #4782 S3 — as the deliver branch above: the
+  // per-login settings map rides the notify gate.
+  const notifyPolicy = resolvePipelinePolicy(
+    ctx.env as unknown as Record<string, unknown>,
+    ctx.readSettingRaw ? readPipelineSettings(ctx.readSettingRaw) : undefined,
+  );
+  if (!shouldNotify(notifyPolicy, event, channel)) {
+    result = { status: "skipped", reason: `Pipeline policy disables ${event} notifications on ${channel}.`, channel, event };
+  } else {
+  const config = resolveScreenerFollowupConfig(ctx.env as unknown as Record<string, unknown>);
+  const resolvedTenantId =
+    job.tenant_id ??
+    outcome.tenantId ??
+    inferTenantFromDeliveryId(outcome.deliveryId ?? jobId);
+  const effectiveRecipient =
+    channel === "email"
+      ? outcome.emailTo ?? config.channels.email.to
+      : channel === "slack"
+        ? outcome.slackChannel ?? config.channels.slack.channel
+        : outcome.webhookUrl ?? config.channels.webhook.url;
+  const runScope = {
+    tenantId: resolvedTenantId,
+    runId: outcome.deliveryId ?? jobId,
+    scheduleId: outcome.scheduleId ?? null,
+    userLogin,
+  };
+  const binding =
+    outcome.recipientBinding ?? resolveEnvChannelRecipientBinding(ctx.env, runScope);
+  const recipientCheck =
+    channel === "email"
+      ? await verifyEmailRecipientAtDelivery({
+          recipient: effectiveRecipient,
+          env: ctx.env,
+          run: runScope,
+          ownerEmail: outcome.ownerEmail,
+          binding,
+          layer: "executor.notify",
+          audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
+        })
+      : channel === "slack"
+        ? await resolveAndVerifySlackRecipientAtDelivery({
+            requestedChannel: outcome.slackChannel,
+            envFallbackChannel: config.channels.slack.channel,
+            env: ctx.env,
+            run: runScope,
+            binding,
+            layer: "executor.notify",
+            audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
+          })
+        : await resolveAndVerifyWebhookRecipientAtDelivery({
+            requestedUrl: outcome.webhookUrl,
+            envFallbackUrl: config.channels.webhook.url,
+            env: ctx.env,
+            run: runScope,
+            binding,
+            layer: "executor.notify",
+            audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
+          });
+  if (!recipientCheck.allowed) {
+    throw new Error(recipientCheck.error);
+  }
+  if (channel === "email") {
+    // Issue #1191: per-task recipient wins (mirrors deliveries);
+    // the allowlist applies to the effective recipient.
+    const to = outcome.emailTo ?? config.channels.email.to;
+    if (!to) throw new Error("Email notification is not configured (SCREENER_EMAIL_TO is unset).");
+    if (!isEmailAllowed(config, to, outcome)) {
+      const error = codedMessage("FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED", `notification recipient ${to}`);
+      ctx.audit("delivery.recipient_refused", "orchestrator", {
+        jobId,
+        channel: "email",
+        recipient: to,
+        tenantId: resolvedTenantId,
+        runId: outcome.deliveryId ?? jobId,
+        scheduleId: outcome.scheduleId ?? null,
+        userLogin,
+        reason: "recipient_not_in_tenant_run",
+        detail: `notification recipient ${to}`,
+        error,
+        layer: "executor.notify",
+      });
+      throw new Error(error);
+    }
+  }
+  const text = formatLifecycleNotification(
+    event,
+    outcome,
+    typeof payload.detail === "string" ? payload.detail : undefined,
+  );
+  const sent = await Promise.race([
+    ctx.followupDeliveryPort().notify({
+      channel,
+      userLogin,
+      text,
+      ...(channel === "email" && outcome.emailTo ? { emailTo: outcome.emailTo } : {}),
+      ...(channel === "slack" && outcome.slackChannel ? { slackChannel: outcome.slackChannel } : {}),
+    }),
+    executionDeadline.promise,
+  ]);
+  if (!sent.ok) throw new Error(sent.error || `Notification via ${channel} failed.`);
+  result = { status: "notified", channel, event };
+  }
+  return { result, ...(responseStatus !== undefined ? { responseStatus } : {}) };
+}
+
+async function executeShardExecuteCapability(
+  execution: AsyncCapabilityExecution,
+): Promise<AsyncCapabilityStepResult> {
+  const { ctx, job, jobId, payload } = execution;
+  const executionDeadline = execution.deadline;
+  let result: unknown;
+  let responseStatus: number | undefined;
+  // Issue #1355: one shard of a sharded scheduled screen. The
+  // executor owns policy + job state; the handler owns the
+  // shard's work (providers, pipeline, store seams).
+  const { executeShardJob, resolveShardChainSource } = await import("../../services/shardExecutors");
+  const { ETradeService } = await import("../../services/etrade");
+  const shardPayload = payload as unknown as import("../../services/shardJobs").ShardPayload;
+  // Issue #3655: one E*TRADE factory closure, shared by the legacy
+  // executor seam and the broker-aware chain-source resolver
+  // below — a second inline construction would trip the #291
+  // extraction ledger (one site per file).
+  const createETradeService = (userLogin: string, environment: string | undefined) =>
+    new ETradeService(ctx.getOrm(), ctx.env, userLogin, environment);
+  result = await Promise.race([
+    executeShardJob(
+    {
+      sql: ctx.agentCtx.storage.sql,
+      env: ctx.env as unknown as Record<string, unknown>,
+      orm: ctx.getOrm(),
+      storage: ctx.agentCtx.storage,
+      createETradeService,
+      // Issue #3655: broker-aware chain source (tenant broker →
+      // Alpaca platform chain source / etrade client /
+      // provider_unsupported). Without this the sharded options
+      // executor would fetch E*TRADE chains for every tenant.
+      resolveChainSource: (chain) =>
+        resolveShardChainSource(
+          {
+            env: ctx.env as unknown as Record<string, unknown>,
+            orm: ctx.getOrm(),
+            createETradeService,
+          },
+          chain
+        ),
+      sessionId: ctx.sessionKey(),
+      // Issue #4417: persist each failed shard attempt on the job row —
+      // durable across a host restart, best-effort by contract.
+      recordAttempt: (attempt: number, error: unknown) => {
+        try {
+          execution.queue.appendAttempt(jobId, {
+            attempt,
+            error: error instanceof Error ? error.message : String(error),
+            at: new Date().toISOString(),
+          });
+        } catch {
+          // History is evidence; it never fails the shard.
+        }
+      },
+    },
+    shardPayload
+    ),
+    executionDeadline.promise,
+  ]);
+  return { result, ...(responseStatus !== undefined ? { responseStatus } : {}) };
+}
+
+async function executeFeedSnapshotCapability(
+  execution: AsyncCapabilityExecution,
+): Promise<AsyncCapabilityStepResult> {
+  const { ctx, job, payload } = execution;
+  const executionDeadline = execution.deadline;
+  let result: unknown;
+  let responseStatus: number | undefined;
+  // Consolidation #1236 (feed seam): the feed stage job. The
+  // executor owns job state; the handler owns the work
+  // (providers, producer, store seams) — the shard.execute idiom.
+  const { executeFeedSnapshotJob } = await import("../../services/feedSnapshotJob");
+  const { ETradeService } = await import("../../services/etrade");
+  const feedPayload = payload as unknown as import("../../services/feedSnapshotJob").FeedSnapshotJobPayload;
+  result = await Promise.race([
+    executeFeedSnapshotJob(
+    {
+      sql: ctx.agentCtx.storage.sql,
+      env: ctx.env as unknown as Record<string, unknown>,
+      orm: ctx.getOrm(),
+      createETradeService: (userLogin, environment) =>
+        new ETradeService(ctx.getOrm(), ctx.env, userLogin, environment),
+      sessionId: ctx.sessionKey(),
+    },
+    feedPayload
+    ),
+    executionDeadline.promise,
+  ]);
+  return { result, ...(responseStatus !== undefined ? { responseStatus } : {}) };
+}
+
+async function executeNlqExecuteCapability(
+  execution: AsyncCapabilityExecution,
+): Promise<AsyncCapabilityStepResult> {
+  const { ctx, job, payload } = execution;
+  const executionDeadline = execution.deadline;
+  let result: unknown;
+  let responseStatus: number | undefined;
+  const query = String(payload.query || "").trim();
+  if (!query) throw new Error("NLQ job requires a non-empty query.");
+  // #1722: NLQ_MODE, run (payload `mode`) > session > user
+  // (payload scopedNlqModes, set by the job submitter) > global
+  // env > built-in "rest". An invalid winning value fails closed
+  // to "rest" and is logged + audited as nlq.config_error.
+  // "rest" (default) is the pre-#1722 async contract verbatim —
+  // scheduling, stock screen, discovery + fit runners, stores
+  // (the async context binds NO social port, in either mode, so
+  // async NLQ can never set a social brief). "mcp" is the
+  // MCP-direct shape — the full function with NO options (no
+  // ports, no stores, no runners). Identity is not switched:
+  // payload userLogin / session key in both modes.
+  const jobUserLoginForNlq = typeof payload.userLogin === "string" ? payload.userLogin : ctx.sessionKey();
+  const resolvedNlqMode = resolveNlqMode(
+    levelsForNlq(
+      (payload as { scopedNlqModes?: { session?: unknown; user?: unknown } }).scopedNlqModes,
+      (payload as { mode?: unknown }).mode,
+      (ctx.env as unknown as Record<string, unknown> | undefined)?.[NLQ_MODE_SWITCH]
+    )
+  );
+  if (resolvedNlqMode.invalid) {
+    structuredLog.error("asyncJobs.nlq_mode_invalid", {
+      message: `[nlq] invalid ${NLQ_MODE_SWITCH} value ${JSON.stringify(resolvedNlqMode.raw)} — failing closed to "rest"`,
+      setting: NLQ_MODE_SWITCH,
+      rawValue: resolvedNlqMode.raw,
+    });
+    ctx.audit(nlqConfigErrorEvent(), "orchestrator", {
+      setting: NLQ_MODE_SWITCH,
+      value: resolvedNlqMode.raw ?? "",
+      resolved: "rest",
+    });
+  }
+  // #2303: ports for the REST-mode discovery runner (the
+  // mcp mode takes no options, unchanged).
+  const nlqDpPorts =
+    resolvedNlqMode.mode === "mcp" ? null : await buildDataProviderPorts(ctx.env);
+  result = await Promise.race([
+    resolvedNlqMode.mode === "mcp"
+    ? executeNaturalLanguageQuery(
+        ctx.getOrm(),
+        ctx.sessionKey(),
+        query,
+        ctx.env,
+        jobUserLoginForNlq,
+        getUserDid(ctx.sessionKey()),
+      )
+    : executeNaturalLanguageQuery(
+        ctx.getOrm(),
+        ctx.sessionKey(),
+        query,
+        ctx.env,
+        jobUserLoginForNlq,
+        getUserDid(ctx.sessionKey()),
+        { scanRunStore: createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, profileStore: createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).strategyProfiles, schedulingPort: ctx.nlqSchedulingPort(), agentScheduleCapability: createAgentScheduleExecutorDepsForDo(ctx.env, ctx.agentCtx.storage.sql, (type, payload) => ctx.audit(type, "orchestrator", payload), { sdk: nlqPortToAgentSdkAdapter(ctx.nlqSchedulingPort(), createD1UnifiedSchedulePorts({ d1: ctx.env.AGENT_DB }).unifiedSchedules, {
+            // Issue #6503 — the start-paused control, resolved here so
+            // a schedule created through chat/NLQ starts active when
+            // the control is off (resume arms it through the NLQ
+            // port's alarms).
+            startPaused: resolveEffectiveScheduleStartPaused(ctx.agentCtx.storage.sql, ctx.env).paused,
+            alarms: nlqPortToScheduleAlarms(ctx.nlqSchedulingPort(), () =>
+              resolveEffectiveScheduleFloor(ctx.agentCtx.storage.sql, ctx.env).seconds,
+            ),
+          }) }), stockScreenPort: ctx.nlqStockScreenPort(), discoveryRunner: createDiscoveryService({ env: ctx.env, userLogin: jobUserLoginForNlq, orm: ctx.getOrm(), sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage, platform: TradingPlatformRegistry.getPlatform(await resolveTenantBroker(ctx.env), ctx.env, ctx.getOrm(), jobUserLoginForNlq), ...(nlqDpPorts?.config ? { configPort: nlqDpPorts.config } : {}), ...(nlqDpPorts?.captures ? { capturePort: nlqDpPorts.captures } : {}) }), fitDiscoveryRunner: createFitDiscoveryRunner({ env: ctx.env, userLogin: jobUserLoginForNlq, sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }) },
+    ),
+    executionDeadline.promise,
+  ]);
+  return { result, ...(responseStatus !== undefined ? { responseStatus } : {}) };
+}
+
+/**
+ * Issue #6554 (F1) — the capability handlers, keyed by capability
+ * for the engine step registry. The registry is the one dispatch:
+ * a capability with no entry here has no registered step, and the
+ * engine refuses it by name (`async_capability_unknown`).
+ */
+export const ASYNC_CAPABILITY_HANDLERS: Record<AsyncCapability, AsyncCapabilityStepHandler> = {
+  "http.request": executeHttpRequestCapability,
+  "mcp.tool": executeMcpToolCapability,
+  "task.draft": executeTaskDraftCapability,
+  "followup.report": executeFollowupReportCapability,
+  "followup.deliver": executeFollowupDeliverCapability,
+  "followup.notify": executeFollowupNotifyCapability,
+  "shard.execute": executeShardExecuteCapability,
+  "feed.snapshot": executeFeedSnapshotCapability,
+  "nlq.execute": executeNlqExecuteCapability,
+};
+
+/**
+ * Issue #6554 (F1) — the queue row's trigger onto the engine's run
+ * trigger vocabulary. Scheduled and manual pass through; the
+ * async-only triggers (autonomous / webhook / agent) have no engine
+ * counterpart and read as the normalizer's manual default — never
+ * an invented trigger.
+ */
+function asyncJobTriggerToRunTrigger(trigger: AsyncJobTrigger | null | undefined): JobRunTrigger | undefined {
+  return trigger === "scheduled" || trigger === "manual" ? trigger : undefined;
+}
+
+/**
+ * Issue #6554 (F1) — the in-process async-capability engine: a
+ * control over in-memory stores with the capability steps
+ * registered. executeAsyncJob falls back to it when the host never
+ * wired an engine, and tests hold its run store to prove the
+ * engine ran the unit. A fresh control per call — its run records
+ * live for the isolate's execution only; the queue row stays the
+ * durable truth until the F5 ledger unification (#6101).
+ * Production hosts wire a DO-backed control through the one
+ * factory (see OrchestratorAgent) and never call this.
+ */
+export function createAsyncCapabilityEngine(): {
+  control: JobPipelineControl;
+  runStore: InMemoryJobRunRecordStore;
+  stores: JobPipelineStores;
+} {
+  const stores = createInMemoryJobPipelineStores();
+  const runStore = new InMemoryJobRunRecordStore();
+  const control = createJobPipelineControl({
+    stores,
+    runRecorder: jobRunRecorderFromStore(runStore),
+    publisher: null,
+    steps: createAsyncCapabilityStepRegistry(ASYNC_CAPABILITY_HANDLERS),
+  });
+  return { control, runStore, stores };
+}
+
+
 export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJobPayload): Promise<void> {
   ctx.ensureTables();
   const family = ports(ctx);
@@ -2511,720 +3392,37 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
       }
     }
 
-    // Issue #1123 S4: a screener main job announces its start on Slack
-    // + email as tracked notification sub-jobs. Planned exactly once —
-    // only the executor that won the claim reaches this point.
-    if (job.capability === "http.request") {
-      const kind = screenerKindForPath(typeof payload.pathAndQuery === "string" ? payload.pathAndQuery : "");
-      if (kind) {
-        try {
-          const startHeaders = (payload.headers ?? {}) as Record<string, unknown>;
-          const startUserLogin = typeof startHeaders["x-user-login"] === "string" ? startHeaders["x-user-login"] : ctx.sessionKey();
-          await submitLifecycleNotifications(
-            ctx,
-            "started",
-            { kind, trigger: "manual", success: true, pdfKeys: [] },
-            jobId,
-            startUserLogin,
-          );
-        } catch (notifyError) {
-          structuredLog.error("asyncJobs.start_notification_schedule_failed", {
-            message: `[OrchestratorAgent] Start notification scheduling failed for job ${jobId}:`,
-            jobId,
-            error: notifyError instanceof Error ? notifyError.message : String(notifyError),
-          });
-        }
-      }
+    // Issue #6554 (F1) — the capability executes as the engine's
+    // async single unit: the handler is the registered engine step
+    // `async.capability.<capability>`, resolved by the engine from
+    // its step registry (see ASYNC_CAPABILITY_HANDLERS below). The
+    // executor keeps the claim, the heartbeat, the execution
+    // deadline, and the terminal row; the engine owns the unit's
+    // run record. A host that never wired an engine falls back to
+    // an in-process control — the queue row stays the durable truth
+    // until the F5 ledger unification (#6101).
+    const engine = ctx.engine ?? createAsyncCapabilityEngine().control;
+    const unit = await engine.runAsyncUnit({
+      capability: job.capability,
+      input: {
+        ctx,
+        job,
+        jobId,
+        payload,
+        deadline: executionDeadline,
+        queue: family.queue,
+      } satisfies AsyncCapabilityExecution,
+      asyncJobId: jobId,
+      trigger: asyncJobTriggerToRunTrigger(getAsyncJob(ctx, jobId)?.trigger),
+    });
+    if (unit.state === "failed") {
+      throw new Error(unit.error ?? `Async capability ${job.capability} failed.`);
     }
-
-    if (job.capability === "http.request") {
-      const pathAndQuery = String(payload.pathAndQuery || "");
-      const method = String(payload.method || "GET");
-      const headers = new Headers(payload.headers as HeadersInit);
-      // Issue #1123: the harmonization seam — a route executed as a job
-      // can see its main-job id and defer follow-ups (report, delivery,
-      // notifications) to the tracked pipeline instead of firing its
-      // own untracked publishers.
-      headers.set("x-async-job-id", jobId);
-      const body = typeof payload.body === "string" ? payload.body : undefined;
-      const response = await Promise.race([
-        ctx.routeRequest(new Request(new URL(pathAndQuery, "https://agent.internal"), {
-          method,
-          headers,
-          body: method === "GET" || method === "HEAD" ? undefined : body,
-        })),
-        executionDeadline.promise,
-      ]);
-      const responseBody = await response.text();
-      if (new TextEncoder().encode(responseBody).byteLength > 5_000_000) {
-        throw new Error("Async API response exceeds the 5 MB job-result limit.");
-      }
-      responseStatus = response.status;
-      result = {
-        body: responseBody,
-        headers: Object.fromEntries(response.headers.entries()),
-      };
-    } else if (job.capability === "mcp.tool") {
-      // #2428 (Agent Mesh S17): the execution hop — recorded when
-      // the job's payload carries the turn's stamped traceparent;
-      // an unstamped job executes untraced (the recorded break),
-      // never under a minted-after-the-fact trace.
-      const traceChild = childContextOfTraceparent(payload.traceparent);
-      if (traceChild) {
-        const executeHop: import("../../data/meshTracePorts").MeshTraceHop = {
-          traceId: traceChild.traceId,
-          spanId: traceChild.spanId,
-          parentSpanId: traceChild.parentSpanId,
-          kind: "job-execute",
-          operation: String(payload.toolName || ""),
-          timestampMs: Date.now(),
-          caller:
-            typeof payload.actingLogin === "string" ? payload.actingLogin : undefined,
-          jobId,
-        };
-        await recordTraceHopBestEffort(ctx.env, executeHop);
-      }
-      const toolName = String(payload.toolName || "");
-      const args = (payload.arguments || {}) as Record<string, unknown>;
-      result = await Promise.race([
-        executeMCPTool(toolName, args, {
-          env: ctx.env,
-          orm: ctx.getOrm(),
-        sessionId: ctx.sessionKey(),
-        // Issue #4357 — the join key: this job's id, so doors
-        // that open a bridge row stamp it as the bridge row's
-        // parent (wrapper ↔ bridge link).
-        asyncJobId: jobId,
-        audit: (type, agent, detail) => ctx.audit(type, agent, detail),
-        // #1744: job-executor call — the external gate already ran
-        // at queue time for /mcp-queued jobs; this gate is the
-        // second layer at execution time.
-        principal: { kind: "system", login: null },
-        // #2341 (Agent Mesh S5): re-supply the acting identity the
-        // turn adapter stamped into this job's payload at queue
-        // time (server-side only — a payload without the stamp
-        // resolves to no identity, and identity-gated tools fail
-        // closed). The stamp is payload data, so it is re-read per
-        // call rather than captured.
-        actingLogin: () =>
-          typeof payload.actingLogin === "string" ? payload.actingLogin : undefined,
-        // #2428 (Agent Mesh S17): re-supply the traceparent the
-        // turn adapter stamped into this job's payload at queue
-        // time (server-side only — a payload without the stamp
-        // resolves to no trace, and the execution records no
-        // trace hops rather than fabricating one).
-        traceparent: () =>
-          typeof payload.traceparent === "string" ? payload.traceparent : undefined,
-        // Issue #1686: async-job MCP scans capture like turn-tool scans.
-        // The scan mechanism itself is executing-pinned via the MCP leg
-        // pin; this literal is source-pinned below (see the pin file).
-        storage: ctx.agentCtx.storage,
-        // Issue #3922: the settings reader carrier (see the
-        // AsyncJobsContext field) for the ND gate's stored layer.
-        ...(ctx.readSettingRaw ? { readSettingRaw: ctx.readSettingRaw } : {}),
-        }),
-        executionDeadline.promise,
-      ]);
-    } else if (job.capability === "task.draft") {
-      result = {
-        taskId: `task_${crypto.randomUUID().slice(0, 8)}`,
-        status: "draft",
-        requiresConfirmation: true,
-        ...payload,
-        message: "Task draft created. Awaiting human confirmation.",
-      };
-    } else if (job.capability === "followup.report") {
-      // Issue #1123 S2: secure the run's report artifact for the
-      // pipeline. The run generates the PDF once (inside the screening
-      // pipeline); this sub-job verifies and adopts the stored artifact
-      // so S3's deliveries all share the same bytes. A failed run
-      // generation completes as 'skipped' with the reason — never a
-      // stale-PDF fallback (the #822 honesty rule).
-      const outcome = payload.outcome as import("../../services/screenerFollowups").ScreenerRunOutcome;
-      const userLogin = typeof payload.userLogin === "string" ? payload.userLogin : ctx.sessionKey();
-      if (!outcome || typeof outcome !== "object") throw new Error("followup.report job requires an outcome payload.");
-      // Issue #2599 (F4): serve is per format, not per PDF. A
-      // failed PDF leg skips serve ONLY when no tabular format
-      // survived with it; when XLSX and/or CSV generated, serve
-      // adopts those (status ready, perFormat pdf: failed, coded
-      // pdfNote) and the options serve record is still written,
-      // so a PDF failure no longer suppresses successful XLSX/CSV
-      // delivery. The PDF failure itself stays coded and visible
-      // (pdfNote + the serve record's pdfError), never silent.
-      const tabularAdoptable =
-        (outcome.xlsxKey && outcome.xlsxStatus !== "failed") ||
-        (outcome.csvKey && outcome.csvStatus !== "failed");
-      if (outcome.pdfStatus === "failed" && !tabularAdoptable) {
-        // Issue #3264: the run is still recorded (canonical +
-        // history + outcome rows, per-format failures named) before
-        // the serve job skips — a failed run must not vanish.
-        const reason = codedMessage("FAILURE_REPORT_PDF_GENERATION", outcome.pdfError || undefined);
-        await recordKeylessOptionsServe(ctx, outcome, reason);
-        result = { status: "skipped", reason };
-      } else if (outcome.canonicalReportId) {
-        // Consolidation C4 (#1329): serve's schedulable content for
-        // runs whose artifact is a canonical row (discovery, goal) —
-        // verify the row exists via the serve stage. A missing row
-        // fails the serve job explicitly (the chain's stop point),
-        // exactly like a missing PDF key below.
-        const { serveReportStage } = await import("../../services/unifiedReportPipeline");
-        const checked = await Promise.race([
-          serveReportStage({
-            canonicalReportId: outcome.canonicalReportId,
-            findCanonicalReport: (id: string) => ctx.getOrm().reports.findById(id),
-          }),
-          executionDeadline.promise,
-        ]);
-        if (!checked.verified) {
-          throw new Error(codedMessage("FAILURE_REPORT_ARTIFACT_MISSING", checked.reason));
-        }
-        result = { status: "ready", artifacts: [], canonicalReportId: outcome.canonicalReportId };
-      } else if ((!outcome.pdfKeys || outcome.pdfKeys.length === 0) && !tabularAdoptable) {
-        // Issue #3264: same record-before-skip as the PDF-failed
-        // branch above — a keyless run still lands its rows.
-        const reason = codedMessage("FAILURE_REPORT_ARTIFACT_MISSING", "The run produced no report artifact key.");
-        await recordKeylessOptionsServe(ctx, outcome, reason);
-        result = { status: "skipped", reason };
-      } else {
-        const port = ctx.followupReportPort();
-        const artifacts: Array<{ key: string; fileName: string; kind?: "pdf" | "xlsx" | "csv" }> = [];
-        const missing: string[] = [];
-        for (const key of outcome.pdfKeys ?? []) {
-          const pdf = outcome.kind === "stock"
-            ? await port.getStockPdf(userLogin, key)
-            : await port.getOptionsPdf(userLogin, key);
-          if (pdf) artifacts.push({ key, fileName: pdf.fileName, kind: "pdf" });
-          else missing.push(key);
-        }
-        // Issue #1191 (#1173 R3): adopt the run's XLSX alongside the
-        // PDF so deliveries carry text + PDF + XLSX. persistRun only
-        // stamps the key after a successful store, so the outcome's
-        // word is the adoption evidence (the delivery port's byte
-        // fetch is the verification — a missing XLSX is reported in
-        // the delivery detail, never fabricated). A failed XLSX
-        // generation is recorded on the result, not silent.
-        let xlsxNote: string | undefined;
-        if (outcome.xlsxKey && outcome.xlsxStatus !== "failed") {
-          artifacts.push({ key: outcome.xlsxKey, fileName: "screener-report.xlsx", kind: "xlsx" });
-        } else if (outcome.xlsxStatus === "failed") {
-          xlsxNote = codedMessage("FAILURE_REPORT_XLSX_GENERATION", outcome.xlsxError || undefined);
-        }
-        // Issue #1346: adopt the run's CSV on the same terms as the
-        // XLSX (outcome's word is the evidence; the delivery port's
-        // byte fetch verifies). perFormat records each format's
-        // adoption so a missing format is visible, not silent.
-        let csvNote: string | undefined;
-        if (outcome.csvKey && outcome.csvStatus !== "failed") {
-          artifacts.push({ key: outcome.csvKey, fileName: "screener-report.csv", kind: "csv" });
-        } else if (outcome.csvStatus === "failed") {
-          // Issue #2599 (F4): a CSV failure carries the CSV code
-          // (single outcome catalog), not the PDF code this line
-          // previously reused — per-format failures must name
-          // their own format.
-          csvNote = codedMessage("FAILURE_REPORT_CSV_GENERATION", outcome.csvError || undefined);
-        }
-        // Issue #2599 (F4): the no-artifact throw moves here,
-        // after tabular adoption — a run whose PDF failed but
-        // whose XLSX/CSV adopted has artifacts and must not
-        // throw for its missing PDF. A run with nothing adopted
-        // still fails explicitly, as before.
-        if (artifacts.length === 0) {
-          throw new Error(codedMessage("FAILURE_REPORT_ARTIFACT_MISSING", `Report artifact(s) referenced by the run are missing from storage: ${missing.join(", ")}`));
-        }
-        const pdfNote = outcome.pdfStatus === "failed"
-          ? codedMessage("FAILURE_REPORT_PDF_GENERATION", outcome.pdfError || undefined)
-          : undefined;
-        const perFormat: Record<string, string> = {
-          pdf: artifacts.some((a) => a.kind === "pdf")
-            ? "adopted"
-            : outcome.pdfStatus === "failed"
-              ? "failed"
-              : "missing",
-          xlsx: outcome.xlsxKey && outcome.xlsxStatus !== "failed"
-            ? "adopted"
-            : outcome.xlsxStatus === "failed"
-              ? "failed"
-              : "missing",
-          csv: outcome.csvKey && outcome.csvStatus !== "failed"
-            ? "adopted"
-            : outcome.csvStatus === "failed"
-              ? "failed"
-              : "missing",
-        };
-        result = { status: "ready", artifacts, missingKeys: missing, perFormat, ...(pdfNote ? { pdfNote } : {}), ...(xlsxNote ? { xlsxNote } : {}), ...(csvNote ? { csvNote } : {}) };
-        // Issue #2091: sharded options runs produced blobs but no
-        // record — the serve stage now writes the canonical row +
-        // history row so Docs and Reports can list the run. Record
-        // failures warn inside the helper and never fail the job.
-        if (outcome.kind === "options" && outcome.timestamp) {
-          const { recordOptionsServeReport } = await import("../../services/optionsServeRecord");
-          await recordOptionsServeReport(
-            { orm: ctx.getOrm() as never, storage: ctx.agentCtx.storage },
-            { ...outcome, userLogin },
-          );
-        }
-      }
-    } else if (job.capability === "followup.deliver") {
-      // Issue #1123 S3: deliver the shared report artifact on one
-      // channel. Policy lives here (skip passthrough, the Assessment's
-      // email allowlist); transport lives behind the delivery port.
-      const channel = payload.channel as AsyncJobChannel;
-      const outcome = payload.outcome as import("../../services/screenerFollowups").ScreenerRunOutcome;
-      const artifacts = (payload.artifacts ?? []) as Array<{ key: string; fileName: string; kind?: "pdf" | "xlsx" | "csv" }>;
-      const userLogin = typeof payload.userLogin === "string" ? payload.userLogin : ctx.sessionKey();
-      // Issue #1191 (#1173 R3): the pipeline policy gates deliveries
-      // per channel + event — an operator's explicit off switch
-      // completes the job as 'skipped' with the reason recorded,
-      // instead of the pre-R3 behavior where coverage depended on
-      // incidental config.
-      // Issue #4782 S3 — the per-login settings map rides the
-      // gate: an operator's `pipeline.*` tuning takes effect on
-      // deliveries. Absent reader → env-only, as before.
-      const pipelinePolicy = resolvePipelinePolicy(
-        ctx.env as unknown as Record<string, unknown>,
-        ctx.readSettingRaw ? readPipelineSettings(ctx.readSettingRaw) : undefined,
-      );
-      if (typeof payload.skipReason === "string" && payload.skipReason) {
-        // Issue #1228 (#1209 F2): the 'completed' notify job was
-        // suppressed on this channel because the delivery was to be
-        // the completion message — so a delivery that has nothing to
-        // attach must still SPEAK (completion text + the reason) or
-        // the channel hears nothing about a completed run. Policy
-        // gates it exactly like a completed notification; best-effort.
-        let noticeSent = false;
-        if (channel !== "webhook" && shouldNotify(pipelinePolicy, "completed", channel)) {
-          try {
-            const notice = await Promise.race([
-              ctx.followupDeliveryPort().notify({
-              channel,
-              userLogin,
-              text: formatUndeliverableNotification(outcome, payload.skipReason),
-              ...(channel === "email" && outcome.emailTo ? { emailTo: outcome.emailTo } : {}),
-              ...(channel === "slack" && outcome.slackChannel ? { slackChannel: outcome.slackChannel } : {}),
-              }),
-              executionDeadline.promise,
-            ]);
-            noticeSent = notice.ok;
-          } catch (noticeError) {
-            structuredLog.warn("asyncJobs.undeliverable_notice_failed", {
-              message: "[asyncJobs] undeliverable-notice failed:",
-              error: noticeError instanceof Error ? noticeError.message : String(noticeError),
-            });
-          }
-        }
-        result = { status: "skipped", reason: payload.skipReason, channel, noticeSent };
-      } else if (!shouldNotify(pipelinePolicy, "completed", channel)) {
-        result = { status: "skipped", reason: `Pipeline policy disables completed-run deliveries on ${channel}.`, channel };
-      // Issue #1347 (owner ruling 2026-10-24, reversing #277 for
-      // RUN deliveries): screener follow-up deliveries send
-      // immediately — no confirmation hold, no held announcement.
-      // The research-report dispatch gate is untouched: it lives
-      // in reportDispatch / the reports routes, not this executor.
-      } else {
-        // Issue #2867: (runId, destination) delivery suppression,
-        // checked after the policy gates above and before any
-        // send — a deliver job that sent and then failed to
-        // complete must not send the same run to the same
-        // destination again on retry. The claim completes the
-        // job as skipped with the reason on the job, never a
-        // silent drop and never a second send.
-        const suppressor =
-          ctx.deliverySuppressor ?? (ctx.deliverySuppressor = createDeliverySuppressor());
-        const resolvedTenantId =
-          job.tenant_id ??
-          outcome.tenantId ??
-          inferTenantFromDeliveryId(outcome.deliveryId ?? jobId);
-        const deliveryRunId = scopedDeliveryClaimRunId(
-          outcome.deliveryId ?? jobId,
-          resolvedTenantId,
-        );
-        const deliveryDestination = deliveryDestinationFor(channel, outcome.emailTo);
-        if (!suppressor.tryClaim(deliveryRunId, deliveryDestination)) {
-          ctx.audit("followup.delivery_suppressed", "orchestrator", {
-            jobId,
-            runId: deliveryRunId,
-            destination: deliveryDestination,
-            channel,
-          });
-          result = {
-            status: "skipped",
-            reason: `Duplicate delivery suppressed for run ${deliveryRunId} to ${deliveryDestination}.`,
-            channel,
-          };
-        } else {
-          const config = resolveScreenerFollowupConfig(ctx.env as unknown as Record<string, unknown>);
-          const effectiveRecipient =
-            channel === "email"
-              ? outcome.emailTo ?? config.channels.email.to
-              : channel === "slack"
-                ? outcome.slackChannel ?? config.channels.slack.channel
-                : outcome.webhookUrl ?? config.channels.webhook.url;
-          const runScope = {
-            tenantId: resolvedTenantId,
-            runId: outcome.deliveryId ?? jobId,
-            scheduleId: outcome.scheduleId ?? null,
-            userLogin,
-          };
-          const binding =
-            outcome.recipientBinding ?? resolveEnvChannelRecipientBinding(ctx.env, runScope);
-          const recipientCheck =
-            channel === "email"
-              ? await verifyEmailRecipientAtDelivery({
-                  recipient: effectiveRecipient,
-                  env: ctx.env,
-                  run: runScope,
-                  ownerEmail: outcome.ownerEmail,
-                  binding,
-                  layer: "executor.deliver",
-                  audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
-                })
-              : channel === "slack"
-                ? await resolveAndVerifySlackRecipientAtDelivery({
-                    requestedChannel: outcome.slackChannel,
-                    envFallbackChannel: config.channels.slack.channel,
-                    env: ctx.env,
-                    run: runScope,
-                    binding,
-                    layer: "executor.deliver",
-                    audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
-                  })
-                : await resolveAndVerifyWebhookRecipientAtDelivery({
-                    requestedUrl: outcome.webhookUrl,
-                    envFallbackUrl: config.channels.webhook.url,
-                    env: ctx.env,
-                    run: runScope,
-                    binding,
-                    layer: "executor.deliver",
-                    audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
-                  });
-          if (!recipientCheck.allowed) {
-            suppressor.release(deliveryRunId, deliveryDestination);
-            throw new Error(recipientCheck.error);
-          }
-          if (channel === "webhook" && "url" in recipientCheck && typeof recipientCheck.url === "string" && recipientCheck.url) {
-            outcome.webhookUrl = recipientCheck.url;
-          }
-          if (channel === "email") {
-            // Per-task override wins over the env recipient (S5b); the
-            // allowlist applies to the effective recipient either way.
-            const to = outcome.emailTo ?? config.channels.email.to;
-            if (!to) {
-              suppressor.release(deliveryRunId, deliveryDestination);
-              throw new Error("Email delivery is not configured (SCREENER_EMAIL_TO is unset).");
-            }
-            if (!isEmailAllowed(config, to, outcome)) {
-              const error = codedMessage("FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED", `recipient ${to}`);
-              ctx.audit("delivery.recipient_refused", "orchestrator", {
-                jobId,
-                channel: "email",
-                recipient: to,
-                tenantId: resolvedTenantId,
-                runId: outcome.deliveryId ?? jobId,
-                scheduleId: outcome.scheduleId ?? null,
-                userLogin,
-                reason: "recipient_not_in_tenant_run",
-                detail: `recipient ${to}`,
-                error,
-                layer: "executor.deliver",
-              });
-              suppressor.release(deliveryRunId, deliveryDestination);
-              throw new Error(error);
-            }
-          }
-          // Issue #2867: a failed send releases the claim, so
-          // a retry may send (the recipient holds nothing). A
-          // post-send failure below does NOT release — the
-          // recipient already holds the artifact, so the retry
-          // is the duplicate this suppressor exists to stop.
-          let delivery: { ok: boolean; error?: string; detail?: string };
-          try {
-            delivery = await Promise.race([
-              ctx.followupDeliveryPort().deliver({ channel, userLogin, outcome, artifacts }),
-              executionDeadline.promise,
-            ]);
-            if (!delivery.ok) throw new Error(codedMessage("FAILURE_DELIVERY_CHANNEL_FAILED", delivery.error || `Delivery via ${channel} failed.`));
-          } catch (sendErr) {
-            suppressor.release(deliveryRunId, deliveryDestination);
-            throw sendErr;
-          }
-          // Issue #2178 (Q7 S2): the delivery claim is consequential —
-          // audit it through the blocking helper before the job can
-          // complete as sent. A throwing store propagates to the
-          // executor's catch, which marks the job failed: the recipient
-          // may already hold the artifact, but the system never reports
-          // an unrecorded delivery as success.
-          // #6102: the blocking claim writes to D1 now; a null port
-          // (AGENT_DB unbound) throws — the job fails, never reports
-          // an unrecorded delivery as success.
-          await recordBlockingAuditAsync(await auditEventPort(ctx.env as unknown as { AGENT_DB?: unknown }), {
-            id: crypto.randomUUID(),
-            sessionId: userLogin,
-            type: "followup.delivered",
-            agent: "orchestrator",
-            payload: { jobId, channel, userLogin, detail: delivery.detail },
-            createdAt: new Date().toISOString(),
-          });
-          result = { status: "sent", channel, detail: delivery.detail };
-        }
-      }
-    } else if (job.capability === "followup.notify") {
-      // Issue #1123 S4: one lifecycle notification on one channel.
-      // Text-only; the email allowlist applies exactly as for
-      // deliveries (Assessment cross-channel rule).
-      const channel = payload.channel as AsyncJobChannel;
-      const event = payload.event as FollowupLifecycleEvent;
-      const outcome = payload.outcome as ScreenerRunOutcome;
-      const userLogin = typeof payload.userLogin === "string" ? payload.userLogin : ctx.sessionKey();
-      // Issue #1191 (#1173 R3): pipeline policy gate, mirroring the
-      // deliver branch — a policy-off event/channel completes as
-      // 'skipped' with the reason on the job, never a silent drop.
-      // Issue #4782 S3 — as the deliver branch above: the
-      // per-login settings map rides the notify gate.
-      const notifyPolicy = resolvePipelinePolicy(
-        ctx.env as unknown as Record<string, unknown>,
-        ctx.readSettingRaw ? readPipelineSettings(ctx.readSettingRaw) : undefined,
-      );
-      if (!shouldNotify(notifyPolicy, event, channel)) {
-        result = { status: "skipped", reason: `Pipeline policy disables ${event} notifications on ${channel}.`, channel, event };
-      } else {
-      const config = resolveScreenerFollowupConfig(ctx.env as unknown as Record<string, unknown>);
-      const resolvedTenantId =
-        job.tenant_id ??
-        outcome.tenantId ??
-        inferTenantFromDeliveryId(outcome.deliveryId ?? jobId);
-      const effectiveRecipient =
-        channel === "email"
-          ? outcome.emailTo ?? config.channels.email.to
-          : channel === "slack"
-            ? outcome.slackChannel ?? config.channels.slack.channel
-            : outcome.webhookUrl ?? config.channels.webhook.url;
-      const runScope = {
-        tenantId: resolvedTenantId,
-        runId: outcome.deliveryId ?? jobId,
-        scheduleId: outcome.scheduleId ?? null,
-        userLogin,
-      };
-      const binding =
-        outcome.recipientBinding ?? resolveEnvChannelRecipientBinding(ctx.env, runScope);
-      const recipientCheck =
-        channel === "email"
-          ? await verifyEmailRecipientAtDelivery({
-              recipient: effectiveRecipient,
-              env: ctx.env,
-              run: runScope,
-              ownerEmail: outcome.ownerEmail,
-              binding,
-              layer: "executor.notify",
-              audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
-            })
-          : channel === "slack"
-            ? await resolveAndVerifySlackRecipientAtDelivery({
-                requestedChannel: outcome.slackChannel,
-                envFallbackChannel: config.channels.slack.channel,
-                env: ctx.env,
-                run: runScope,
-                binding,
-                layer: "executor.notify",
-                audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
-              })
-            : await resolveAndVerifyWebhookRecipientAtDelivery({
-                requestedUrl: outcome.webhookUrl,
-                envFallbackUrl: config.channels.webhook.url,
-                env: ctx.env,
-                run: runScope,
-                binding,
-                layer: "executor.notify",
-                audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
-              });
-      if (!recipientCheck.allowed) {
-        throw new Error(recipientCheck.error);
-      }
-      if (channel === "email") {
-        // Issue #1191: per-task recipient wins (mirrors deliveries);
-        // the allowlist applies to the effective recipient.
-        const to = outcome.emailTo ?? config.channels.email.to;
-        if (!to) throw new Error("Email notification is not configured (SCREENER_EMAIL_TO is unset).");
-        if (!isEmailAllowed(config, to, outcome)) {
-          const error = codedMessage("FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED", `notification recipient ${to}`);
-          ctx.audit("delivery.recipient_refused", "orchestrator", {
-            jobId,
-            channel: "email",
-            recipient: to,
-            tenantId: resolvedTenantId,
-            runId: outcome.deliveryId ?? jobId,
-            scheduleId: outcome.scheduleId ?? null,
-            userLogin,
-            reason: "recipient_not_in_tenant_run",
-            detail: `notification recipient ${to}`,
-            error,
-            layer: "executor.notify",
-          });
-          throw new Error(error);
-        }
-      }
-      const text = formatLifecycleNotification(
-        event,
-        outcome,
-        typeof payload.detail === "string" ? payload.detail : undefined,
-      );
-      const sent = await Promise.race([
-        ctx.followupDeliveryPort().notify({
-          channel,
-          userLogin,
-          text,
-          ...(channel === "email" && outcome.emailTo ? { emailTo: outcome.emailTo } : {}),
-          ...(channel === "slack" && outcome.slackChannel ? { slackChannel: outcome.slackChannel } : {}),
-        }),
-        executionDeadline.promise,
-      ]);
-      if (!sent.ok) throw new Error(sent.error || `Notification via ${channel} failed.`);
-      result = { status: "notified", channel, event };
-      }
-    } else if (job.capability === "shard.execute") {
-      // Issue #1355: one shard of a sharded scheduled screen. The
-      // executor owns policy + job state; the handler owns the
-      // shard's work (providers, pipeline, store seams).
-      const { executeShardJob, resolveShardChainSource } = await import("../../services/shardExecutors");
-      const { ETradeService } = await import("../../services/etrade");
-      const shardPayload = payload as unknown as import("../../services/shardJobs").ShardPayload;
-      // Issue #3655: one E*TRADE factory closure, shared by the legacy
-      // executor seam and the broker-aware chain-source resolver
-      // below — a second inline construction would trip the #291
-      // extraction ledger (one site per file).
-      const createETradeService = (userLogin: string, environment: string | undefined) =>
-        new ETradeService(ctx.getOrm(), ctx.env, userLogin, environment);
-      result = await Promise.race([
-        executeShardJob(
-        {
-          sql: ctx.agentCtx.storage.sql,
-          env: ctx.env as unknown as Record<string, unknown>,
-          orm: ctx.getOrm(),
-          storage: ctx.agentCtx.storage,
-          createETradeService,
-          // Issue #3655: broker-aware chain source (tenant broker →
-          // Alpaca platform chain source / etrade client /
-          // provider_unsupported). Without this the sharded options
-          // executor would fetch E*TRADE chains for every tenant.
-          resolveChainSource: (chain) =>
-            resolveShardChainSource(
-              {
-                env: ctx.env as unknown as Record<string, unknown>,
-                orm: ctx.getOrm(),
-                createETradeService,
-              },
-              chain
-            ),
-          sessionId: ctx.sessionKey(),
-          // Issue #4417: persist each failed shard attempt on the job row —
-          // durable across a host restart, best-effort by contract.
-          recordAttempt: (attempt: number, error: unknown) => {
-            try {
-              family.queue.appendAttempt(jobId, {
-                attempt,
-                error: error instanceof Error ? error.message : String(error),
-                at: new Date().toISOString(),
-              });
-            } catch {
-              // History is evidence; it never fails the shard.
-            }
-          },
-        },
-        shardPayload
-        ),
-        executionDeadline.promise,
-      ]);
-    } else if (job.capability === "feed.snapshot") {
-      // Consolidation #1236 (feed seam): the feed stage job. The
-      // executor owns job state; the handler owns the work
-      // (providers, producer, store seams) — the shard.execute idiom.
-      const { executeFeedSnapshotJob } = await import("../../services/feedSnapshotJob");
-      const { ETradeService } = await import("../../services/etrade");
-      const feedPayload = payload as unknown as import("../../services/feedSnapshotJob").FeedSnapshotJobPayload;
-      result = await Promise.race([
-        executeFeedSnapshotJob(
-        {
-          sql: ctx.agentCtx.storage.sql,
-          env: ctx.env as unknown as Record<string, unknown>,
-          orm: ctx.getOrm(),
-          createETradeService: (userLogin, environment) =>
-            new ETradeService(ctx.getOrm(), ctx.env, userLogin, environment),
-          sessionId: ctx.sessionKey(),
-        },
-        feedPayload
-        ),
-        executionDeadline.promise,
-      ]);
-    } else if (job.capability === "nlq.execute") {
-      const query = String(payload.query || "").trim();
-      if (!query) throw new Error("NLQ job requires a non-empty query.");
-      // #1722: NLQ_MODE, run (payload `mode`) > session > user
-      // (payload scopedNlqModes, set by the job submitter) > global
-      // env > built-in "rest". An invalid winning value fails closed
-      // to "rest" and is logged + audited as nlq.config_error.
-      // "rest" (default) is the pre-#1722 async contract verbatim —
-      // scheduling, stock screen, discovery + fit runners, stores
-      // (the async context binds NO social port, in either mode, so
-      // async NLQ can never set a social brief). "mcp" is the
-      // MCP-direct shape — the full function with NO options (no
-      // ports, no stores, no runners). Identity is not switched:
-      // payload userLogin / session key in both modes.
-      const jobUserLoginForNlq = typeof payload.userLogin === "string" ? payload.userLogin : ctx.sessionKey();
-      const resolvedNlqMode = resolveNlqMode(
-        levelsForNlq(
-          (payload as { scopedNlqModes?: { session?: unknown; user?: unknown } }).scopedNlqModes,
-          (payload as { mode?: unknown }).mode,
-          (ctx.env as unknown as Record<string, unknown> | undefined)?.[NLQ_MODE_SWITCH]
-        )
-      );
-      if (resolvedNlqMode.invalid) {
-        structuredLog.error("asyncJobs.nlq_mode_invalid", {
-          message: `[nlq] invalid ${NLQ_MODE_SWITCH} value ${JSON.stringify(resolvedNlqMode.raw)} — failing closed to "rest"`,
-          setting: NLQ_MODE_SWITCH,
-          rawValue: resolvedNlqMode.raw,
-        });
-        ctx.audit(nlqConfigErrorEvent(), "orchestrator", {
-          setting: NLQ_MODE_SWITCH,
-          value: resolvedNlqMode.raw ?? "",
-          resolved: "rest",
-        });
-      }
-      // #2303: ports for the REST-mode discovery runner (the
-      // mcp mode takes no options, unchanged).
-      const nlqDpPorts =
-        resolvedNlqMode.mode === "mcp" ? null : await buildDataProviderPorts(ctx.env);
-      result = await Promise.race([
-        resolvedNlqMode.mode === "mcp"
-        ? executeNaturalLanguageQuery(
-            ctx.getOrm(),
-            ctx.sessionKey(),
-            query,
-            ctx.env,
-            jobUserLoginForNlq,
-            getUserDid(ctx.sessionKey()),
-          )
-        : executeNaturalLanguageQuery(
-            ctx.getOrm(),
-            ctx.sessionKey(),
-            query,
-            ctx.env,
-            jobUserLoginForNlq,
-            getUserDid(ctx.sessionKey()),
-            { scanRunStore: createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, profileStore: createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).strategyProfiles, schedulingPort: ctx.nlqSchedulingPort(), agentScheduleCapability: createAgentScheduleExecutorDepsForDo(ctx.env, ctx.agentCtx.storage.sql, (type, payload) => ctx.audit(type, "orchestrator", payload), { sdk: nlqPortToAgentSdkAdapter(ctx.nlqSchedulingPort(), createD1UnifiedSchedulePorts({ d1: ctx.env.AGENT_DB }).unifiedSchedules, {
-                // Issue #6503 — the start-paused control, resolved here so
-                // a schedule created through chat/NLQ starts active when
-                // the control is off (resume arms it through the NLQ
-                // port's alarms).
-                startPaused: resolveEffectiveScheduleStartPaused(ctx.agentCtx.storage.sql, ctx.env).paused,
-                alarms: nlqPortToScheduleAlarms(ctx.nlqSchedulingPort(), () =>
-                  resolveEffectiveScheduleFloor(ctx.agentCtx.storage.sql, ctx.env).seconds,
-                ),
-              }) }), stockScreenPort: ctx.nlqStockScreenPort(), discoveryRunner: createDiscoveryService({ env: ctx.env, userLogin: jobUserLoginForNlq, orm: ctx.getOrm(), sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage, platform: TradingPlatformRegistry.getPlatform(await resolveTenantBroker(ctx.env), ctx.env, ctx.getOrm(), jobUserLoginForNlq), ...(nlqDpPorts?.config ? { configPort: nlqDpPorts.config } : {}), ...(nlqDpPorts?.captures ? { capturePort: nlqDpPorts.captures } : {}) }), fitDiscoveryRunner: createFitDiscoveryRunner({ env: ctx.env, userLogin: jobUserLoginForNlq, sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }) },
-        ),
-        executionDeadline.promise,
-      ]);
-    } else {
-      throw new Error(`Unsupported async capability: ${job.capability}`);
-    }
+    const stepOutput = unit.output as
+      | { result?: unknown; responseStatus?: number }
+      | undefined;
+    result = stepOutput?.result;
+    responseStatus = stepOutput?.responseStatus;
 
     const serializedResult = JSON.stringify(
       // Issue #3121 S4 — the completed step's run record carries its

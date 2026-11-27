@@ -152,7 +152,7 @@ import {
   resolvePlatformId,
   type AttributionEnvelopeOverride,
 } from "../security/attributionEnvelope";
-import { submitAsyncJob, recoverQueuedAsyncJobs, recoverStaleRunningAsyncJobs, getAsyncJob, listAsyncJobs, executeAsyncJob, sweepStaleAsyncJobs, scheduleScreenerFollowups, retryAsyncJob, retryFailedChainJobs, type AsyncJobsContext } from "./orchestrator/asyncJobs";
+import { submitAsyncJob, recoverQueuedAsyncJobs, recoverStaleRunningAsyncJobs, getAsyncJob, listAsyncJobs, executeAsyncJob, sweepStaleAsyncJobs, scheduleScreenerFollowups, retryAsyncJob, retryFailedChainJobs, ASYNC_CAPABILITY_HANDLERS, type AsyncJobsContext } from "./orchestrator/asyncJobs";
 import { formatMissedScheduleAlertDetail, watchdogMissedSchedules, type ScheduleWatchdogContext, type ScheduleWatchdogSweepResult } from "./orchestrator/scheduleWatchdog";
 import { RECORDED_SCHEDULE_CALLBACKS } from "./orchestrator/scheduleCallbacks";
 import { ensureOrchestratorTables } from "./orchestrator/tableSchema";
@@ -219,6 +219,13 @@ import {
   projectJobRunRecordBestEffort,
 } from "../services/runLedgerProjectionHooks";
 import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
+import { createJobPipelineStoresFromSql } from "../data/createJobPipelinePorts";
+import { createJobPipelineControl } from "../services/jobPipelineControlFactory";
+import {
+  jobRunRecorderFromStore,
+  type JobPipelineControl,
+} from "../services/jobPipelineEngine";
+import { createAsyncCapabilityStepRegistry } from "../services/asyncCapabilitySteps";
 import { parseJobRunRecordNaturalKey } from "../workflows/runLedgerQueueTransport";
 // Issue #359-01: reports + HITL routes live in src/agents/routes/reports.ts;
 // routeRequest delegates to handleReportsRoutes at the original position.
@@ -767,10 +774,41 @@ export class OrchestratorAgent extends PortThink {
     return turn.traceparent;
   }
 
+  /**
+   * Issue #6554 (F1) — the orchestrator's async-capability engine:
+   * one DO-backed control per instance, over the same DO SQLite
+   * the queue lives in, built through the one factory so the OTel
+   * run-settled observers wire exactly once (#6250). Its run
+   * records are the engine's record of async units; the
+   * mas_async_jobs row stays the durable truth until the F5 ledger
+   * unification (#6101). Construction does no I/O — the stores
+   * ensure their schema on first use.
+   */
+  private asyncCapabilityEngineControl?: JobPipelineControl;
+
+  private asyncCapabilityEngine(): JobPipelineControl {
+    if (this.asyncCapabilityEngineControl) return this.asyncCapabilityEngineControl;
+    const sql = this.ctx.storage.sql;
+    const control = createJobPipelineControl(
+      {
+        stores: createJobPipelineStoresFromSql(sql as never),
+        runRecorder: jobRunRecorderFromStore(new SqlJobRunRecordStore(sql as never)),
+        publisher: null,
+        steps: createAsyncCapabilityStepRegistry(ASYNC_CAPABILITY_HANDLERS),
+      },
+      { env: this.env },
+    );
+    this.asyncCapabilityEngineControl = control;
+    return control;
+  }
+
   private asyncJobsContext(): AsyncJobsContext {
     return {
       env: this.env,
       agentCtx: this.ctx,
+      // Issue #6554 (F1) — the engine the async capability executes
+      // through (DO-backed; see asyncCapabilityEngine above).
+      engine: this.asyncCapabilityEngine(),
       // Issue #3922: the instance's settings reader, forwarded
       // into mcp.tool executions (the ND gate's stored layer).
       readSettingRaw: (key) => this.readSettingRaw(key),
