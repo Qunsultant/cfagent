@@ -2407,7 +2407,9 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
    * Contract mirrors YahooFinanceProvider.getQuotes: returns only
    * genuinely live quotes, in request order; symbols Alpaca omits
    * (or whose snapshot carries no positive trade price) are absent
-   * and the caller diffs. Field mapping is this class's own
+   * and the caller diffs. The endpoint answers a top-level symbol
+   * map (#6690) — not the wrapped { snapshots: … } shape the
+   * crypto/options endpoints use. Field mapping is this class's own
    * snapshot semantics: price from latestTrade, previousClose from
    * prevDailyBar, OHLC/volume/vwap from dailyBar, bid/ask from
    * latestQuote.
@@ -2429,23 +2431,63 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
     // rate-limiter token, as every fetch does (#6208 pattern). A
     // failed chunk throws, as the single request did — the feed
     // job retries the whole fetch.
+    //
+    // Issue #6690 — feed selection is externalized
+    // (ALPACA_STOCKS_FEED, the ALPACA_OPTIONS_FEED pattern): a set
+    // value rides the request; unset omits the parameter so Alpaca
+    // applies its entitled default (sip with the unlimited
+    // subscription, otherwise iex). The label rides every terminal
+    // error so an entitlement refusal is diagnosable from the
+    // error alone.
+    const feed = String(this.env?.ALPACA_STOCKS_FEED ?? "").trim();
+    const feedLabel = feed || "default";
     const snaps: Record<string, any> = {};
+    let lastStatus = 0;
     for (let i = 0; i < wanted.length; i += BATCH_QUOTES_CHUNK_SIZE) {
       const chunk = wanted.slice(i, i + BATCH_QUOTES_CHUNK_SIZE);
-      const url = `${this.getDataUrl()}/v2/stocks/snapshots?symbols=${encodeURIComponent(chunk.join(","))}`;
+      const url =
+        `${this.getDataUrl()}/v2/stocks/snapshots?symbols=${encodeURIComponent(chunk.join(","))}` +
+        (feed ? `&feed=${encodeURIComponent(feed)}` : "");
       const res = await this.throttledFetch(url, { headers: this.getHeaders() });
+      lastStatus = res.status;
       if (!res.ok) {
-        throw new Error(`Alpaca batch quotes HTTP ${res.status}`);
+        throw new Error(`Alpaca batch quotes HTTP ${res.status} (feed=${feedLabel})`);
       }
-      const data = (await res.json().catch(() => ({}))) as any;
-      Object.assign(snaps, data?.snapshots ?? {});
+      // Issue #6690 — a body that does not parse is its own named
+      // failure; folding it into {} made it indistinguishable from
+      // a healthy empty result.
+      let data: any;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error(
+          `Alpaca batch quotes malformed body (HTTP ${res.status}, feed=${feedLabel})`,
+        );
+      }
+      if (!data || typeof data !== "object" || Array.isArray(data)) {
+        throw new Error(
+          `Alpaca batch quotes malformed body (HTTP ${res.status}, feed=${feedLabel})`,
+        );
+      }
+      // Issue #6690 — the multi-symbol stocks snapshots endpoint
+      // returns a TOP-LEVEL symbol map ({ "AAPL": { latestTrade,
+      // … } }); the wrapped { snapshots: … } shape belongs to the
+      // crypto/options endpoints. Reading data.snapshots merged
+      // zero snapshots on every healthy 2xx.
+      Object.assign(snaps, data);
     }
     const out: MarketDataResearchQuote[] = [];
+    let present = 0;
+    let unusable = 0;
     for (const symbol of wanted) {
       const s = snaps[symbol];
       if (!s) continue;
+      present += 1;
       const price = Number(s.latestTrade?.p || s.dailyBar?.c || 0);
-      if (!(price > 0)) continue;
+      if (!(price > 0)) {
+        unusable += 1;
+        continue;
+      }
       const prevCloseRaw = Number(s.prevDailyBar?.c || 0);
       const previousClose = prevCloseRaw > 0 ? prevCloseRaw : price;
       const change = Number((price - previousClose).toFixed(2));
@@ -2475,7 +2517,13 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
       });
     }
     if (out.length === 0) {
-      throw new Error("Alpaca batch quotes returned no results");
+      // Issue #6690 — the terminal error carries the response-shape
+      // evidence: HTTP status, feed used, snapshots present,
+      // present-but-unusable (no positive price), and requested —
+      // so an empty result names its own mechanism.
+      throw new Error(
+        `Alpaca batch quotes returned no results (HTTP ${lastStatus}, feed=${feedLabel}, snapshots=${present}, unusable=${unusable}, requested=${wanted.length})`,
+      );
     }
     return out;
   }
