@@ -40,7 +40,13 @@ import {
 import { isSynchronousMcpTool } from "../config/asyncJobModes";
 import type { AgentScheduleActionRequest } from "../services/agentScheduleCapability";
 import type { AgentScheduleLoopOrigin } from "../services/agentScheduleCapability";
-import { resolveAgentScheduleTenant } from "../services/agentScheduleCapability";
+import {
+  AGENT_SCHEDULABLE_CALLBACKS,
+  AGENT_SCHEDULABLE_GOAL_OPERATIONS,
+  isAgentSchedulableCallback,
+  isAgentSchedulableGoalOperation,
+  resolveAgentScheduleTenant,
+} from "../services/agentScheduleCapability";
 import { AGENTIC_SPEND_AGENT_ID } from "../payments/ledger";
 import type { Env } from "../types";
 
@@ -56,41 +62,107 @@ export interface AgentScheduleToolContext {
 
 export function createAgentScheduleManagementTool(context: AgentScheduleToolContext) {
   const scheduleTimingSchema = z.discriminatedUnion("type", [
-    z.object({ type: z.literal("cron"), cron: z.string().min(1) }),
-    z.object({ type: z.literal("interval"), intervalSeconds: z.number().int().positive() }),
-    z.object({ type: z.literal("scheduled"), time: z.number().finite() }),
-    z.object({ type: z.literal("delayed"), delayInSeconds: z.number().int().positive() }),
+    z.object({
+      type: z.literal("cron"),
+      cron: z.string().min(1).describe("Cron expression, e.g. '0 9 * * 1-5'."),
+    }),
+    z.object({
+      type: z.literal("interval"),
+      intervalSeconds: z.number().int().positive().describe("Repeat every this many seconds."),
+    }),
+    z.object({
+      type: z.literal("scheduled"),
+      time: z.number().finite().describe("Unix epoch milliseconds of the single fire time."),
+    }),
+    z.object({
+      type: z.literal("delayed"),
+      delayInSeconds: z.number().int().positive().describe("Fire once after this many seconds."),
+    }),
   ]);
   const goalSchema = z.object({
-    id: z.string().min(1),
-    name: z.string().min(1),
-    cron: z.string().min(1),
-    operation: z.string().min(1),
-    budgetCents: z.number().positive(),
-    enabled: z.boolean().optional(),
-    timeZone: z.string().optional(),
-    subDailyOptIn: z.boolean().optional(),
+    id: z.string().min(1).describe("Stable goal id, unique within the tenant; reused for updates."),
+    name: z.string().min(1).describe("Human-readable goal name."),
+    cron: z.string().min(1).describe("Cron expression driving the goal schedule (the goal's own cadence)."),
+    operation: z.string().min(1).describe(
+      `Goal operation to run at firing. Must be an agent-schedulable operation: ${AGENT_SCHEDULABLE_GOAL_OPERATIONS.join(", ")} (a "pipeline:*" entry means any operation starting with "pipeline:"). Descriptor-only operations such as "none" or "search.query" are refused.`,
+    ),
+    budgetCents: z.number().positive().describe("Budget in cents; must be greater than 0."),
+    enabled: z.boolean().optional().describe("Whether the goal schedule starts enabled; enabled when omitted."),
+    timeZone: z.string().optional().describe("IANA time zone interpreting cron; the tenant time zone when omitted."),
+    subDailyOptIn: z.boolean().optional().describe("Opt in to sub-daily firing; sub-daily cadences need this flag."),
   }).strict();
+  // #6665 (G2): the schema states the constraints up front so the model
+  // can call the tool in one round — executionMode required for create,
+  // kind-specific payloads, schedulable-only callback/operation — instead
+  // of discovering them one failure per round from execute(). The
+  // execute() throws below stay as fail-closed backstops.
   const scheduleInputSchema = z.object({
-    action: z.enum(["create", "list", "update", "pause", "resume", "trigger", "delete"]),
+    action: z.enum(["create", "list", "update", "pause", "resume", "trigger", "delete"])
+      .describe("Schedule action: create, list, update, pause, resume, trigger, or delete."),
     kind: context.goalsOnly
       ? z.literal("goal")
-      : z.enum(["sdk", "goal", "workflow-stage"]),
-    executionMode: z.enum(["deterministic", "agentic-loop"]).optional(),
-    scheduleId: z.string().min(1).optional(),
-    callback: z.string().min(1).optional(),
-    timing: scheduleTimingSchema.optional(),
-    payload: z.record(z.string(), z.unknown()).optional(),
-    goal: goalSchema.optional(),
-    jobId: z.string().min(1).optional(),
-    nodePath: z.string().min(1).optional(),
-    reason: z.string().optional(),
-    budgetCents: z.number().nonnegative().optional(),
-  }).strict();
+      : z.enum(["sdk", "goal", "workflow-stage"]).describe(
+          'Schedule kind: "sdk" (a callback schedule), "goal" (a goal schedule), or "workflow-stage" (a workflow-node schedule). The agentic loop accepts "goal" only.',
+        ),
+    executionMode: z.enum(["deterministic", "agentic-loop"]).optional()
+      .describe('Required for create: "deterministic" or "agentic-loop". Goal updates also require it; sdk and workflow-stage updates must omit it.'),
+    scheduleId: z.string().min(1).optional()
+      .describe("Id of the existing schedule. Required for update, pause, resume, trigger, and delete."),
+    callback: z.string().min(1).optional().describe(
+      `SDK callback to run at firing. Must be one of the agent-schedulable callbacks: ${AGENT_SCHEDULABLE_CALLBACKS.join(", ")}. Required for kind "sdk" creates.`,
+    ),
+    timing: scheduleTimingSchema.optional()
+      .describe('When the schedule fires: { type: "cron", cron }, { type: "interval", intervalSeconds }, { type: "scheduled", time }, or { type: "delayed", delayInSeconds }. Required for sdk and workflow-stage creates.'),
+    payload: z.record(z.string(), z.unknown()).optional()
+      .describe("Optional JSON payload passed to the callback at firing (sdk creates only)."),
+    goal: goalSchema.optional()
+      .describe('The goal definition, NESTED under "goal" — never flattened onto the top level. Required for goal creates.'),
+    jobId: z.string().min(1).optional()
+      .describe("Workflow job id; required for workflow-stage creates."),
+    nodePath: z.string().min(1).optional()
+      .describe("Path of the workflow node to run; required for workflow-stage creates."),
+    reason: z.string().optional()
+      .describe("Optional human-readable reason recorded with the action (workflow-stage creates)."),
+    budgetCents: z.number().nonnegative().optional()
+      .describe("Optional budget in cents (sdk and workflow-stage creates). A goal budget lives on goal.budgetCents and must be greater than 0."),
+  }).strict().superRefine((input, ctx) => {
+    const fail = (path: (string | number)[], message: string) => {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path, message });
+    };
+    if (input.callback !== undefined && !isAgentSchedulableCallback(input.callback)) {
+      fail(
+        ["callback"],
+        `Callback '${input.callback}' is not agent-schedulable: only ${AGENT_SCHEDULABLE_CALLBACKS.join(", ")} may be armed by an agent.`,
+      );
+    }
+    if (input.goal !== undefined && !isAgentSchedulableGoalOperation(input.goal.operation)) {
+      fail(
+        ["goal", "operation"],
+        `Goal operation '${input.goal.operation}' is not agent-schedulable: use one of ${AGENT_SCHEDULABLE_GOAL_OPERATIONS.join(", ")}.`,
+      );
+    }
+    if (input.action === "create") {
+      if (!input.executionMode) {
+        fail(["executionMode"], "Creating a schedule requires an explicit executionMode ('deterministic' or 'agentic-loop').");
+      }
+      if (input.kind === "sdk") {
+        if (!input.callback) fail(["callback"], "Creating an SDK schedule requires callback and timing.");
+        if (!input.timing) fail(["timing"], "Creating an SDK schedule requires callback and timing.");
+      } else if (input.kind === "goal") {
+        if (!input.goal) fail(["goal"], "Creating a goal schedule requires a goal definition.");
+      } else if (input.kind === "workflow-stage") {
+        if (!input.jobId) fail(["jobId"], "Creating a workflow-stage schedule requires jobId, nodePath, and timing.");
+        if (!input.nodePath) fail(["nodePath"], "Creating a workflow-stage schedule requires jobId, nodePath, and timing.");
+        if (!input.timing) fail(["timing"], "Creating a workflow-stage schedule requires jobId, nodePath, and timing.");
+      }
+    } else if (input.action !== "list" && !input.scheduleId) {
+      fail(["scheduleId"], `Action '${input.action}' requires scheduleId.`);
+    }
+  });
 
   return tool({
     description:
-      "Create, list, update, pause, resume, trigger, or delete a tenant-owned schedule through the governed scheduler. The server derives the principal and tenant; excluded callbacks and unauthorized or approval-bound actions are refused.",
+      "Manage tenant-owned schedules through the governed scheduler. Callable as 'tool_openaimp_manage_agent_schedule' in chat turns and as 'manage_agent_schedule' in the agentic loop. Valid kinds: sdk, goal, workflow-stage. Create requires executionMode ('deterministic' or 'agentic-loop'): an sdk create needs a schedulable callback + timing; a goal create needs a NESTED goal object whose operation is schedulable and whose budgetCents is greater than 0; a workflow-stage create needs jobId + nodePath + timing. Non-create actions other than list require scheduleId. The server derives the principal and tenant; excluded callbacks and unauthorized or approval-bound actions are refused.",
     inputSchema: scheduleInputSchema,
     execute: async (input) => {
       const login = context.actingLogin?.()?.trim();
@@ -452,6 +524,13 @@ export function createAgentMcpTools(context: McpToolContext) {
       execute: context.agentScheduleExecute,
       loopOrigin: context.agentScheduleLoopOrigin,
     });
+    // #6665 (G2): alias under the discovered-tool naming convention —
+    // the prompt steers to tool_openaimp_* names, so the model calls
+    // this key; the bare name stays registered for the agentic-loop
+    // path (src/agents/scheduled-agent.ts, activeTools:
+    // ["manage_agent_schedule"]). Same object, as with
+    // compareValuations/compareStocks above.
+    tools["tool_openaimp_manage_agent_schedule"] = tools["manage_agent_schedule"];
   }
 
   return tools;

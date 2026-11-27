@@ -87,7 +87,6 @@
  * were re-pointed to the new line in the same PR.
  */
 import type { Env } from "../types";
-import { resolveEnvironmentConfig } from "../config/environment";
 import { BROKER_CATALOG, isBrokerId, type AccountBindingTuple } from "../trading";
 import { neutralPromptToolName, promptToolName } from "../shared/brokerToolNames";
 import { maskAccountId } from "../config/accountBindings";
@@ -333,7 +332,7 @@ Sub-agent and MCP tools are available. Discovered descriptions are authoritative
 - 'tool_openaimp_run_stock_screen': THE universe-screen tool — run a stock screen over a named universe (NASDAQ100, SP500, SP100, RUSSELL2000, TECH, ETF, LEV_ETF, or ALL) as a durable screener workflow. When monetization is on, a paid screen needs a receipt email: ask the user for it in the chat turn when none is known, and pass it as receiptEmail (#4435).
 - 'tool_openaimp_run_options_strategy_screen': THE options-strategy-screen tool — screen options strategies over a named universe by structured constraints (strategy type from the strategy catalog, maxLoss, minProfit, minRewardRisk, DTE window); never deflect that request to a UI workflow (rule 6).
 - 'tool_openaimp_etrade_market_scan': Filter-scan of raw exchange listings by technical and fundamental indicators (RSI, Market Cap, Sector, Price, MACD, Volume, Gainers/Losers). Returns raw listings rows — NOT a universe screen; use 'tool_openaimp_run_stock_screen' when the user names a universe or asks to run a screen.
-- 'manage_agent_schedule': Use for schedule changes; list tools are read-only.
+- 'tool_openaimp_manage_agent_schedule': Schedule changes. Kinds: sdk, goal, workflow-stage. Create needs executionMode ('deterministic'|'agentic-loop'); goal create needs a NESTED goal object (schedulable operation, budgetCents > 0).
 - '${brokerTools.quoteTool}': Real-time equity quotes (${brokerTools.brokerLabel} ${brokerTools.modeLabel}).
 - '${brokerTools.previewTool}': Draft an order proposal with cryptographic Agent DID attestation ('did:agent:openaimp:trading'). NEVER execute without human confirmation.
 - '${brokerTools.executeTool}': ${brokerTools.executionPolicy === "autonomous" ? `Execute an order immediately in autonomous mode (${brokerTools.brokerLabel} ${brokerTools.modeLabel}) within risk policy limits.` : "Execute a confirmed order draft ONLY after explicit human authorization."}
@@ -355,17 +354,12 @@ Agentic Best Practices & Workflow Rules:
 
 /**
  * The manual loop's step clamp, verbatim:
- * Math.max(1, Math.min(10, <resolved MAS_MAX_STEPS>)).
- * Phase 3 (#6550): MAS_MAX_STEPS now lives in environment.config.json
- * (defaults.ai.masMaxSteps, 2 in production); a still-set env var
- * wins. Non-numeric values propagate NaN — today's behavior,
- * preserved here exactly (the shadow sanitizes; see below). The old
- * `|| 6` fallback for a blank env is gone: the file always provides
- * the value now.
+ * Math.max(1, Math.min(10, Number(env.MAS_MAX_STEPS || 6))).
+ * Non-numeric MAS_MAX_STEPS propagates NaN — today's behavior,
+ * preserved here exactly (the shadow sanitizes; see below).
  */
 export function resolveMasMaxSteps(env: Partial<Env>): number {
-  const steps = resolveEnvironmentConfig(env).workerSettings.ai.masMaxSteps;
-  return Math.max(1, Math.min(10, steps));
+  return Math.max(1, Math.min(10, Number(env.MAS_MAX_STEPS || 6)));
 }
 
 /**
