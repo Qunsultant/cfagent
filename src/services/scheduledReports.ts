@@ -10,10 +10,13 @@
  * HITL dispatch) delivers THAT stored copy; no channel creates a copy,
  * and re-delivery never duplicates the row.
  *
- * Storage: the shared ORM's `mas_reports` table (DO-SQLite, same idiom
- * as mas_events). Each row carries the run/goal identity, a source
- * label, a short summary, and the full report payload as JSON — capped
- * in size so one runaway report cannot blow the 2 MB SQLite row limit.
+ * Storage: D1 `agent_reports` (issue #6101, step 8 — the DO
+ * `mas_reports` table is frozen at cutover; new rows write D1
+ * directly, no projector, no copy). Each row carries the run/goal
+ * identity, a source label, a short summary, and the full report
+ * payload as JSON — capped in size so one runaway report cannot
+ * blow the row limit. Rows are versioned: a redelivery backfill
+ * lands as a new version, never an in-place rewrite.
  *
  * Retrieval: searchScheduledReports() does token-based LIKE matching
  * over title + summary + body, newest first. It is wired into the AI
@@ -23,13 +26,8 @@
  *
  * Issue #876 (production hotfix, 2026-10-21): the never-throws contract
  * stays, but persistence failures are no longer silent — the persist
- * seams (persistScheduledReportSql, storeReportAtGeneration,
- * recordUsageEvent, the ensure DDL) log the underlying SQL error via
- * console.error before returning null, and ensureScheduledReportsTable
- * reconciles every expected column additively and guards the
- * generation_id UNIQUE INDEX, so accumulated table state (duplicate
- * generation ids, a legacy column shape) can never permanently block
- * report writes for a Durable Object.
+ * seams (storeReportAtGeneration, recordUsageEvent) log the underlying
+ * error via console.error before returning null.
  *
  * Issue #338 (design accepted 2026-10-23): the canonical body moves to
  * R2 (reports/<reportId>.json via the REPORTS_BUCKET binding); the
@@ -39,28 +37,34 @@
  *
  * Issue #2347 (#1976 step 3c, ADR 0022 D-C.3 / D-F2): the fan-out
  * contract. This fan-out is NOT a transaction candidate — its only
- * SQL write is one already-atomic INSERT, and the R2 / Vectorize /
- * AI Search legs cannot join a DO transaction; the declared
+ * D1 write is one already-atomic INSERT, and the R2 / Vectorize /
+ * AI Search legs cannot join a D1 transaction; the declared
  * contract is D-C.3's cross-store shape (atomic-or-honestly-failed
- * at the seam, outcomes recorded). Every store through the ONE
- * seam now records a CanonicalReportFanoutOutcome on the row
- * (fanout_outcome column, JSON): the body leg, both index legs,
- * and a catalogued outcome code (DataFoundationCode
- * REPORT_FANOUT_STORED / _DEGRADED; a failed INSERT stores no row
- * and surfaces REPORT_FANOUT_FAILED via the logged null). The
- * divergent persistScheduledReportSql INSERT is retired into
- * this seam (see its deprecation note).
+ * at the seam). Every store through the ONE seam returns a
+ * CanonicalReportFanoutOutcome on the store result (the body leg,
+ * both index legs, and a catalogued outcome code
+ * (DataFoundationCode REPORT_FANOUT_STORED / _DEGRADED; a failed
+ * INSERT stores no row and surfaces REPORT_FANOUT_FAILED via the
+ * logged null). Issue #6101 (step 8): the outcome is NO LONGER
+ * recorded on the row — D1 agent_reports carries no fan-out column
+ * (recordFanoutLegOutcome / getCanonicalReportFanoutOutcome deleted
+ * with the DO row); a failed index leg is logged, never silent.
+ * The divergent persistScheduledReportSql INSERT was retired into
+ * this seam, and the wrapper itself was deleted with the DO write
+ * in #6101 step 8.
  *
  * Issue #2359 (#1976 step 4d, ADR 0022 D-A): the seam's
  * STATEMENTS moved behind the canonical-report store ports
  * (src/data/canonicalReportStorePorts.ts — the write port 3c
  * deferred, the read port, and the usage-event port for the
- * metering section below). This module keeps everything the
- * contract is made of: the fan-out logic and outcome
- * computation, the dedupe discipline, the owner refusal, the
- * never-throws shapes and every log line. The ports hold the
- * SQL — including the table DDL, whose ONE home is now the
- * write adapter's ensureSchema.
+ * metering section below). Issue #6101 (step 8): the seam reads and
+ * writes D1 agent_reports through the audit-report port
+ * (src/data/createAuditReportPorts.ts); the DO ports remain only
+ * for the frozen mas_reports table (ensure + maintenance) until
+ * the #6627 DROP. This module keeps everything the contract is
+ * made of: the fan-out logic and outcome computation, the dedupe
+ * discipline, the owner refusal, the never-throws shapes and every
+ * log line.
  *
  * Issue #2398: the generation UNIQUE index is tenant-scoped
  * — (user_login, generation_id) — matching this seam's
@@ -85,6 +89,16 @@ import {
   createCanonicalReportStorePorts,
   type CanonicalReportStorePorts,
 } from "../data/createCanonicalReportStorePorts";
+import { createAuditReportAdapter } from "../data/createAuditReportPorts";
+import { ensureAuditReportSchema } from "../data/d1AuditReportAdapter";
+import type {
+  AuditReportStore,
+  CanonicalReportRow,
+} from "../data/auditReportPorts";
+import { createJobRunRecordAdapter } from "../data/createJobRunRecordPorts";
+import { resolveIaaaTenant } from "../security/iaaaGithubEndToEnd";
+import { d1JobRunRecordId } from "./jobRunRecordReads";
+import type { JobRunRecord } from "./jobRunRecords";
 import {
   type CanonicalReportForIndex,
   type IndexEnv,
@@ -241,9 +255,10 @@ export interface CanonicalStoreResult {
   /**
    * Issue #2347: the fan-out outcome as known at return time.
    * Index legs are fire-and-forget, so an attempted leg reads
-   * "pending" here; its final status lands on the report record
-   * (fanout_outcome column) when the leg settles — read it back
-   * with getCanonicalReportFanoutOutcome / ScheduledReportHit.
+   * "pending" here. Issue #6101 (step 8): the outcome is NOT
+   * recorded on the row — D1 agent_reports carries no fan-out
+   * column, so a read-back returns fanoutOutcome: null; a failed
+   * leg is named only on the store result and in the worker log.
    */
   fanout: CanonicalReportFanoutOutcome;
 }
@@ -330,94 +345,25 @@ function makeFanoutOutcome(
   };
 }
 
-/** Parse a recorded fanout_outcome value; null when absent/malformed. */
-export function parseFanoutOutcome(
-  raw: unknown
-): CanonicalReportFanoutOutcome | null {
-  try {
-    if (typeof raw !== "string" || !raw) return null;
-    const parsed = JSON.parse(raw) as CanonicalReportFanoutOutcome;
-    if (!parsed || typeof parsed !== "object" || !parsed.outcome) return null;
-    return parsed;
-  } catch (err) {
-    structuredLog.error("parseFanoutOutcome.malformed_outcome", {
-      message: `[scheduledReports] parseFanoutOutcome: recorded outcome is malformed: ${err instanceof Error ? err.message : String(err)}`,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
-}
 
 /**
- * Record (merge) leg outcomes onto a stored report row. The
- * read-modify-write is synchronous over the caller's sql
- * handle, so two legs settling in sequence cannot clobber
- * each other. Never throws (#1133 discipline): a recording
- * failure is logged with its catalog code, never dropped
- * silently and never thrown into the store's path.
- */
-function recordFanoutLegOutcome(
-  sql: SqlStorage,
-  reportId: string,
-  patch: Partial<Pick<CanonicalReportFanoutOutcome, "vectorize" | "aiSearch" | "aiSearchCode">>
-): void {
-  try {
-    const store = storePorts(sql).write;
-    const current = parseFanoutOutcome(store.getFanoutOutcomeRaw(reportId));
-    if (!current) return;
-    const next: CanonicalReportFanoutOutcome = { ...current, ...patch };
-    next.code = fanoutCodeFor(next.body, next.vectorize, next.aiSearch);
-    store.updateFanoutOutcome(reportId, JSON.stringify(next));
-  } catch (err) {
-    structuredLog.error("recordFanoutLegOutcome.failed", {
-      message: `[scheduledReports] recordFanoutLegOutcome failed for report ${reportId} (${DataFoundationCode.REPORT_FANOUT_DEGRADED}): ${err instanceof Error ? err.message : String(err)}`,
-      reportId,
-      code: DataFoundationCode.REPORT_FANOUT_DEGRADED,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-}
-
-/** The recorded fan-out outcome for a stored report, or null. Never throws. */
-export function getCanonicalReportFanoutOutcome(
-  sql: SqlStorage,
-  reportId: string
-): CanonicalReportFanoutOutcome | null {
-  try {
-    if (!reportId) return null;
-    ensureScheduledReportsTable(sql);
-    return parseFanoutOutcome(storePorts(sql).write.getFanoutOutcomeRaw(reportId));
-  } catch (err) {
-    structuredLog.error("getCanonicalReportFanoutOutcome.failed", {
-      message: `[scheduledReports] getCanonicalReportFanoutOutcome failed for report ${reportId}: ${err instanceof Error ? err.message : String(err)}`,
-      reportId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
-}
-
-/**
- * Fire both index legs for a stored report and record each
- * leg's settled outcome on the report record (#2347). This
- * replaces the bare `void` calls: the legs stay fire-and-
- * forget for the caller, but their results are no longer
- * discarded. Issue #3527 S1: the legs now run inside the
- * publish stage (src/services/documentPublish.ts) — the stage
- * composes the existing executors and carries the
- * distinctions this wrapper used to compute inline (the
- * Vectorize leg's attempted vs not-attempted, which its
- * boolean result conflates, and the AI Search leg's outcome
+ * Fire both index legs for a stored report. The legs stay fire-and-
+ * forget for the caller. Issue #6101 (step 8): the settled outcomes
+ * are NO LONGER recorded on the row — D1 agent_reports carries no
+ * fan-out column, and the D1 read returns fanoutOutcome: null (the
+ * #2347 recorded-outcome contract ends with the DO row). A failed leg
+ * is logged with its code, never silent and never thrown into the
+ * store's path. Issue #3527 S1: the legs run inside the publish
+ * stage (src/services/documentPublish.ts) — the stage composes the
+ * existing executors and carries the distinctions this wrapper used
+ * to compute inline (the Vectorize leg's attempted vs not-attempted,
+ * which its boolean result conflates, and the AI Search leg's outcome
  * code, where "disabled" means not attempted per #2246).
- * The seam keeps owning the record: each stage outcome is
- * mapped back onto the row's fan-out vocabulary exactly as
- * the inline version recorded it.
  */
 function fireFanoutIndexLegs(
-  sql: SqlStorage,
   env: IndexEnv | undefined,
   vecReport: CanonicalReportForIndex,
-  aiReport: CanonicalReportForAiSearchIndex
+  aiReport: CanonicalReportForAiSearchIndex,
 ): void {
   const publication = publishDocument(env, {
     kind: "report",
@@ -433,26 +379,12 @@ function fireFanoutIndexLegs(
   });
   for (const target of publication.targets) {
     void target.settled.then((outcome) => {
-      if (outcome.target === "vectorize") {
-        recordFanoutLegOutcome(sql, vecReport.reportId, {
-          vectorize:
-            outcome.status === "published"
-              ? "indexed"
-              : outcome.status === "failed"
-                ? "failed"
-                : "not_attempted",
-        });
-      } else if (outcome.target === "ai-search") {
-        recordFanoutLegOutcome(sql, aiReport.reportId, {
-          aiSearch:
-            outcome.status === "published"
-              ? "indexed"
-              : outcome.status === "failed"
-                ? "failed"
-                : "not_attempted",
-          ...(outcome.status === "published"
-            ? {}
-            : { aiSearchCode: outcome.code ?? "upload_failed" }),
+      if (outcome.status === "failed") {
+        structuredLog.warn("scheduledReports.fanout_leg_failed", {
+          message: `[scheduledReports] fan-out ${outcome.target} leg failed for report ${vecReport.reportId} (not recorded on the row — D1 carries no fan-out column, #6101): ${outcome.code ?? "failed"}`,
+          reportId: vecReport.reportId,
+          target: outcome.target,
+          code: outcome.code ?? "failed",
         });
       }
     });
@@ -470,55 +402,6 @@ function initialIndexStatuses(
   };
 }
 
-/**
- * Issue #308: THE single generate→store seam. The generator stores the
- * canonical report copy at generation time; every delivery channel reads
- * it back. Idempotent on input.generationId: when a row with that
- * generation id already exists, it is returned untouched (no duplicate,
- * no rewrite). SELECT-then-INSERT keeps MockSqlStorage compatible
- * (it does not parse INSERT OR REPLACE).
- *
- * Never throws: returns null on bad input or SQL errors so generation
- * and delivery are never broken by the store.
- */
-/**
- * The mas_reports row id already stored for a (generation, owner) pair,
- * or "". Tenant-scoped: two tenants may legitimately produce the same
- * timestamped generation id; each owns its own row, and one tenant can
- * never be handed another's report id.
- */
-function existingReportIdForGeneration(
-  sql: SqlStorage,
-  generationId: string,
-  owner: string
-): string {
-  return storePorts(sql).write.findIdByGeneration(generationId, owner);
-}
-
-/**
- * Issue #1169 S4-1: the full row behind an existing report id, for the
- * redelivery index hook (a redelivery re-upserts the same vector id, so
- * the hook needs the stored title/source/summary/body, not the caller's
- * possibly-partial input). Null when the row cannot be loaded.
- */
-function existingReportRowForId(
-  sql: SqlStorage,
-  id: string
-): {
-  title: string;
-  source: string;
-  summary: string;
-  body: string;
-  bodyR2Key: string | null;
-  /** Issue #2602: the row's owner, for the redelivery owner re-check. */
-  userLogin?: string;
-} | null {
-  try {
-    return storePorts(sql).write.findStoredContent(id);
-  } catch {
-    return null;
-  }
-}
 
 function generationIdOf(input: ScheduledReportInput): string | null {
   return typeof input.generationId === "string" && input.generationId
@@ -536,37 +419,6 @@ function reportOwnerOf(input: ScheduledReportInput): string {
   return owner;
 }
 
-/**
- * The one INSERT both store seams share — the write port's
- * insertRow (#2359); the statement itself lives in the DO
- * adapter (single line there — MockSqlStorage's INSERT regex
- * has no dotAll flag). Issue #338: when bodyR2Key is set the
- * body column stores "" and the pointer names the R2 object
- * holding the body; otherwise the body is inline and the
- * pointer is NULL.
- */
-function insertScheduledReportRow(
-  sql: SqlStorage,
-  rec: ScheduledReportRecord & { servingProviderId?: string },
-  generationId: string | null,
-  owner: string,
-  bodyR2Key: string | null,
-  fanout: CanonicalReportFanoutOutcome
-): void {
-  storePorts(sql).write.insertRow({
-    id: rec.id,
-    runId: rec.runId,
-    title: rec.title,
-    source: rec.source,
-    summary: rec.summary,
-    body: bodyR2Key ? "" : rec.body,
-    createdAt: rec.createdAt,
-    generationId,
-    owner,
-    bodyR2Key,
-    fanoutOutcomeJson: JSON.stringify(fanout),
-  });
-}
 
 /**
  * Issue #1169 S4-1: the optional env a caller passes when it has the
@@ -714,15 +566,13 @@ export interface RefreshCanonicalPdfFieldsResult {
 }
 
 /**
- * Issue #2869 slice 1 follow-up — refresh a canonical
- * mas_reports row's PDF fields after a queued consume
- * generates them (in-process leg failed, claim released,
- * queued consume generated). The generated fields land on
- * the persisted analysis key by the consumer; without this
- * refresh the canonical row — what the Reports tab reads —
- * keeps showing no PDF for a run that now has one.
+ * Issue #2869 slice 1 follow-up — refresh a canonical report row's
+ * PDF fields after a queued consume generates them (in-process leg
+ * failed, claim released, queued consume generated). The generated
+ * fields land on the persisted analysis key by the consumer; without
+ * this the stored row keeps its "failed" PDF status forever.
  *
- * Rules, all inherited from planArtifactBackfill (#2602):
+ * Rules (unchanged from the DO seam):
  *  - UPDATE ONLY, never create: a missing row is reported
  *    as "missing-row", never written — the one recorder
  *    (persistScreenerReportCanonical) owns row creation.
@@ -747,10 +597,13 @@ export interface RefreshCanonicalPdfFieldsResult {
  *  - Never throws: every failure is a returned status
  *    with a named reason, logged — a queue consumer must
  *    never fail a run (or a queue ack) on a refresh.
+ *
+ * Issue #6101 (step 8): the row is a D1 agent_reports row now — the
+ * merged body lands as a new version for inline rows (D1 rows are
+ * versioned), and as a put to the same R2 key for pointer rows.
  */
 export async function refreshCanonicalReportPdfFields(
-  sql: SqlStorage,
-  env: { REPORTS_BUCKET?: R2Bucket; APP_BASE_URL?: string },
+  env: ReportWriterEnv,
   input: {
     generationId: string;
     userLogin: string;
@@ -763,17 +616,18 @@ export async function refreshCanonicalReportPdfFields(
     if (!input.generationId?.trim() || !input.userLogin?.trim() || !input.pdfKey?.trim()) {
       return { status: "failed", reason: "generationId, userLogin, and pdfKey are required" };
     }
-    ensureScheduledReportsTable(sql);
-    const id = storePorts(sql).write.findIdByGeneration(
+    const adapter = createAuditReportAdapter(env);
+    if (!adapter) {
+      return { status: "failed", reason: "AGENT_DB is not bound" };
+    }
+    await ensureAuditReportSchema(adapter.db);
+    const tenantId = resolveIaaaTenant(env);
+    const row = await adapter.latestReportByGeneration(
+      tenantId,
       input.generationId,
       input.userLogin,
     );
-    if (!id) return { status: "missing-row", reason: `no canonical row for generation ${input.generationId} owned by ${input.userLogin}` };
-    const row = storePorts(sql).write.findStoredContent(id);
-    if (!row) return { status: "missing-row", reason: `canonical row ${id} could not be loaded` };
-    if (row.userLogin && row.userLogin !== input.userLogin) {
-      return { status: "not-backfillable", reason: "owner-mismatch" };
-    }
+    if (!row) return { status: "missing-row", reason: `no canonical row for generation ${input.generationId} owned by ${input.userLogin}` };
     const reportUrl = `${env.APP_BASE_URL || "https://agent.openaimp.com"}/api/screener/report.pdf?key=${encodeURIComponent(input.pdfKey)}`;
     const incoming = {
       pdfKey: input.pdfKey,
@@ -786,7 +640,7 @@ export async function refreshCanonicalReportPdfFields(
       // Issue #6659 — through the ONE access point, so this read inherits the
       // bounded retry, the terminal `absent` answer and the negative cache.
       const read = await createReportBodyStore(env).read(
-        id,
+        row.reportId,
         "refreshCanonicalReportPdfFields",
         row.bodyR2Key,
       );
@@ -805,18 +659,23 @@ export async function refreshCanonicalReportPdfFields(
       owner: input.userLogin,
       ...(row.userLogin ? { storedOwner: row.userLogin } : {}),
     });
-    if (outcome.status === "noop") return { status: "noop", reportId: id };
+    if (outcome.status === "noop") return { status: "noop", reportId: row.reportId };
     if (outcome.status === "not-backfillable") {
-      return { status: "not-backfillable", reportId: id, reason: outcome.reason };
+      return { status: "not-backfillable", reportId: row.reportId, reason: outcome.reason };
     }
     if (row.bodyR2Key) {
       // Issue #6659 — the same access point, so the write also clears the
       // negative-cache entry for this report id.
-      await createReportBodyStore(env).put(id, outcome.bodyJson, row.bodyR2Key);
+      await createReportBodyStore(env).put(row.reportId, outcome.bodyJson, row.bodyR2Key);
     } else {
-      storePorts(sql).write.updateBody(id, outcome.bodyJson);
+      await adapter.recordReport({
+        ...row,
+        body: outcome.bodyJson,
+        updatedAtMs: Date.now(),
+        version: row.version + 1,
+      });
     }
-    return { status: "refreshed", reportId: id, filled: outcome.filled };
+    return { status: "refreshed", reportId: row.reportId, filled: outcome.filled };
   } catch (err) {
     structuredLog.error("refreshCanonicalReportPdfFields.failed", {
       message: `[scheduledReports] refreshCanonicalReportPdfFields failed for generation ${input?.generationId}: ${err instanceof Error ? err.message : String(err)}`,
@@ -828,167 +687,402 @@ export async function refreshCanonicalReportPdfFields(
 }
 
 /**
- * @deprecated Issue #2602 — compatibility wrapper over
- * planArtifactBackfill (superseded by src/services/scheduledReports.ts
- * `planArtifactBackfill`, which also names why a record cannot be
- * backfilled). Returns the merged body JSON, or null when nothing was
- * missing or the merge was refused. Do not add callers.
+ * Issue #6101 (step 8) — the D1 writer core both seams share. The
+ * canonical report copy is written to D1 agent_reports directly; the
+ * DO mas_reports row is never written (frozen at cutover) and the
+ * #6099 projector is deleted, so there is no copy step anymore.
+ * Idempotent on input.generationId: when a D1 row with that
+ * generation id already exists for the owner, it is returned
+ * (created:false) with a backfill merge when the redelivery carries
+ * a missing artifact key — as a new version, never an in-place
+ * rewrite (D1 rows are versioned; see latestReportByGeneration).
+ *
+ * Never throws: returns null on bad input, an unbound AGENT_DB, or a
+ * store error, so generation and delivery are never broken by the
+ * store. An unbound binding is logged with REPORT_FANOUT_FAILED —
+ * the row is not stored, and the null says so.
  */
-export function backfillArtifactKeys(
-  storedBodyJson: string,
-  redeliveryBody: unknown,
-): string | null {
-  const outcome = planArtifactBackfill(storedBodyJson, redeliveryBody);
-  return outcome.status === "merged" ? outcome.bodyJson : null;
+const REPORT_D1_WRITER = "store-report-at-generation";
+
+/**
+ * Issue #6101 (step 8) — the report→run link, re-created from the
+ * deleted #6099 projector (runLedgerProjection.resolveReportLink):
+ * a generation id names its job (pipeline-generate:<jobId>:...),
+ * and the link is the unique D1 job run record whose
+ * [started, finished] window contains the report's creation time.
+ * Ambiguity (zero or two in-window runs) links nothing, never a guess.
+ */
+const GENERATE_PREFIX = "pipeline-generate:";
+
+export function jobIdForGenerationId(generationId: string | null): string | null {
+  if (!generationId) return null;
+  if (generationId.startsWith(GENERATE_PREFIX)) {
+    const rest = generationId.slice(GENERATE_PREFIX.length);
+    const sep = rest.indexOf(":");
+    if (sep <= 0) return null;
+    return rest.slice(0, sep);
+  }
+  return generationId;
 }
 
-export function storeReportAtGeneration(
-  sql: SqlStorage,
+export function resolveLinkedJobRunId(
+  generationId: string | null,
+  createdAtMs: number,
+  records: JobRunRecord[],
+): string | null {
+  const jobId = jobIdForGenerationId(generationId);
+  if (!jobId || !Number.isFinite(createdAtMs)) return null;
+  const inWindow = records.filter((r) => {
+    if (r.jobId !== jobId) return false;
+    const startedMs = Date.parse(r.started);
+    const finishedMs = Date.parse(r.finished);
+    return (
+      Number.isFinite(startedMs) &&
+      Number.isFinite(finishedMs) &&
+      createdAtMs >= startedMs &&
+      createdAtMs <= finishedMs
+    );
+  });
+  if (inWindow.length !== 1) return null;
+  return d1JobRunRecordId(inWindow[0]);
+}
+
+/** Best-effort link resolution against the D1 run ledger; null when unresolvable. */
+async function resolveReportLink(
+  env: { AGENT_DB?: D1Database } | undefined,
+  generationId: string | null,
+  createdAtMs: number,
+): Promise<string | null> {
+  try {
+    const jobId = jobIdForGenerationId(generationId);
+    if (!jobId) return null;
+    const store = createJobRunRecordAdapter(env ?? {});
+    if (!store) return null;
+    const records = await store.listByJob(jobId, 50);
+    return resolveLinkedJobRunId(generationId, createdAtMs, records);
+  } catch {
+    return null;
+  }
+}
+
+type ReportWriterEnv = {
+  AGENT_DB?: D1Database;
+  REPORTS_BUCKET?: R2Bucket;
+  AI?: any;
+  VECTOR_MEMORY?: any;
+  IAAA_TENANT_ID?: string;
+  APP_BASE_URL?: string;
+};
+
+/**
+ * Issue #2528 — redelivery of an existing generation id: the stored
+ * row's artifact keys backfill from the redelivery (missing-fields-only,
+ * same rule as the DO seam), landed as a new D1 version for inline
+ * rows, or as a fresh put to the SAME R2 pointer for pointer rows
+ * (#2602 — never forking). The R2 seam backfills pointer rows only;
+ * the inline seam backfills inline rows only — the pre-#6101
+ * asymmetry, preserved: a row stored inline by the R2 seam is not
+ * migrated to R2 by a redelivery. The index legs re-fire against the
+ * STORED row (the hook needs the stored title/source/summary/body,
+ * not the caller's possibly-partial input).
+ */
+async function storeReportRedelivery(
+  adapter: AuditReportStore,
+  env: ReportWriterEnv | undefined,
+  existing: CanonicalReportRow,
   input: ScheduledReportInput,
-  env?: IndexEnv
-): CanonicalStoreResult | null {
+  owner: string,
+  withR2Body: boolean,
+): Promise<CanonicalStoreResult> {
+  const statuses = initialIndexStatuses(env, existing.source);
+  const dedupedFanout = makeFanoutOutcome(
+    "deduped",
+    existing.bodyR2Key ? "r2" : "inline",
+    statuses.vectorize,
+    statuses.aiSearch,
+  );
+  // The body to backfill from: the R2 object for pointer rows (R2 seam
+  // only — the inline seam cannot resolve it, so it plans against the
+  // empty inline body and records the not-backfillable warn, exactly as
+  // the DO seam did), the inline body for inline rows (inline seam
+  // only — the R2 seam leaves inline rows untouched on redelivery).
+  let storedBody: string | null;
+  if (existing.bodyR2Key) {
+    if (withR2Body) {
+      storedBody = await resolveCanonicalReportBody(
+        env ?? {},
+        scheduledReportHitFromD1Row(existing),
+      );
+      if (storedBody === null) {
+        structuredLog.warn("storeReportAtGenerationWithR2.backfill_skipped_body_in_r2", {
+          message: `[scheduledReports] storeReportAtGenerationWithR2: artifact-key backfill skipped for report ${existing.reportId}: R2 body missing or unreadable.`,
+          reportId: existing.reportId,
+        });
+      }
+    } else {
+      storedBody = existing.body;
+    }
+  } else {
+    storedBody = withR2Body ? null : existing.body;
+  }
+  if (storedBody !== null) {
+    try {
+      const outcome = planArtifactBackfill(storedBody, input.body, {
+        owner,
+        ...(existing.userLogin ? { storedOwner: existing.userLogin } : {}),
+      });
+      if (outcome.status === "merged") {
+        if (existing.bodyR2Key) {
+          await publishDocument(
+            env,
+            {
+              kind: "report",
+              documentId: existing.reportId,
+              title: existing.title,
+              source: existing.source,
+              summary: existing.summary,
+              body: outcome.bodyJson,
+              bodyR2Key: null,
+            },
+            {},
+            { targets: ["r2-body"] },
+          ).settled;
+        } else {
+          await adapter.recordReport({
+            ...existing,
+            body: outcome.bodyJson,
+            updatedAtMs: Date.now(),
+            version: existing.version + 1,
+          });
+        }
+      } else if (outcome.status === "not-backfillable") {
+        structuredLog.warn("storeReportAtGeneration.backfill_not_backfillable", {
+          message: `[scheduledReports] storeReportAtGeneration: report ${existing.reportId} cannot be backfilled (${outcome.reason}); stored body left untouched.`,
+          reportId: existing.reportId,
+          reason: outcome.reason,
+        });
+      }
+    } catch (err) {
+      structuredLog.warn("storeReportAtGeneration.backfill_failed", {
+        message: `[scheduledReports] storeReportAtGeneration: artifact-key backfill failed for report ${existing.reportId}: ${err instanceof Error ? err.message : String(err)}`,
+        reportId: existing.reportId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  fireFanoutIndexLegs(
+    env,
+    {
+      reportId: existing.reportId,
+      title: existing.title,
+      source: existing.source,
+      summary: existing.summary,
+      body: existing.body,
+      bodyR2Key: existing.bodyR2Key,
+    },
+    {
+      reportId: existing.reportId,
+      title: existing.title,
+      source: existing.source,
+      summary: existing.summary,
+      body: existing.body,
+      bodyR2Key: existing.bodyR2Key,
+      runId: input.runId,
+      ownerLogin: owner,
+    },
+  );
+  return { reportId: existing.reportId, created: false, fanout: dedupedFanout };
+}
+
+async function storeReportAtGenerationD1(
+  env: ReportWriterEnv | undefined,
+  input: ScheduledReportInput,
+  withR2Body: boolean,
+): Promise<CanonicalStoreResult | null> {
+  const seam = withR2Body
+    ? "storeReportAtGenerationWithR2"
+    : "storeReportAtGeneration";
   try {
     if (!input || typeof input.runId !== "string" || !input.runId) return null;
     const owner = reportOwnerOf(input);
-    ensureScheduledReportsTable(sql);
+    const tenantId = resolveIaaaTenant(
+      env as { IAAA_TENANT_ID?: string } | null | undefined,
+    );
+    const adapter = createAuditReportAdapter(env ?? {});
+    if (!adapter) {
+      structuredLog.error("storeReportAtGeneration.unbound", {
+        message: `[scheduledReports] ${seam}: AGENT_DB is not bound; no D1 row written for run ${input.runId} (${DataFoundationCode.REPORT_FANOUT_FAILED})`,
+        runId: input.runId,
+        code: DataFoundationCode.REPORT_FANOUT_FAILED,
+      });
+      return null;
+    }
+    await ensureAuditReportSchema(adapter.db);
     const generationId = generationIdOf(input);
     if (generationId) {
-      const id = existingReportIdForGeneration(sql, generationId, owner);
-      if (id) {
-        const row = existingReportRowForId(sql, id);
-        const dedupeStatuses = initialIndexStatuses(env, row?.source ?? input.source);
-        const dedupedFanout = makeFanoutOutcome(
-          "deduped",
-          row?.bodyR2Key ? "r2" : "inline",
-          dedupeStatuses.vectorize,
-          dedupeStatuses.aiSearch
-        );
-        if (row) {
-          // Issue #2528, slice 1: canonical artifact-key backfill
-          // on redelivery. A keyless first write must not freeze
-          // a row forever: fill ONLY fields that are missing on
-          // the stored inline body, from the redelivery input.
-          // Never overwrite an existing key/status, never touch
-          // R2-pointer rows (their body lives in R2, not here),
-          // and never fail the redelivery if the backfill fails.
-          if (row.bodyR2Key) {
-            // Issue #2602 — R2 fail-closed: the body lives out of line, so
-            // an inline merge would fork the record from its pointer. Skip
-            // the merge and NAME the row; the pointer is never rewritten
-            // by a redelivery.
-            structuredLog.warn("storeReportAtGeneration.backfill_skipped_body_in_r2", {
-              message: `[scheduledReports] storeReportAtGeneration: artifact-key backfill skipped for report ${id}: body-in-r2 (first-write-win; the R2 body is the record).`,
-              reportId: id,
-            });
-          } else {
-            try {
-              const outcome = planArtifactBackfill(row.body, input.body, {
-                owner,
-                ...(row.userLogin ? { storedOwner: row.userLogin } : {}),
-              });
-              if (outcome.status === "merged") {
-                storePorts(sql).write.updateBody(id, outcome.bodyJson);
-              } else if (outcome.status === "not-backfillable") {
-                // Never guessed: the row stays exactly as stored and the
-                // reason is on the record's log line.
-                structuredLog.warn("storeReportAtGeneration.backfill_not_backfillable", {
-                  message: `[scheduledReports] storeReportAtGeneration: report ${id} cannot be backfilled (${outcome.reason}); stored body left untouched.`,
-                  reportId: id,
-                  reason: outcome.reason,
-                });
-              }
-            } catch (err) {
-              structuredLog.warn("storeReportAtGeneration.backfill_failed", {
-                message: `[scheduledReports] storeReportAtGeneration: artifact-key backfill failed for report ${id}: ${err instanceof Error ? err.message : String(err)}`,
-                reportId: id,
-                error: err instanceof Error ? err.message : String(err),
-              });
-            }
-          }
-          // Record the deduped outcome before re-firing the legs,
-          // so the row never carries a stale pre-#2347 (absent)
-          // outcome after a redelivery.
-          try {
-            storePorts(sql).write.updateFanoutOutcome(id, JSON.stringify(dedupedFanout));
-          } catch (err) {
-            structuredLog.error("storeReportAtGeneration.record_deduped_outcome_failed", {
-              message: `[scheduledReports] storeReportAtGeneration: recording the deduped fan-out outcome failed for report ${id}: ${err instanceof Error ? err.message : String(err)}`,
-              reportId: id,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
-          fireFanoutIndexLegs(
-            sql,
-            env,
-            {
-              reportId: id,
-              title: row.title,
-              source: row.source,
-              summary: row.summary,
-              body: row.body,
-              bodyR2Key: row.bodyR2Key,
-            },
-            {
-              reportId: id,
-              title: row.title,
-              source: row.source,
-              summary: row.summary,
-              body: row.body,
-              bodyR2Key: row.bodyR2Key,
-              runId: input.runId,
-              ownerLogin: owner,
-            }
-          );
-        }
-        return { reportId: id, created: false, fanout: dedupedFanout };
+      const existing = await adapter.latestReportByGeneration(
+        tenantId,
+        generationId,
+        owner,
+      );
+      if (existing) {
+        return storeReportRedelivery(adapter, env, existing, input, owner, withR2Body);
       }
     }
     const rec = toScheduledReportRecord(input);
     const statuses = initialIndexStatuses(env, rec.source);
+    let bodyR2Key: string | null = null;
+    let bodyStatus: FanoutBodyStatus = "inline";
+    if (withR2Body) {
+      // Issue #3527 S2: the body put is the publish stage's r2-body
+      // target now (src/services/documentPublish.ts). The seam requests
+      // that target alone and AWAITS its settle pre-insert — the row's
+      // shape depends on the outcome (the #2347 contract: the put
+      // precedes the insert and a row never claims a body it does not
+      // have), while the index legs keep firing post-insert through
+      // fireFanoutIndexLegs. The outcome maps back onto the body
+      // statuses exactly as the inline put did: published -> the
+      // pointer row; not_configured (no REPORTS_BUCKET bound) -> the
+      // plain inline row; failed -> the recorded inline fallback.
+      const bodyPublication = publishDocument(
+        env,
+        {
+          kind: "report",
+          documentId: rec.id,
+          title: rec.title,
+          source: rec.source,
+          summary: rec.summary,
+          body: rec.body,
+          bodyR2Key: null,
+        },
+        {},
+        { targets: ["r2-body"] },
+      );
+      const bodyOutcome = (await bodyPublication.settled).targets[0];
+      if (bodyOutcome?.status === "published") {
+        bodyR2Key = reportBodyR2Key(rec.id);
+        bodyStatus = "r2";
+      } else if (bodyOutcome?.status === "failed") {
+        // Issue #2347: the fallback is a DECLARED outcome
+        // (body: "inline_fallback", code REPORT_FANOUT_DEGRADED
+        // on the store result), not only this log line. The stage
+        // carries the put error's message on the outcome; the
+        // line quotes it exactly as the inline catch did.
+        // Issue #6101 (step 8): the outcome is NOT recorded on
+        // the row anymore — D1 carries no fan-out column; the
+        // result is the only place it lives.
+        bodyStatus = "inline_fallback";
+        structuredLog.error(
+          "storeReportAtGenerationWithR2.r2_body_put_failed",
+          withProvenanceTuple(
+            {
+              message: `[scheduledReports] storeReportAtGenerationWithR2: R2 body put failed for report ${rec.id}; storing inline instead: ${bodyOutcome.error ?? "unknown error"}`,
+              reportId: rec.id,
+              error: bodyOutcome.error ?? "unknown error",
+            },
+            "fallback",
+            {
+              tenantId: owner,
+              userId: owner,
+              providerId: rec.source ?? "scheduled_reports",
+              brokerId: "none",
+              channel: "r2_fallback",
+            },
+          ),
+        );
+      }
+    }
     const fanout = makeFanoutOutcome(
-      "stored_inline",
-      "inline",
+      bodyStatus === "r2"
+        ? "stored_r2"
+        : bodyStatus === "inline_fallback"
+          ? "stored_inline_fallback"
+          : "stored_inline",
+      bodyStatus,
       statuses.vectorize,
-      statuses.aiSearch
+      statuses.aiSearch,
     );
-    insertScheduledReportRow(sql, rec, generationId, owner, null, fanout);
+    const linkedJobRunId = await resolveReportLink(
+      env,
+      generationId,
+      Date.parse(rec.createdAt),
+    );
+    await adapter.recordReport({
+      tenantId,
+      workspaceId: tenantId,
+      reportId: rec.id,
+      runId: rec.runId,
+      generationId,
+      title: rec.title,
+      source: rec.source,
+      summary: rec.summary,
+      body: bodyR2Key ? "" : rec.body,
+      createdAtMs: Date.parse(rec.createdAt),
+      updatedAtMs: Date.now(),
+      version: 1,
+      provenanceWriter: REPORT_D1_WRITER,
+      provenanceSourceDo: "Orchestrator",
+      provenanceSourceVersion: "1",
+      linkedJobRunId,
+      userLogin: owner,
+      bodyR2Key,
+    });
     fireFanoutIndexLegs(
-      sql,
       env,
       {
         reportId: rec.id,
         title: rec.title,
         source: rec.source,
         summary: rec.summary,
-        body: rec.body,
-        bodyR2Key: null,
+        body: bodyR2Key ? "" : rec.body,
+        bodyR2Key,
       },
       {
         reportId: rec.id,
         title: rec.title,
         source: rec.source,
         summary: rec.summary,
-        body: rec.body,
-        bodyR2Key: null,
+        body: bodyR2Key ? "" : rec.body,
+        bodyR2Key,
         runId: rec.runId,
         ownerLogin: owner,
         storedAt: rec.createdAt,
-      }
+      },
     );
     return { reportId: rec.id, created: true, fanout };
   } catch (err) {
-    // Issue #876: never silent. The caller (#835's null check) can only
-    // say THAT the store failed; the worker log must say WHY.
+    // Issue #876: never silent. The caller (the seam's null check) can
+    // only say THAT the store failed; the worker log must say WHY.
     // Issue #2347: this is the fan-out's REPORT_FANOUT_FAILED member —
     // no row was stored, so no record can carry the outcome.
-    structuredLog.error("storeReportAtGeneration.failed", {
-      message: `[scheduledReports] storeReportAtGeneration failed for run ${typeof input?.runId === "string" ? input.runId : "?"} (${DataFoundationCode.REPORT_FANOUT_FAILED}): ${err instanceof Error ? err.message : String(err)}`,
+    structuredLog.error(`${seam}.failed`, {
+      message: `[scheduledReports] ${seam} failed for run ${typeof input?.runId === "string" ? input.runId : "?"} (${DataFoundationCode.REPORT_FANOUT_FAILED}): ${err instanceof Error ? err.message : String(err)}`,
       runId: typeof input?.runId === "string" ? input.runId : "?",
       code: DataFoundationCode.REPORT_FANOUT_FAILED,
       error: err instanceof Error ? err.message : String(err),
     });
     return null;
   }
+}
+
+/**
+ * Issue #308: THE single generate→store seam. The generator stores the
+ * canonical report copy at generation time; every delivery channel reads
+ * it back. Idempotent on input.generationId: when a row with that
+ * generation id already exists, it is returned (created:false) with a
+ * backfill merge when the redelivery carries a missing artifact key —
+ * as a new D1 version, never an in-place rewrite.
+ *
+ * Issue #6101 (step 8): the seam writes D1 agent_reports directly
+ * (no DO row, no projector). Never throws: returns null on bad input,
+ * an unbound AGENT_DB, or a store error, so generation and delivery
+ * are never broken by the store.
+ */
+export async function storeReportAtGeneration(
+  input: ScheduledReportInput,
+  env?: ReportWriterEnv,
+): Promise<CanonicalStoreResult | null> {
+  return storeReportAtGenerationD1(env, input, false);
 }
 
 /**
@@ -1000,261 +1094,64 @@ export function storeReportAtGeneration(
  * first, so a re-delivery never rewrites the R2 object. When the bucket
  * is unbound — or the put fails — the write falls back to the exact
  * legacy inline shape: a report is never lost to the storage flip.
+ *
+ * Issue #6101 (step 8): the row is a D1 agent_reports row now; the R2
+ * put still precedes the insert, and the pointer still names the R2
+ * object holding the body.
  */
 export async function storeReportAtGenerationWithR2(
-  sql: SqlStorage,
-  env: { REPORTS_BUCKET?: R2Bucket; AI?: any; VECTOR_MEMORY?: any },
-  input: ScheduledReportInput
+  env: ReportWriterEnv,
+  input: ScheduledReportInput,
 ): Promise<CanonicalStoreResult | null> {
-  try {
-    if (!input || typeof input.runId !== "string" || !input.runId) return null;
-    const owner = reportOwnerOf(input);
-    ensureScheduledReportsTable(sql);
-    const generationId = generationIdOf(input);
-    if (generationId) {
-      const id = existingReportIdForGeneration(sql, generationId, owner);
-      if (id) {
-        const row = existingReportRowForId(sql, id);
-        const dedupeStatuses = initialIndexStatuses(env, row?.source ?? input.source);
-        const dedupedFanout = makeFanoutOutcome(
-          "deduped",
-          row?.bodyR2Key ? "r2" : "inline",
-          dedupeStatuses.vectorize,
-          dedupeStatuses.aiSearch
-        );
-        if (row) {
-          if (row.bodyR2Key) {
-            // Issue #2607 — R2-pointer backfill parity: resolve the R2-backed
-            // body, run the same first-write-win planArtifactBackfill, and if
-            // missing artifact/lineage fields merged, write back to the SAME
-            // R2 pointer (never forking or inventing).
-            try {
-              const existingR2Body = await resolveCanonicalReportBody(env, {
-                id,
-                runId: input.runId ?? id,
-                title: row.title,
-                source: row.source,
-                summary: row.summary,
-                body: row.body,
-                bodyR2Key: row.bodyR2Key,
-                createdAt: "",
-                generationId: generationId ?? null,
-                fanoutOutcome: null,
-                userLogin: row.userLogin ?? null,
-              });
-              if (existingR2Body) {
-                const outcome = planArtifactBackfill(existingR2Body, input.body, {
-                  owner,
-                  ...(row.userLogin ? { storedOwner: row.userLogin } : {}),
-                });
-                if (outcome.status === "merged") {
-                  await publishDocument(
-                    env,
-                    {
-                      kind: "report",
-                      documentId: id,
-                      title: row.title,
-                      source: row.source,
-                      summary: row.summary,
-                      body: outcome.bodyJson,
-                      bodyR2Key: null,
-                    },
-                    {},
-                    { targets: ["r2-body"] },
-                  ).settled;
-                }
-              } else {
-                structuredLog.warn("storeReportAtGenerationWithR2.backfill_skipped_body_in_r2", {
-                  message: `[scheduledReports] storeReportAtGenerationWithR2: artifact-key backfill skipped for report ${id}: R2 body missing or unreadable.`,
-                  reportId: id,
-                });
-              }
-            } catch (err) {
-              structuredLog.warn("storeReportAtGenerationWithR2.r2_backfill_failed", {
-                message: `[scheduledReports] storeReportAtGenerationWithR2: R2 backfill failed for report ${id}: ${err instanceof Error ? err.message : String(err)}`,
-                reportId: id,
-                error: err instanceof Error ? err.message : String(err),
-              });
-            }
-          }
-          try {
-            storePorts(sql).write.updateFanoutOutcome(id, JSON.stringify(dedupedFanout));
-          } catch (err) {
-            structuredLog.error("storeReportAtGenerationWithR2.record_deduped_outcome_failed", {
-              message: `[scheduledReports] storeReportAtGenerationWithR2: recording the deduped fan-out outcome failed for report ${id}: ${err instanceof Error ? err.message : String(err)}`,
-              reportId: id,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
-          fireFanoutIndexLegs(
-            sql,
-            env,
-            {
-              reportId: id,
-              title: row.title,
-              source: row.source,
-              summary: row.summary,
-              body: row.body,
-              bodyR2Key: row.bodyR2Key,
-            },
-            {
-              reportId: id,
-              title: row.title,
-              source: row.source,
-              summary: row.summary,
-              body: row.body,
-              bodyR2Key: row.bodyR2Key,
-              runId: input.runId,
-              ownerLogin: owner,
-            }
-          );
-        }
-        return { reportId: id, created: false, fanout: dedupedFanout };
-      }
-    }
-    const rec = toScheduledReportRecord(input);
-    // Issue #3527 S2: the body put is the publish stage's
-    // r2-body target now (src/services/documentPublish.ts).
-    // The seam requests that target alone and AWAITS its
-    // settle pre-insert — the row's shape depends on the
-    // outcome (the #2347 contract: the put precedes the
-    // insert and a row never claims a body it does not
-    // have), while the index legs keep firing post-insert
-    // through fireFanoutIndexLegs. The outcome maps back
-    // onto the body statuses exactly as the inline put did:
-    // published -> the pointer row; not_configured (no
-    // REPORTS_BUCKET bound) -> the plain inline row;
-    // failed -> the recorded inline fallback.
-    const bodyPublication = publishDocument(
-      env,
-      {
-        kind: "report",
-        documentId: rec.id,
-        title: rec.title,
-        source: rec.source,
-        summary: rec.summary,
-        body: rec.body,
-        bodyR2Key: null,
-      },
-      {},
-      { targets: ["r2-body"] }
-    );
-    const bodyOutcome = (await bodyPublication.settled).targets[0];
-    let bodyR2Key: string | null = null;
-    let bodyStatus: FanoutBodyStatus = "inline";
-    if (bodyOutcome?.status === "published") {
-      bodyR2Key = reportBodyR2Key(rec.id);
-      bodyStatus = "r2";
-    } else if (bodyOutcome?.status === "failed") {
-      // Issue #2347: the fallback is a RECORDED outcome
-      // (body: "inline_fallback", code REPORT_FANOUT_DEGRADED
-      // on the row), not only this log line. The stage
-      // carries the put error's message on the outcome; the
-      // line quotes it exactly as the inline catch did.
-      bodyStatus = "inline_fallback";
-      structuredLog.error(
-        "storeReportAtGenerationWithR2.r2_body_put_failed",
-        withProvenanceTuple(
-          {
-            message: `[scheduledReports] storeReportAtGenerationWithR2: R2 body put failed for report ${rec.id}; storing inline instead: ${bodyOutcome.error ?? "unknown error"}`,
-            reportId: rec.id,
-            error: bodyOutcome.error ?? "unknown error",
-          },
-          "fallback",
-          {
-            tenantId: owner,
-            userId: owner,
-            providerId: rec.source ?? "scheduled_reports",
-            brokerId: "none",
-            channel: "r2_fallback",
-          },
-        ),
-      );
-    }
-    const statuses = initialIndexStatuses(env, rec.source);
-    const fanout = makeFanoutOutcome(
-      bodyStatus === "r2"
-        ? "stored_r2"
-        : bodyStatus === "inline_fallback"
-          ? "stored_inline_fallback"
-          : "stored_inline",
-      bodyStatus,
-      statuses.vectorize,
-      statuses.aiSearch
-    );
-    insertScheduledReportRow(sql, rec, generationId, owner, bodyR2Key, fanout);
-    fireFanoutIndexLegs(
-      sql,
-      env,
-      {
-        reportId: rec.id,
-        title: rec.title,
-        source: rec.source,
-        summary: rec.summary,
-        body: bodyR2Key ? "" : rec.body,
-        bodyR2Key,
-      },
-      {
-        reportId: rec.id,
-        title: rec.title,
-        source: rec.source,
-        summary: rec.summary,
-        body: bodyR2Key ? "" : rec.body,
-        bodyR2Key,
-        runId: rec.runId,
-        ownerLogin: owner,
-        storedAt: rec.createdAt,
-      }
-    );
-    return { reportId: rec.id, created: true, fanout };
-  } catch (err) {
-    structuredLog.error("storeReportAtGenerationWithR2.failed", {
-      message: `[scheduledReports] storeReportAtGenerationWithR2 failed for run ${typeof input?.runId === "string" ? input.runId : "?"} (${DataFoundationCode.REPORT_FANOUT_FAILED}): ${err instanceof Error ? err.message : String(err)}`,
-      runId: typeof input?.runId === "string" ? input.runId : "?",
-      code: DataFoundationCode.REPORT_FANOUT_FAILED,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
+  return storeReportAtGenerationD1(env, input, true);
 }
 
 /**
- * Issue #338 S3: the coupled delete — the ONLY way a mas_reports row may
- * be removed. The design requires the R2 body object to be deleted in
- * the same scope as the row, or every deletion strands an object. The
- * object delete runs first and is best-effort: if it fails (or no bucket
- * is bound) the failure is logged and the row is still deleted — a
- * stranded object is inert and is the orphan sweep's job (the design's
- * named follow-up), while a stranded ROW pointing at a deleted object
- * would break reads. mas_reports has no pruning today (retention
- * decision #786: KEEP — pruning is a product decision); this primitive
- * exists so that any future deletion path is coupled by construction.
- * Never throws; returns true when the row is gone.
+ * Issue #338 S3: the coupled delete — the ONLY way a canonical report
+ * row may be removed. The design requires the R2 body object to be
+ * deleted in the same scope as the row, or every deletion strands an
+ * object. The object delete runs first and is best-effort: if it fails
+ * (or no bucket is bound) the failure is logged and the row is still
+ * deleted — a stranded object is inert and is the orphan sweep's job
+ * (the design's named follow-up), while a stranded ROW pointing at a
+ * deleted object would break reads. mas_reports has no pruning today
+ * (retention decision #786: KEEP — pruning is a product decision);
+ * this primitive exists so that any future deletion path is coupled
+ * by construction. Never throws; returns true when the row is gone.
+ *
+ * Issue #6101 (step 8): the row is a D1 agent_reports row now
+ * (all versions deleted); the R2 coupling is unchanged.
  */
 export async function deleteCanonicalReport(
-  sql: SqlStorage,
-  env: { REPORTS_BUCKET?: R2Bucket },
-  reportId: string
+  env: { AGENT_DB?: D1Database; REPORTS_BUCKET?: R2Bucket },
+  reportId: string,
 ): Promise<boolean> {
   try {
     if (!reportId) return false;
-    ensureScheduledReportsTable(sql);
-    const hit = getCanonicalReport(sql, reportId);
-    if (!hit) return false;
-    if (hit.bodyR2Key) {
+    const adapter = createAuditReportAdapter(env);
+    if (!adapter) return false;
+    await ensureAuditReportSchema(adapter.db);
+    const tenantId = resolveIaaaTenant(env);
+    const row = await adapter.latestReport(tenantId, reportId);
+    if (!row) return false;
+    if (row.bodyR2Key) {
       try {
         // Issue #6659 — the delete side of the same access point.
-        await createReportBodyStore(env).remove(reportId, hit.bodyR2Key);
+        // The D1 row is deleted below regardless; an unbound bucket
+        // throws "REPORTS_BUCKET is not bound" and lands in the same
+        // r2_delete_failed log (the old no_bucket_bound branch dies —
+        // the access point owns the unbound case).
+        await createReportBodyStore(env).remove(reportId, row.bodyR2Key);
       } catch (err) {
         structuredLog.error("deleteCanonicalReport.r2_delete_failed", {
-          message: `[scheduledReports] deleteCanonicalReport: R2 delete failed for report ${reportId} (key ${hit.bodyR2Key}); deleting the row anyway — the orphan sweep owns the stranded object: ${err instanceof Error ? err.message : String(err)}`,
+          message: `[scheduledReports] deleteCanonicalReport: R2 delete failed for report ${reportId} (key ${row.bodyR2Key}); deleting the row anyway — the orphan sweep owns the stranded object: ${err instanceof Error ? err.message : String(err)}`,
           reportId,
-          bodyR2Key: hit.bodyR2Key,
+          bodyR2Key: row.bodyR2Key,
           error: err instanceof Error ? err.message : String(err),
         });
       }
     }
-    storePorts(sql).write.deleteRow(reportId);
+    await adapter.deleteReport(tenantId, reportId);
     return true;
   } catch (err) {
     structuredLog.error("deleteCanonicalReport.failed", {
@@ -1276,11 +1173,13 @@ export async function deleteCanonicalReport(
  * the inline body is returned either way. Backfill is best-effort: any
  * failure is logged and the row stays inline for the next read — a
  * read never fails because the migration hiccuped.
+ *
+ * Issue #6101 (step 8): the pointer lands as a new D1 version (body
+ * "", bodyR2Key set), never a DO row.
  */
 export async function resolveCanonicalReportBodyWithBackfill(
-  sql: SqlStorage,
-  env: { REPORTS_BUCKET?: R2Bucket },
-  hit: ScheduledReportHit
+  env: { AGENT_DB?: D1Database; REPORTS_BUCKET?: R2Bucket },
+  hit: ScheduledReportHit,
 ): Promise<string | null> {
   if (hit.bodyR2Key) return resolveCanonicalReportBody(env, hit);
   const bodyStore = createReportBodyStore(env);
@@ -1289,8 +1188,23 @@ export async function resolveCanonicalReportBodyWithBackfill(
   try {
     // Issue #6659 — the write side of the same access point.
     await bodyStore.put(hit.id, hit.body, key);
-    ensureScheduledReportsTable(sql);
-    storePorts(sql).write.backfillBodyPointer(hit.id, key);
+    // Issue #6101 (step 8): the pointer lands as a new D1 version —
+    // the DO backfillBodyPointer write dies with the frozen table.
+    const adapter = createAuditReportAdapter(env);
+    if (adapter) {
+      await ensureAuditReportSchema(adapter.db);
+      const tenantId = resolveIaaaTenant(env);
+      const row = await adapter.latestReport(tenantId, hit.id);
+      if (row && !row.bodyR2Key) {
+        await adapter.recordReport({
+          ...row,
+          body: "",
+          bodyR2Key: key,
+          updatedAtMs: Date.now(),
+          version: row.version + 1,
+        });
+      }
+    }
   } catch (err) {
     structuredLog.error("resolveCanonicalReportBodyWithBackfill.backfill_failed", {
       message: `[scheduledReports] resolveCanonicalReportBodyWithBackfill: backfill failed for report ${hit.id}; serving inline (retried on next read): ${err instanceof Error ? err.message : String(err)}`,
@@ -1323,16 +1237,19 @@ export async function resolveCanonicalReportBody(
 }
 
 /** Read back the canonical stored copy for delivery. Never throws. */
-export function getCanonicalReport(
-  sql: SqlStorage,
-  reportId: string
-): ScheduledReportHit | null {
+export async function getCanonicalReport(
+  env: { AGENT_DB?: D1Database },
+  reportId: string,
+): Promise<ScheduledReportHit | null> {
   try {
     if (!reportId) return null;
-    ensureScheduledReportsTable(sql);
-    const r = storePorts(sql).read.getRowById(reportId);
-    if (!r) return null;
-    return scheduledReportHitFromRow(r as unknown as Record<string, unknown>);
+    const adapter = createAuditReportAdapter(env);
+    if (!adapter) return null;
+    await ensureAuditReportSchema(adapter.db);
+    const tenantId = resolveIaaaTenant(env);
+    const row = await adapter.latestReport(tenantId, reportId);
+    if (!row) return null;
+    return scheduledReportHitFromD1Row(row);
   } catch {
     return null;
   }
@@ -1340,22 +1257,26 @@ export function getCanonicalReport(
 
 /**
  * Issue #2664: whether one canonical report row belongs to the given
- * login, resolved through the canonical-report read port
- * (getRowByIdForOwner) — never a raw storage query, so this service
- * layer keeps zero storage-exec sites. Used by the report-confirmation
+ * login, resolved through the D1 read (latestReport + userLogin check)
+ * — never a raw storage query. Used by the report-confirmation
  * ownership gate (legacy fallback for rows created before confirmation
  * creator tracking) and by the stored-report delivery seam. False when
  * the report does not exist, the owner differs, or the read fails.
  * Never throws.
  */
-export function isCanonicalReportOwnedBy(
-  sql: SqlStorage,
+export async function isCanonicalReportOwnedBy(
+  env: { AGENT_DB?: D1Database },
   reportId: string,
-  owner: string
-): boolean {
+  owner: string,
+): Promise<boolean> {
   try {
     if (!reportId || typeof reportId !== "string" || !owner) return false;
-    return storePorts(sql).read.getRowByIdForOwner(reportId, owner) !== null;
+    const adapter = createAuditReportAdapter(env);
+    if (!adapter) return false;
+    await ensureAuditReportSchema(adapter.db);
+    const tenantId = resolveIaaaTenant(env);
+    const row = await adapter.latestReport(tenantId, reportId);
+    return row?.userLogin === owner;
   } catch {
     return false;
   }
@@ -1432,48 +1353,6 @@ export function parseResearchReportBody(bodyJson: string): {
   }
 }
 
-/**
- * Persist via raw SQL (for call sites holding SqlStorage). Never throws.
- *
- * @deprecated Superseded by storeReportAtGeneration in
- * src/services/scheduledReports.ts (the one canonical seam,
- * #2347). This name is retained for compatibility and now
- * DELEGATES to that seam: its former divergent INSERT (no
- * body_r2_key column, no index legs, no generation-id dedupe,
- * no recorded fan-out outcome) no longer exists as a separate
- * write path. Callers through this door get the full contract
- * — the shared INSERT with body_r2_key + fanout_outcome,
- * generation-id dedupe, and the recorded outcome with both
- * index legs not_attempted (this door carries no env, so no
- * leg can be attempted; the S4-1 backfill remains the repair
- * path, exactly as for any env-less canonical store).
- */
-export function persistScheduledReportSql(
-  sql: SqlStorage,
-  input: ScheduledReportInput
-): string | null {
-  try {
-    const stored = storeReportAtGeneration(sql, input);
-    if (!stored) {
-      // Issue #876: never silent — the seam has already logged
-      // the underlying error; this line names THIS door so a
-      // null from persistScheduledReportSql is attributable.
-      structuredLog.error("persistScheduledReportSql.seam_returned_null", {
-        message: `[scheduledReports] persistScheduledReportSql failed for run ${typeof input?.runId === "string" ? input.runId : "?"}: the canonical seam (storeReportAtGeneration) returned null; see its log line above for the underlying error`,
-        runId: typeof input?.runId === "string" ? input.runId : "?",
-      });
-      return null;
-    }
-    return stored.reportId;
-  } catch (err) {
-    structuredLog.error("persistScheduledReportSql.failed", {
-      message: `[scheduledReports] persistScheduledReportSql failed for run ${typeof input?.runId === "string" ? input.runId : "?"}: ${err instanceof Error ? err.message : String(err)}`,
-      runId: typeof input?.runId === "string" ? input.runId : "?",
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
-}
 
 export interface ScheduledReportHit {
   id: string;
@@ -1508,44 +1387,41 @@ export interface ScheduledReportHit {
   fanoutOutcome: CanonicalReportFanoutOutcome | null;
 }
 
-/** Map one mas_reports row to a hit, tolerating pre-#338 rows (no key). */
-function scheduledReportHitFromRow(
-  r: Record<string, unknown>
-): ScheduledReportHit {
-  const key = r.body_r2_key;
+/**
+ * Issue #6101 (step 8) — map one D1 agent_reports row to a hit.
+ * fanoutOutcome is ALWAYS null: D1 carries no fan-out column — the
+ * #2347 recorded-outcome contract ends with the DO row (named loss;
+ * the store result still carries the outcome as known at return time).
+ */
+function scheduledReportHitFromD1Row(row: CanonicalReportRow): ScheduledReportHit {
   return {
-    id: String(r.id ?? ""),
-    runId: String(r.run_id ?? ""),
-    title: String(r.title ?? ""),
-    source: String(r.source ?? ""),
-    summary: String(r.summary ?? ""),
-    body: String(r.body ?? ""),
-    createdAt: String(r.created_at ?? ""),
-    generationId:
-      typeof r.generation_id === "string" && r.generation_id !== ""
-        ? r.generation_id
-        : null,
-    userLogin:
-      typeof r.user_login === "string" && r.user_login !== ""
-        ? r.user_login
-        : null,
-    bodyR2Key: typeof key === "string" && key ? key : null,
-    fanoutOutcome: parseFanoutOutcome(r.fanout_outcome),
+    id: row.reportId,
+    runId: row.runId,
+    title: row.title,
+    source: row.source,
+    summary: row.summary,
+    body: row.body,
+    createdAt: new Date(row.createdAtMs).toISOString(),
+    generationId: row.generationId,
+    userLogin: row.userLogin,
+    bodyR2Key: row.bodyR2Key,
+    fanoutOutcome: null,
   };
 }
 
 /**
  * Token-based search over stored reports, newest first. Tokens shorter
  * than 3 chars are ignored to keep the LIKE scan cheap. Never throws.
+ * Issue #6101 (step 8): reads D1 agent_reports now. Pre-cutover DO rows
+ * are not visible here (replacement ruling — history restarts at cutover).
  */
-export function searchScheduledReports(
-  sql: SqlStorage,
+export async function searchScheduledReports(
+  env: { AGENT_DB?: D1Database },
   query: string,
   limit: number = SCHEDULED_REPORT_DEFAULT_LIMIT,
-  opts?: { userLogin?: string }
-): ScheduledReportHit[] {
+  opts?: { userLogin?: string },
+): Promise<ScheduledReportHit[]> {
   try {
-    ensureScheduledReportsTable(sql);
     const tokens = query
       .toLowerCase()
       .split(/\s+/)
@@ -1562,10 +1438,15 @@ export function searchScheduledReports(
         ? opts.userLogin
         : undefined;
     const capped = Math.max(1, Math.min(Math.floor(limit) || SCHEDULED_REPORT_DEFAULT_LIMIT, 25));
-    // The token LIKE clause is built in the read adapter (#2359);
-    // tokenization stays here as the seam's domain logic.
-    const rows = storePorts(sql).read.searchRows(tokens, owner, capped);
-    return rows.map((r) => scheduledReportHitFromRow(r as unknown as Record<string, unknown>));
+    const adapter = createAuditReportAdapter(env);
+    if (!adapter) return [];
+    await ensureAuditReportSchema(adapter.db);
+    const tenantId = resolveIaaaTenant(env);
+    const rows = await adapter.searchReports(tenantId, tokens, {
+      userLogin: owner,
+      limit: capped,
+    });
+    return rows.map(scheduledReportHitFromD1Row);
   } catch {
     return [];
   }
@@ -1574,13 +1455,13 @@ export function searchScheduledReports(
 /**
  * #584 EP-003: user-scoped report listing, newest first. Extracted from the
  * /reports route so the scoping is tested in one place.
+ * Issue #6101 (step 8): reads D1 agent_reports now.
  */
-export function listScheduledReports(
-  sql: SqlStorage,
-  opts?: { userLogin?: string; sourceFilter?: string; limit?: number }
-): ScheduledReportHit[] {
+export async function listScheduledReports(
+  env: { AGENT_DB?: D1Database },
+  opts?: { userLogin?: string; sourceFilter?: string; limit?: number },
+): Promise<ScheduledReportHit[]> {
   try {
-    ensureScheduledReportsTable(sql);
     // #584 EP-003: strict filter when the caller knows the user; legacy
     // unfiltered behavior when unknown (identity strings not yet unified).
     const owner =
@@ -1589,21 +1470,23 @@ export function listScheduledReports(
         : undefined;
     const limit = Math.max(
       1,
-      Math.min(Math.floor(opts?.limit ?? 50) || 50, 100)
+      Math.min(Math.floor(opts?.limit ?? 50) || 50, 100),
     );
-    const rows = storePorts(sql).read.listRows(owner, opts?.sourceFilter, limit);
-    return rows.map((r) => scheduledReportHitFromRow(r as unknown as Record<string, unknown>));
+    const adapter = createAuditReportAdapter(env);
+    if (!adapter) return [];
+    await ensureAuditReportSchema(adapter.db);
+    const tenantId = resolveIaaaTenant(env);
+    const rows = await adapter.listReports(tenantId, {
+      userLogin: owner,
+      source: opts?.sourceFilter,
+      limit,
+    });
+    return rows.map(scheduledReportHitFromD1Row);
   } catch {
     return [];
   }
 }
 
-/**
- * Issue #339: fetch one stored report by id for the Reports-tab detail
- * view. Owner scoping matches the list (#584 EP-003): strict when the
- * caller login is known, legacy unfiltered when it is not. Returns null
- * when the report does not exist (or is not the caller's). Never throws.
- */
 /**
  * Issue #2863: fetch one stored report by its stored run_id
  * (screener: `screener:<timestamp>` generation) — the key
@@ -1613,45 +1496,53 @@ export function listScheduledReports(
  * Newest first, so a duplicated run_id resolves to the
  * latest canonical copy. Returns null when absent (or not
  * the caller's). Never throws.
+ * Issue #6101 (step 8): reads D1 agent_reports now.
  */
-export function getScheduledReportByRunId(
-  sql: SqlStorage,
+export async function getScheduledReportByRunId(
+  env: { AGENT_DB?: D1Database },
   runId: string,
-  opts?: { userLogin?: string }
-): ScheduledReportHit | null {
+  opts?: { userLogin?: string },
+): Promise<ScheduledReportHit | null> {
   try {
     if (!runId || typeof runId !== "string") return null;
-    ensureScheduledReportsTable(sql);
     const owner =
       opts?.userLogin && typeof opts.userLogin === "string"
         ? opts.userLogin
         : undefined;
-    // Issue #2863 fix: serve through the canonical report store port
-    // (getRowByRunIdForOwner, newest first, owner-scoped) — this file
-    // must hold zero storage-exec sites (#2359 step 4d census).
-    const row = storePorts(sql).read.getRowByRunIdForOwner(runId, owner);
+    const adapter = createAuditReportAdapter(env);
+    if (!adapter) return null;
+    await ensureAuditReportSchema(adapter.db);
+    const tenantId = resolveIaaaTenant(env);
+    const row = await adapter.latestReportByRunId(tenantId, runId, owner);
     if (!row) return null;
-    return scheduledReportHitFromRow(row as unknown as Record<string, unknown>);
+    return scheduledReportHitFromD1Row(row);
   } catch {
     return null;
   }
 }
 
-export function getScheduledReportById(
-  sql: SqlStorage,
+/**
+ * Issue #339: fetch one stored report by id for the Reports-tab detail
+ * view. Owner scoping matches the list (#584 EP-003): strict when the
+ * caller login is known, legacy unfiltered when it is not. Returns null
+ * when the report does not exist (or is not the caller's). Never throws.
+ * Issue #6101 (step 8): reads D1 agent_reports now.
+ */
+export async function getScheduledReportById(
+  env: { AGENT_DB?: D1Database },
   reportId: string,
-  opts?: { userLogin?: string }
-): ScheduledReportHit | null {
+  opts?: { userLogin?: string },
+): Promise<ScheduledReportHit | null> {
   try {
     if (!reportId || typeof reportId !== "string") return null;
-    ensureScheduledReportsTable(sql);
-    const owner =
-      opts?.userLogin && typeof opts.userLogin === "string"
-        ? opts.userLogin
-        : undefined;
-    const row = storePorts(sql).read.getRowByIdForOwner(reportId, owner);
+    const adapter = createAuditReportAdapter(env);
+    if (!adapter) return null;
+    await ensureAuditReportSchema(adapter.db);
+    const tenantId = resolveIaaaTenant(env);
+    const row = await adapter.latestReport(tenantId, reportId);
     if (!row) return null;
-    return scheduledReportHitFromRow(row as unknown as Record<string, unknown>);
+    if (opts?.userLogin && row.userLogin !== opts.userLogin) return null;
+    return scheduledReportHitFromD1Row(row);
   } catch {
     return null;
   }

@@ -23,7 +23,11 @@ import {
   type ScheduleWatchdogContext,
   type ScheduleWatchdogSchedule,
 } from "../src/agents/orchestrator/scheduleWatchdog";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
+import { MockD1Database } from "./mock-d1";
 import { buildJobRunRecord } from "../src/services/jobRunRecords";
 import { SCHEDULE_WATCHDOG_FIRST_SEEN_KEY } from "../src/services/scheduleWatchdog";
 
@@ -50,6 +54,8 @@ const RECORDED = ["autonomousMarketScreen", "executeAsyncJob"];
 interface Harness {
   db: DatabaseSync;
   sql: ReturnType<typeof makeSql>;
+  d1: MockD1Database;
+  store: D1JobRunRecordStore;
   ctx: ScheduleWatchdogContext;
   audits: Array<{ type: string; payload: Record<string, unknown> }>;
   alerts: MissedScheduleAlertInfo[];
@@ -59,11 +65,17 @@ interface Harness {
 function makeHarness(schedules: ScheduleWatchdogSchedule[], env: Record<string, string> = {}): Harness {
   const db = new DatabaseSync(":memory:");
   const sql = makeSql(db);
+  // Issue #6101 — the watchdog reads/writes the D1 ledger: the
+  // store resolves from ctx.env.AGENT_DB, never the DO table.
+  const d1 = new MockD1Database();
+  const store = new D1JobRunRecordStore(
+    createD1JobRunRecordDb(d1 as unknown as D1Database),
+  );
   const audits: Harness["audits"] = [];
   const alerts: MissedScheduleAlertInfo[] = [];
   const firstSeen = new Map<string, unknown>();
   const ctx = {
-    env,
+    env: { ...env, AGENT_DB: d1 },
     sql: sql as never,
     storage: {
       get: async (k: string) => firstSeen.get(k),
@@ -77,17 +89,17 @@ function makeHarness(schedules: ScheduleWatchdogSchedule[], env: Record<string, 
       alerts.push(info);
     },
   } as unknown as ScheduleWatchdogContext;
-  return { db, sql, ctx, audits, alerts, firstSeen };
+  return { db, sql, d1, store, ctx, audits, alerts, firstSeen };
 }
 
-function seedRun(
+async function seedRun(
   harness: Harness,
   jobId: string,
   startedIso: string,
   outcome: "success" | "failure" | "skipped" = "success",
-): void {
-  const store = new SqlJobRunRecordStore(harness.sql as never);
-  store.record(
+): Promise<void> {
+  // Issue #6101 — the seed lands in D1, not the DO.
+  await harness.store.record(
     buildJobRunRecord({
       system: "orchestrator-schedule",
       jobId,
@@ -129,12 +141,11 @@ describe("orchestrator schedule watchdog sweep (#3788)", () => {
     expect(detection).toHaveLength(1);
     expect(detection[0].payload.code).toBe("missed_fire");
     expect(detection[0].payload.scheduleId).toBe("sched-1");
-    const store = new SqlJobRunRecordStore(h.sql as never);
-    const row = store.latestByJob("sched-1");
+    const row = await h.store.latestByJob("sched-1");
     expect(row?.outcome).toBe("skipped");
     expect(row?.detail).toMatch(/^missed-fire: expected 2026-11-08T06:00:00.000Z/);
     // Heartbeat: the sweep ran, with examined counts.
-    const heartbeat = store.latestByJob("schedule-watchdog-heartbeat");
+    const heartbeat = await h.store.latestByJob("schedule-watchdog-heartbeat");
     expect(heartbeat?.outcome).toBe("success");
     expect(heartbeat?.detail).toContain("examined=1");
     expect(heartbeat?.detail).toContain("missed=1");
@@ -146,7 +157,7 @@ describe("orchestrator schedule watchdog sweep (#3788)", () => {
     ];
     const h = makeHarness(schedules);
     seedFirstSeen(h, "sched-1");
-    seedRun(h, "sched-1", "2026-11-08T06:05:00.000Z");
+    await seedRun(h, "sched-1", "2026-11-08T06:05:00.000Z");
     const result = await watchdogMissedSchedules(h.ctx, { recordedCallbacks: RECORDED, nowMs: NOW });
     expect(result.missed).toBe(0);
     expect(result.alerted).toBe(0);
@@ -195,7 +206,7 @@ describe("orchestrator schedule watchdog sweep (#3788)", () => {
     ];
     const h = makeHarness(schedules);
     seedFirstSeen(h, "sched-iv");
-    seedRun(h, "sched-iv", "2026-11-09T01:00:00.000Z");
+    await seedRun(h, "sched-iv", "2026-11-09T01:00:00.000Z");
     const result = await watchdogMissedSchedules(h.ctx, { recordedCallbacks: RECORDED, nowMs: NOW });
     expect(result.missed).toBe(1);
     expect(h.alerts[0].expectedTick).toBe("2026-11-09T01:15:00.000Z");
@@ -209,7 +220,6 @@ describe("orchestrator schedule watchdog sweep (#3788)", () => {
     seedFirstSeen(h, "sched-1");
     const result = await watchdogMissedSchedules(h.ctx, { recordedCallbacks: RECORDED, nowMs: NOW });
     expect(result).toEqual({ examined: 0, alerted: 0, missed: 0, skippedUnrecorded: 0 });
-    const store = new SqlJobRunRecordStore(h.sql as never);
-    expect(store.latestByJob("schedule-watchdog-heartbeat")).toBeUndefined();
+    expect(await h.store.latestByJob("schedule-watchdog-heartbeat")).toBeUndefined();
   });
 });

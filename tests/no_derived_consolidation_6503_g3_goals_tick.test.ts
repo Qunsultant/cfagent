@@ -56,6 +56,7 @@ import { ScheduledAgent } from "../src/agents/scheduled-agent";
 import { MockD1Database } from "./mock-d1";
 import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import { goalToRecord } from "../src/services/unifiedScheduleManagement";
+import { makeLedgerStub } from "./ledger-stub";
 
 function makeCtx() {
   const store = new Map<string, unknown>();
@@ -69,6 +70,9 @@ function makeCtx() {
 }
 
 function makeEnv(mockD1: MockD1Database) {
+  // Issue #6101 (step 9) — the KV "jobRunRecords" key is retired:
+  // a fired goal's run lands only through the ledger post, so the
+  // env binds a fresh ledger stub as ORCHESTRATOR_AGENT.
   return {
     PAYMENTS_AGENT: {
       idFromName: () => "default",
@@ -76,6 +80,7 @@ function makeEnv(mockD1: MockD1Database) {
     },
     SESSION_STORE: null,
     AGENT_DB: mockD1,
+    ORCHESTRATOR_AGENT: makeLedgerStub().namespace,
   };
 }
 
@@ -119,8 +124,9 @@ describe("6503 G3: the D1-backed goals tick skips a paused goal", () => {
       testGoal({ id: "paused-goal", enabled: false }),
       testGoal({ id: "active-goal", enabled: true }),
     ]);
-    const agent = new ScheduledAgent(makeCtx() as never, makeEnv(mockD1) as never);
-    const tick = await agent.onCron(makeEnv(mockD1) as never, { halted: false } as never);
+    const env = makeEnv(mockD1);
+    const agent = new ScheduledAgent(makeCtx() as never, env as never);
+    const tick = await agent.onCron(env as never, { halted: false } as never);
     // The paused goal is skipped before evaluation; only the active
     // goal is evaluated (and fires: its cron is due at 06:00).
     expect(tick.goalsEvaluated).toBe(1);
@@ -136,8 +142,9 @@ describe("6503 G3: the D1-backed goals tick skips a paused goal", () => {
     vi.setSystemTime(new Date("2026-11-25T06:00:00Z"));
     const mockD1 = new MockD1Database();
     await plantGoals(mockD1, [testGoal({ id: "paused-goal", enabled: false })]);
-    const agent = new ScheduledAgent(makeCtx() as never, makeEnv(mockD1) as never);
-    const tick = await agent.onCron(makeEnv(mockD1) as never, { halted: false } as never);
+    const env = makeEnv(mockD1);
+    const agent = new ScheduledAgent(makeCtx() as never, env as never);
+    const tick = await agent.onCron(env as never, { halted: false } as never);
     expect(tick.goalsEvaluated).toBe(0);
     expect(await agent.listJobRuns("paused-goal")).toHaveLength(0);
   });

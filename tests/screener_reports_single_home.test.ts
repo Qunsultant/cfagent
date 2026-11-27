@@ -25,12 +25,13 @@
  *  - Behavioural (characterization of the surviving home — passes before
  *    and after, by design): a screener report stored through the
  *    orchestrator seam (DatabaseORM.storeCanonicalReport, the exact call
- *    both orchestrator paths make) lands as EXACTLY ONE mas_reports row,
- *    dedupes on the generation id, and reads back through the exact
- *    functions the Reports routes use (listScheduledReports /
- *    getScheduledReportById) — the test-level proof that #732's
- *    regression (Reports tab empty) stays fixed with the screener-side
- *    write gone.
+ *    both orchestrator paths make) lands as EXACTLY ONE D1 agent_reports
+ *    report id (#6101 step 8 — the DO mas_reports table is frozen at
+ *    cutover and receives no new writes), dedupes on the generation id,
+ *    and reads back through the exact functions the Reports routes use
+ *    (listScheduledReports / getScheduledReportById) — the test-level
+ *    proof that #732's regression (Reports tab empty) stays fixed with
+ *    the screener-side write gone.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -38,10 +39,19 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 import {
   listScheduledReports,
   getScheduledReportById,
 } from "../src/services/scheduledReports";
+
+type D1Database = any;
+
+function d1Env() {
+  const mock = new MockD1Database();
+  const env = { AGENT_DB: mock as unknown as D1Database, IAAA_TENANT_ID: "tenant-783" };
+  return { mock, env };
+}
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const screenerSrc = readFileSync(
@@ -93,29 +103,27 @@ function scheduledScreenerInput(timestamp: string) {
   } as const;
 }
 
-function rowCount(sql: MockSqlStorage): number {
-  const rows = Array.from(
-    sql.exec("SELECT COUNT(*) AS count FROM mas_reports") as Iterable<{
-      count?: unknown;
-    }>
-  );
-  return Number(rows[0]?.count ?? 0);
+/** Distinct D1 report ids visible through the Reports-route list. */
+async function rowCount(env: { AGENT_DB: D1Database }): Promise<number> {
+  const hits = await listScheduledReports(env, { limit: 100 });
+  return new Set(hits.map((h) => h.id)).size;
 }
 
 describe("the orchestrator store is the single home for screener reports", () => {
-  it("a scheduled screen's report lands as exactly one row and reads back through the Reports-route functions", () => {
+  it("a scheduled screen's report lands as exactly one row and reads back through the Reports-route functions", async () => {
     const sql = new MockSqlStorage();
     const orm = new DatabaseORM(sql);
+    const { env } = d1Env();
     const ts = "2026-10-21T03:30:00.000Z";
 
-    const stored = orm.storeCanonicalReport(scheduledScreenerInput(ts) as any);
+    const stored = await orm.storeCanonicalReport(scheduledScreenerInput(ts) as any, env);
     expect(stored).not.toBeNull();
     expect(stored!.created).toBe(true);
-    expect(rowCount(sql)).toBe(1);
+    expect(await rowCount(env)).toBe(1);
 
     // The list the Reports tab renders (routes/reports.ts calls
     // listScheduledReports with a source filter).
-    const listed = listScheduledReports(sql, {
+    const listed = await listScheduledReports(env, {
       sourceFilter: "screener",
       limit: 10,
     });
@@ -126,7 +134,7 @@ describe("the orchestrator store is the single home for screener reports", () =>
 
     // The detail route's lookup (routes/reports.ts calls
     // getScheduledReportById).
-    const hit = getScheduledReportById(sql, stored!.reportId, {});
+    const hit = await getScheduledReportById(env, stored!.reportId, {});
     expect(hit).not.toBeNull();
     expect(hit!.source).toBe("screener");
     const body = JSON.parse(hit!.body);
@@ -134,32 +142,36 @@ describe("the orchestrator store is the single home for screener reports", () =>
     expect(body.opportunities).toEqual([{ symbol: "NVDA" }]);
   });
 
-  it("re-storing the same run (re-delivery / second writer) dedupes to the same single row", () => {
+  it("re-storing the same run (re-delivery / second writer) dedupes to the same single row", async () => {
     const sql = new MockSqlStorage();
     const orm = new DatabaseORM(sql);
+    const { env } = d1Env();
     const ts = "2026-10-21T03:30:00.000Z";
 
-    const first = orm.storeCanonicalReport(scheduledScreenerInput(ts) as any);
-    const second = orm.storeCanonicalReport(scheduledScreenerInput(ts) as any);
+    const first = await orm.storeCanonicalReport(scheduledScreenerInput(ts) as any, env);
+    const second = await orm.storeCanonicalReport(scheduledScreenerInput(ts) as any, env);
     expect(first!.created).toBe(true);
     expect(second!.created).toBe(false);
     expect(second!.reportId).toBe(first!.reportId);
-    expect(rowCount(sql)).toBe(1);
+    expect(await rowCount(env)).toBe(1);
   });
 
-  it("two distinct runs produce exactly two rows — one per run, no duplicates", () => {
+  it("two distinct runs produce exactly two rows — one per run, no duplicates", async () => {
     const sql = new MockSqlStorage();
     const orm = new DatabaseORM(sql);
+    const { env } = d1Env();
 
-    orm.storeCanonicalReport(
-      scheduledScreenerInput("2026-10-21T03:30:00.000Z") as any
+    await orm.storeCanonicalReport(
+      scheduledScreenerInput("2026-10-21T03:30:00.000Z") as any,
+      env,
     );
-    orm.storeCanonicalReport(
-      scheduledScreenerInput("2026-10-21T04:30:00.000Z") as any
+    await orm.storeCanonicalReport(
+      scheduledScreenerInput("2026-10-21T04:30:00.000Z") as any,
+      env,
     );
-    expect(rowCount(sql)).toBe(2);
+    expect(await rowCount(env)).toBe(2);
     expect(
-      listScheduledReports(sql, { sourceFilter: "screener", limit: 10 })
+      await listScheduledReports(env, { sourceFilter: "screener", limit: 10 }),
     ).toHaveLength(2);
   });
 });

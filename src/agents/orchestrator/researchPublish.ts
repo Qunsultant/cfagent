@@ -140,10 +140,9 @@ export async function generateAndStoreResearchReport(
     });
   }
 
-  const stored = storeReportAtGeneration(
-    ctx.ensureTables(),
+  const stored = await storeReportAtGeneration(
     researchReportToStoreInput(report, artifacts, opts.userLogin),
-    ctx.env as { AI?: any; VECTOR_MEMORY?: any },
+    ctx.env,
   );
 
   const reportId = stored?.reportId ?? null;
@@ -155,8 +154,9 @@ export async function generateAndStoreResearchReport(
  * Issue #319: THE single publish entry for autonomous options research.
  * The manual route and the scheduled tick are thin triggers over this
  * method (amendment 2). The ResearchAgent runs the pipeline; the
- * canonical copy is stored here via the #308 seam on the orchestrator's
- * mas_reports — the table the Reports tab (#318) and AI Search read.
+ * canonical copy is stored here via the #308 seam on D1
+ * agent_reports (#6101 step 8) — the table the Reports tab (#318)
+ * and AI Search read.
  */
 export async function runResearchAndPublish(ctx: ResearchPublishContext, 
   trigger: "manual" | "scheduled",

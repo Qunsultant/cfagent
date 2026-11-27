@@ -503,15 +503,18 @@ describe("3123-P05 one ledger write entry", () => {
       expect(body).toContain("recordLedgerRun");
       expect(body).not.toContain("store.record(");
     }
-    // The ScheduledAgent KV write is the fallback only (one site).
+    // Issue #6101 step 9 — the KV "jobRunRecords" key is retired:
+    // the ScheduledAgent no longer writes it at all; the ledger
+    // post is the only write path. The exactly-once pin this test
+    // used to carry died with the write — this pins the retirement
+    // instead: zero `put("jobRunRecords"` anywhere in the agent.
     const agentBody = source("src/agents/scheduled-agent.ts");
-    expect(agentBody.split('put("jobRunRecords"').length - 1).toBe(1);
-    // No second INSERT into job_run_records outside the DO adapter
-    // and the D1 pipeline residency (filed #4124).
+    expect(agentBody.split('put("jobRunRecords"').length - 1).toBe(0);
+    // No second INSERT into job_run_records outside the D1 writer
+    // (filed #4124). Issue #6101 — the DO adapter is deleted, so
+    // the D1 writer is the only inserter.
     const inserters = liveSrcContaining("INSERT INTO job_run_records").filter(
-      (f) =>
-        !f.endsWith("src/data/doSqliteJobRunRecordAdapter.ts") &&
-        !f.includes("d1JobRunRecord"),
+      (f) => !f.includes("d1JobRunRecord"),
     );
     expect(inserters).toEqual([]);
   });

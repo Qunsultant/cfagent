@@ -41,7 +41,6 @@ import { createMessagingPorts } from "../../messaging/createMessagingPorts";
 import { createJobPipelineEventsHandler } from "../../messaging/jobPipelineEventsConsumer";
 import type { JobStageEventRecord } from "../../data/jobStageEventPorts";
 import { createScreenerEventsWorkHandler } from "../../messaging/screenerEventsConsumer";
-import type { RunLedgerProjectLedger, RunLedgerProjectMessage } from "../../workflows/runLedgerQueueTransport";
 import { createDeadLetterStoreAdapter, ensureDeadLetterStoreSchema } from "../../data/createDeadLetterStorePorts";
 import { resolveDlqDepthAlertThreshold } from "../../config/dlqDepthAlert";
 import { resolveHeartbeatWatchdogConfig } from "../../config/heartbeatWatchdog";
@@ -207,69 +206,6 @@ async function dispatchOptionsAnalysisQueueWork(opts: {
   if (!opts.awaitDispatch && opts.ctx?.waitUntil) opts.ctx.waitUntil(queuePromise);
   else await queuePromise;
   return "dispatched";
-}
-
-/**
- * Issue #4116 — the run-ledger.project queue dispatch: route the
- * claim-check message to the OWNING Orchestrator instance, which
- * re-reads the DO row and applies the shared projector. The
- * recorder instance that wrote the row is the per-user
- * orchestrator for manual runs and the shared instance for
- * workflow runs — so this tries the per-user instance first and
- * the shared instance when that reports no row (the PDF-refresh
- * pattern at the analysis-done branch below). Both attempts are
- * owner-scoped reads, so a miss projects nothing.
- *
- * Returns "projected" or "already-current". THROWS when neither
- * instance holds the row (persist-then-publish ordering
- * guarantees it exists) or the projection cannot land — the
- * port core turns the throw into "retry", so the platform
- * re-delivers up to max_retries and then DLQs the message.
- */
-export async function dispatchRunLedgerProjectQueueWork(opts: {
-  env: Env;
-  project: RunLedgerProjectMessage;
-}): Promise<"projected" | "already-current"> {
-  const userLogin =
-    typeof opts.project.userLogin === "string" ? opts.project.userLogin.trim() : "";
-  const tenantId =
-    typeof opts.project.tenantId === "string" ? opts.project.tenantId.trim() : "";
-  if (!userLogin || !tenantId) {
-    throw new Error(
-      `run-ledger.project requires non-empty owner scoping (userLogin=${JSON.stringify(opts.project.userLogin)}, tenantId=${JSON.stringify(opts.project.tenantId)}); refusing shared-instance fallback (#5043).`,
-    );
-  }
-  type ProjectQueuedRunLedger = {
-    projectQueuedRunLedger: (input: {
-      // Issue #6006 — the shared ledger union: a local copy would
-      // silently drop the next ledger (this one dropped job_outcomes).
-      ledger: RunLedgerProjectLedger;
-      naturalKey: string;
-      tenantId: string;
-      userLogin: string;
-    }) => Promise<{ status: "projected" | "already-current" | "missing-row" }>;
-  };
-  const input = {
-    ledger: opts.project.ledger,
-    naturalKey: opts.project.naturalKey,
-    tenantId,
-    userLogin,
-  };
-  const perUser = actorGateway.stub<ProjectQueuedRunLedger>(
-    opts.env.ORCHESTRATOR_AGENT,
-    userLogin,
-  );
-  const first = await perUser.projectQueuedRunLedger(input);
-  if (first.status !== "missing-row") return first.status;
-  const shared = actorGateway.stub<ProjectQueuedRunLedger>(
-    opts.env.ORCHESTRATOR_AGENT,
-    SHARED_ORCHESTRATOR_INSTANCE,
-  );
-  const second = await shared.projectQueuedRunLedger(input);
-  if (second.status !== "missing-row") return second.status;
-  throw new Error(
-    `run-ledger.project row missing in both instances (${opts.project.ledger} ${opts.project.naturalKey}, owner ${userLogin}) — the DO row should exist before its publish; retrying.`,
-  );
 }
 
 /**
@@ -685,11 +621,6 @@ export async function handleQueueBatch(batch: any, env: Env, ctx?: any): Promise
       const workHandler = createScreenerEventsWorkHandler({
         dispatchOptionsAnalysis: (payload, runId, unitId) =>
           dispatchWork(payload, true, runId, unitId),
-        // Issue #4116 — the queue carrier's consumer half: a
-        // run-ledger.project envelope re-reads the DO row in the
-        // owning instance and applies the shared projector.
-        dispatchRunLedgerProject: (project) =>
-          dispatchRunLedgerProjectQueueWork({ env, project }),
         persistDeadLetter,
       });
       const envelopeMessages: any[] = [];

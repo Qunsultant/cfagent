@@ -7,12 +7,15 @@
  * path already did; the dispatch did not — so a dispatch-path run was
  * unreadable from D1 once its DO was gone (and a D1-only reader saw nothing).
  *
- * What this file pins, at the control's own seam:
- *  - 6388-P01 a dispatch given a D1 carries the mirror store on its control;
- *  - 6388-P02 a dispatch given no D1 carries no mirror (never a store over
- *    undefined, never a throw);
- *  - 6388-P03 a dispatch given both a DO sql and a D1 carries BOTH planes —
- *    the authoritative DO store and its mirror.
+ * Issue #6101 (step 7): the mirror IS the writer now. The DO leg and the
+ * `stageEventsMirror` dep are deleted; the dispatch carries the D1 store
+ * as `stageEvents`. What this file pins now, at the control's own seam:
+ *  - 6388-P01 a dispatch given a D1 carries the D1 writer on its control;
+ *  - 6388-P02 a dispatch given no D1 carries no stage-events store
+ *    (never a store over undefined, never a throw);
+ *  - 6388-P03 a dispatch given both a DO sql and a D1 carries ONLY the
+ *    D1 writer — the DO sql feeds the engine's other stores, never a
+ *    stage-event store.
  *
  * The control is captured through the ONE factory (#6250) the dispatch must
  * build it through, so a regression that bypasses the factory fails here too.
@@ -98,22 +101,23 @@ async function dispatch(extra: Record<string, unknown>) {
   return deps as Record<string, unknown>;
 }
 
-describe("#6388 — the dispatch control carries the D1 stage-event mirror", () => {
-  it("P01: a D1 is wired as the mirror", async () => {
+describe("#6388 — the dispatch control carries the D1 stage-event writer (#6101 step 7)", () => {
+  it("P01: a D1 is wired as the stage-events writer", async () => {
     const deps = await dispatch({ d1: fakeD1() });
-    expect(deps.stageEventsMirror).toBeTruthy();
-    expect(typeof (deps.stageEventsMirror as { record?: unknown }).record).toBe("function");
-  });
-
-  it("P02: no D1 means no mirror key at all — never a store over undefined", async () => {
-    const deps = await dispatch({});
+    expect(deps.stageEvents).toBeTruthy();
+    expect(typeof (deps.stageEvents as { record?: unknown }).record).toBe("function");
     expect(Object.prototype.hasOwnProperty.call(deps, "stageEventsMirror")).toBe(false);
   });
 
-  it("P03: with both planes the control carries the DO store and its mirror", async () => {
+  it("P02: no D1 means no stage-events key at all — never a store over undefined", async () => {
+    const deps = await dispatch({});
+    expect(Object.prototype.hasOwnProperty.call(deps, "stageEvents")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(deps, "stageEventsMirror")).toBe(false);
+  });
+
+  it("P03: with both planes the control carries only the D1 writer", async () => {
     const deps = await dispatch({ sql: fakeSql(), d1: fakeD1() });
     expect(deps.stageEvents).toBeTruthy();
-    expect(deps.stageEventsMirror).toBeTruthy();
-    expect(deps.stageEvents).not.toBe(deps.stageEventsMirror);
+    expect(Object.prototype.hasOwnProperty.call(deps, "stageEventsMirror")).toBe(false);
   });
 });

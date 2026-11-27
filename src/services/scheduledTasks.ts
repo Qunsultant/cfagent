@@ -11,6 +11,7 @@
 import type { Env, ScheduledTaskResult, StageChainConfig, TradeRecord, ScreenedStockItem } from "../types";
 import { DatabaseORM, type SqlStorage } from "../orm";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
+import { createJobRunRecordAdapter } from "../data/createJobRunRecordPorts";
 import { BusinessError, codedMessage } from "../outcomes/outcomeAspects";
 import { resolveRunBrokerContext, type RunBrokerContext, type RunBrokerSelection } from "./runBrokerContext";
 import { optionsFailureAlertText, ensureCodedOutcome, claimNoticeDelivery } from "./optionsRunAlertFormat";
@@ -178,8 +179,6 @@ import {
 } from "./screenerFollowups";
 import { createFollowupDeliveryPort } from "./screenerFollowupDelivery";
 import { deliverDiscoveryDirect } from "./screeningDelivery";
-import { recordJobOutcome } from "./jobOutcomes";
-import { projectJobOutcomeBestEffort } from "./runLedgerProjectionHooks";
 import { storeReportStage } from "./unifiedReportPipeline";
 import { storeOptionsCanonicalReport } from "./optionsServeRecord";
 import { registerScreenerPublishers } from "../events/screenerPublishers";
@@ -909,9 +908,9 @@ export class ScheduledTasksService {
   }
 
   /**
-   * Issue #1333: discovery outcomes into the job-outcome sink.
-   * Guarded on platformDeps.sql and never throwing â€” a sink failure
-   * must not fail the discovery run.
+   * Issue #1333: discovery outcomes fold directly onto the D1 run
+   * ledger (#6101). Never throwing: a fold failure must not fail
+   * the discovery run.
    */
   private async recordDiscoveryOutcome(input: {
     id: string;
@@ -923,21 +922,33 @@ export class ScheduledTasksService {
     createdAt?: string;
   }): Promise<void> {
     try {
-      const sql = this.platformDeps?.sql;
-      if (!sql) return;
-      recordJobOutcome(sql, {
-        kind: "discovery",
-        origin: "discovery",
-        ...input,
-      });
-      // Issue #6006 — fold the outcome facts into the one run
-      // source (D1); best-effort, never fails the discovery run.
-      await projectJobOutcomeBestEffort({
+      // Issue #6101 — the outcome folds directly onto D1 (no DO
+      // row, no projection); an unbound ledger is the named error,
+      // logged by the catch below.
+      const ledgerStore = createJobRunRecordAdapter(this.env);
+      if (!ledgerStore) {
+        throw new Error("[run-ledger] D1 run-ledger binding unbound (AGENT_DB) (#6101).");
+      }
+      // Issue #3179 — the tenant resolves owner-row-first (stored
+      // account tenant wins; env default only as the documented
+      // fallback inside resolveTickTenant), never via the env-default
+      // resolver directly.
+      const { createCommercialAdapter } = await import("../data/createCommercialPorts");
+      const { resolveTickTenant } = await import("./paidScreenSubmission");
+      const commercial = createCommercialAdapter(this.env as { AGENT_DB?: unknown });
+      const tickTenant = await resolveTickTenant(commercial, {
+        userId: this.userLogin,
         env: this.env,
-        sql,
-        outcomeId: input.id,
-        userLogin: this.userLogin,
       });
+      await ledgerStore.foldJobOutcome(
+        {
+          kind: "discovery",
+          origin: "discovery",
+          ...input,
+        },
+        tickTenant.tenantId,
+        Date.now(),
+      );
     } catch (err) {
       structuredLog.warn("scheduledTasks.discovery_outcome_record_failed", {
         message: "[ScheduledTasksService] discovery outcome record failed",
@@ -3744,7 +3755,7 @@ export class ScheduledTasksService {
       // keeps one run↔generation link, and the dedupe key stays
       // stable for the run's single store.
       const reportGenerationId = generationId(reportRunId);
-      const canonical = storeOptionsCanonicalReport(this.orm, {
+      const canonical = await storeOptionsCanonicalReport(this.orm, {
         runId: reportRunId,
         generationId: reportGenerationId,
         title: `Options scanner â€” ${targetThesis} (${timestamp.slice(0, 10)})`,
@@ -4783,7 +4794,7 @@ export class ScheduledTasksService {
               userLogin: userLogin ?? this.userLogin,
               trigger: "scheduled",
               runId,
-              engineStores: this.engineSql ? optionsEngineStoresFromSql(this.engineSql) : null,
+              engineStores: this.engineSql ? optionsEngineStoresFromSql(this.engineSql, this.env) : null,
               queue: this.stageQueue ?? null,
             });
       const snapshot = result.snapshot;
@@ -5645,10 +5656,10 @@ export class ScheduledTasksService {
    * reports failure instead of success. Returns true when the row
    * is stored, or when no store is configured (nothing to fail).
    */
-  private persistIvCollectionReport(report: IvCollectionReport, timestamp: string): boolean {
+  private async persistIvCollectionReport(report: IvCollectionReport, timestamp: string): Promise<boolean> {
     if (!this.orm?.storeCanonicalReport) return true;
     try {
-      this.orm.storeCanonicalReport({
+      await this.orm.storeCanonicalReport({
         runId: `iv_collection:${report.date}`,
         generationId: `iv_collection:${report.date}`,
         title: `Daily IV collection â€” ${report.date}`,
@@ -5797,7 +5808,7 @@ export class ScheduledTasksService {
       // Issue #1999 (D2): the persisted row IS this run's record
       // (#278: persist so the agent can surface it later). A lost
       // store must not report success â€” the run failed its point.
-      const stored = this.persistIvCollectionReport(report, timestamp);
+      const stored = await this.persistIvCollectionReport(report, timestamp);
 
       return {
         success: stored,

@@ -37,6 +37,7 @@ import {
   OPPORTUNITY_HUNT_OPERATION,
   runOpportunityHunt,
 } from "../src/services/opportunityHunt";
+import { makeLedgerStub } from "./ledger-stub";
 
 function makeCtx() {
   const store = new Map<string, unknown>();
@@ -58,6 +59,10 @@ function makeEnv() {
     // plants opportunity-hunt itself, so no fixture planting is
     // needed: the forced goal resolves from the seed.
     AGENT_DB: new MockD1Database(),
+    // #6101 step 9 — the KV "jobRunRecords" key is retired: the
+    // hunt's run lands via the ledger post on ORCHESTRATOR_AGENT
+    // (the shared stub), and listJobRuns reads it back from there.
+    ORCHESTRATOR_AGENT: makeLedgerStub().namespace,
     PAYMENTS_AGENT: {
       idFromName: () => "payments-default",
       get: () => ({ budgetCheck: async () => ({ allowed: true }) }),

@@ -30,7 +30,6 @@ import {
   canonicalResearchWebhookBody,
   type ScheduledReportHit,
 } from "../../services/scheduledReports";
-import { createCanonicalReportStorePorts } from "../../data/createCanonicalReportStorePorts";
 import type { SettingsChangeNotifier } from "../settingsWebhookNotify";
 import { createOrchestratorTablePorts } from "../../data/createOrchestratorTablePorts";
 import {
@@ -62,11 +61,8 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 import { resolveScheduledJobAlertThreshold } from "../../config/scheduledJobAlert";
 import { postSlackText, resourceSlackPost } from "../resourceGoals";
 import type { SlackDeliveryEnv } from "../social/delivery";
-import {
-  recordJobOutcome,
-  type JobOutcomeTrigger,
-} from "../../services/jobOutcomes";
-import { projectJobOutcomeBestEffort } from "../../services/runLedgerProjectionHooks";
+import type { JobOutcomeTrigger } from "../../services/jobOutcomes";
+import { createJobRunRecordAdapter } from "../../data/createJobRunRecordPorts";
 import type { Env } from "../../types";
 import { resolveActorAttribution } from "../../security/backgroundAttribution";
 import { getServiceUserLogin } from "../../security/serviceIdentity";
@@ -96,8 +92,11 @@ export interface ReportsRouteContext {
     AI?: any;
     VECTOR_MEMORY?: any;
     REPORTS_BUCKET?: any;
-    /** Issue #2481: D1 binding for the tenant settings store. */
-    AGENT_DB?: unknown;
+    /** Issue #2481: D1 binding for the tenant settings store.
+     *  Issue #6101 (step 8): typed as the real D1Database (was
+     *  unknown) — the report seam's env param requires it, and the
+     *  mount passes the worker Env whose binding is D1Database. */
+    AGENT_DB?: D1Database;
     /** Issue #2481: server-resolved tenant id (see resolveIaaaTenant). */
     IAAA_TENANT_ID?: string;
     /** Issue #3527 S5: the service identity joins the narrow env
@@ -315,37 +314,36 @@ async function recordReportsBackfillRun(
   }
 ): Promise<void> {
   try {
-    recordJobOutcome(sql, {
-      id: `reports-index-backfill:${args.ranAt}`,
-      kind: "reports",
-      trigger: reportsBackfillTrigger(ctx, request),
-      status: args.status,
-      scanned: args.outcome?.rows,
-      matched: args.outcome?.upserted,
-      codedError: args.codedError,
-      deliveryStates: args.outcome
-        ? {
-            pages: String(args.outcome.pages),
-            upserted: String(args.outcome.upserted),
-            skippedRetention: String(args.outcome.skippedRetention),
-          }
-        : undefined,
-      origin: "reports-index-backfill",
-      createdAt: args.ranAt,
-    });
-    // Issue #6006 — fold the outcome facts into the one run source
-    // (D1); best-effort, never fails the backfill. The mount passes
-    // the full env (narrow type here); the service login owns the
-    // queue route when the narrow env carries one.
-    await projectJobOutcomeBestEffort({
-      env: (ctx.env ?? {}) as unknown as Partial<Env>,
-      sql,
-      outcomeId: `reports-index-backfill:${args.ranAt}`,
-      // Phase 3 (#6550): the service login now resolves from
-      // environment.config.json (defaults.service.userLogin); a
-      // still-set env var wins.
-      userLogin: resolveEnvironmentConfig(ctx.env as unknown as Partial<Env>).serviceUserLogin ?? null,
-    });
+    // Issue #6101 — the outcome folds directly onto D1 (no DO row,
+    // no projection); best-effort, never fails the backfill. An
+    // unbound ledger is the named error, logged by the catch below.
+    const ledgerStore = createJobRunRecordAdapter(ctx.env ?? {});
+    if (!ledgerStore) {
+      throw new Error("[run-ledger] D1 run-ledger binding unbound (AGENT_DB) (#6101).");
+    }
+    await ledgerStore.foldJobOutcome(
+      {
+        id: `reports-index-backfill:${args.ranAt}`,
+        kind: "reports",
+        trigger: reportsBackfillTrigger(ctx, request),
+        status: args.status,
+        scanned: args.outcome?.rows,
+        matched: args.outcome?.upserted,
+        codedError: args.codedError,
+        deliveryStates: args.outcome
+          ? {
+              pages: String(args.outcome.pages),
+              upserted: String(args.outcome.upserted),
+              skippedRetention: String(args.outcome.skippedRetention),
+            }
+          : undefined,
+        origin: "reports-index-backfill",
+        createdAt: args.ranAt,
+      },
+      resolveIaaaTenant({ IAAA_TENANT_ID: ctx.env?.IAAA_TENANT_ID }),
+      Date.now(),
+    );
+
   } catch (err) {
     structuredLog.warn("scheduled_job_outcome.run_record_failed", {
       message: "[reports] reports-index-backfill run record failed",
@@ -446,9 +444,18 @@ export async function handleReportsRoutes(
       const sql = ctx.ensureTables();
       // Issue #2359 (#1976 step 4d): both halves of the join
       // serve through their ports — the canonical-report read
-      // port for the run's row id, the confirmation port for
+      // for the run's row id, the confirmation port for
       // its confirmations (same projections and order).
-      const reportId = createCanonicalReportStorePorts(sql as never).read.findIdByRunId(runId);
+      // Issue #6101 (step 8): the canonical half reads D1
+      // agent_reports now (getScheduledReportByRunId); only
+      // the confirmations half stays DO (mas_report_confirmations
+      // is untouched by #6101). A post-cutover run's row lives
+      // in D1 only, so the old DO join found nothing for it.
+      const { getScheduledReportByRunId } = await import(
+        "../../services/scheduledReports"
+      );
+      const hit = await getScheduledReportByRunId(ctx.env ?? {}, runId);
+      const reportId = hit?.id ?? null;
       if (!reportId) {
         return Response.json({ confirmations: [] });
       }
@@ -755,7 +762,7 @@ export async function handleReportsRoutes(
         );
       }
     } else if (row.report_id) {
-      if (!isCanonicalReportOwnedBy(ctx.ensureTables(), String(row.report_id), callerLogin)) {
+      if (!(await isCanonicalReportOwnedBy(ctx.env ?? {}, String(row.report_id), callerLogin))) {
         ctx.audit("research_report.confirmation_denied", "trading", { confirmationId });
         return Response.json(
           { error: "Forbidden: this confirmation's report belongs to another user or is no longer available; re-submit the delivery." },
@@ -1139,7 +1146,7 @@ export async function handleReportsRoutes(
       const { extractResearchBrowseEntries, researchBrowseGates } = await import("../../services/researchBrowse");
       const headerLogin = request.headers.get("x-user-login");
       const userLogin = headerLogin && headerLogin.trim() ? headerLogin : undefined;
-      const reports = listScheduledReports(ctx.ensureTables(), {
+      const reports = await listScheduledReports(ctx.env ?? {}, {
         userLogin,
         sourceFilter: "research_report",
         limit: 100,
@@ -1291,17 +1298,16 @@ export async function handleReportsRoutes(
         return Response.json({ error: "sourceRunId is required" }, { status: 400 });
       }
       const sql = ctx.ensureTables();
-      const { ensureScheduledReportsTable, listScheduledReports } = await import("../../services/scheduledReports");
+      const { listScheduledReports } = await import("../../services/scheduledReports");
       const { replayOptionsReport } = await import("../../services/optionsReportReplay");
-      ensureScheduledReportsTable(sql);
       const tenantId = resolveIaaaTenant((ctx as any).env as { IAAA_TENANT_ID?: string } | null | undefined);
       const result = await replayOptionsReport(
         {
           sql,
           orm: (ctx.getOrm?.() ?? null) as any,
           env: ((ctx as any).env ?? {}) as Record<string, unknown>,
-          findSourceReport: (wanted, owner) => {
-            const hits = listScheduledReports(sql, { userLogin: owner, limit: 100 });
+          findSourceReport: async (wanted, owner) => {
+            const hits = await listScheduledReports(ctx.env ?? {}, { userLogin: owner, limit: 100 });
             return hits.find((h) => h.runId === wanted || h.id === wanted) ?? null;
           },
         },
@@ -1329,12 +1335,11 @@ export async function handleReportsRoutes(
       if (!headerLogin) {
         return Response.json({ error: "x-user-login is required" }, { status: 401 });
       }
-      const sql = ctx.ensureTables();
       const { listRecommendationSnapshots } = await import("../../services/recommendationPortfolios");
       const tenantId = resolveIaaaTenant((ctx as any).env as { IAAA_TENANT_ID?: string } | null | undefined);
       const limit = Math.max(1, Math.min(parseInt(url.searchParams.get("limit") || "50", 10) || 50, 200));
       return Response.json({
-        snapshots: listRecommendationSnapshots(sql, tenantId, headerLogin, limit),
+        snapshots: await listRecommendationSnapshots(ctx.env ?? {}, tenantId, headerLogin, limit),
       });
     } catch (err: any) {
       return Response.json({ error: err?.message || "Failed to list recommendation snapshots" }, { status: 500 });
@@ -1353,10 +1358,9 @@ export async function handleReportsRoutes(
         sourceSnapshotIds?: string[];
         thesis?: string | null;
       };
-      const sql = ctx.ensureTables();
       const { constructPortfolioFromSnapshots } = await import("../../services/recommendationPortfolios");
       const tenantId = resolveIaaaTenant((ctx as any).env as { IAAA_TENANT_ID?: string } | null | undefined);
-      const result = constructPortfolioFromSnapshots(sql, {
+      const result = await constructPortfolioFromSnapshots(ctx.env ?? {}, {
         snapshotId: body.snapshotId,
         runId: typeof body.runId === "string" && body.runId.trim() ? body.runId.trim() : `portfolio-run:${crypto.randomUUID()}`,
         userLogin: headerLogin,
@@ -1419,30 +1423,6 @@ export async function handleReportsRoutes(
         await import("../../services/runLedgerReads");
       const tenantId = resolveIaaaTenant((ctx as any).env as { IAAA_TENANT_ID?: string } | null | undefined);
       let linkedJobRunIds = new Set<string>();
-      // Issue #6103 (Q4) — the D1 rows arrive via the grandfathered
-      // #6099 projector, which runs only when a carrier is configured
-      // for this tenant. When none is, the runs are incomplete and the
-      // gap is named here, never silent. A carrier row that cannot be
-      // read is NOT named: the D1 reads below already fail loudly
-      // there, so naming it too would double-report the same failure.
-      // The carrier state itself cannot be verified from the repo —
-      // it is live D1 state — so this names the configuration gap, not
-      // a verified live state.
-      if ((ctx as any).env !== undefined) {
-        try {
-          const { readTenantProjectionCarriers } = await import("../../services/projectionCarriers");
-          const carriers = await readTenantProjectionCarriers((ctx as any).env || {});
-          if (carriers.status === "unconfigured") {
-            storeErrors.runs =
-              "runs incomplete: no projection carrier configured for this tenant — projected rows are missing; engine D1 records still show";
-          } else if (carriers.status === "ok" && !carriers.carriers?.orm && !carriers.carriers?.queues) {
-            storeErrors.runs =
-              "runs incomplete: no projection carrier enabled for this tenant — projected rows are missing; engine D1 records still show";
-          }
-        } catch {
-          // Unreadable carrier store — the D1 reads below report it.
-        }
-      }
       const readStore = async (name: string, read: () => Promise<RunSummary[]>) => {
         try {
           const rows = await read();
@@ -1539,7 +1519,7 @@ export async function handleReportsRoutes(
       const { getScheduledReportById, scheduledReportPdfUrl, resolveCanonicalReportBodyWithBackfill } = await import("../../services/scheduledReports");
       const headerLogin = request.headers.get("x-user-login");
       const userLogin = headerLogin && headerLogin.trim() ? headerLogin : undefined;
-      const hit = getScheduledReportById(ctx.ensureTables(), decodeURIComponent(reportDetailMatch[1]), { userLogin });
+      const hit = await getScheduledReportById(ctx.env ?? {}, decodeURIComponent(reportDetailMatch[1]), { userLogin });
       if (!hit) {
         return Response.json({ error: "Report not found" }, { status: 404 });
       }
@@ -1548,7 +1528,7 @@ export async function handleReportsRoutes(
       // resolve to themselves; a lost object resolves to null and the
       // detail view renders body: null, as for an unparseable body).
       const reportEnv = (ctx as any).env || {};
-      const bodyText = (await resolveCanonicalReportBodyWithBackfill(ctx.ensureTables(), reportEnv, hit)) ?? "";
+      const bodyText = (await resolveCanonicalReportBodyWithBackfill(reportEnv, hit)) ?? "";
       let body: unknown = null;
       let hasAttachment = false;
       try {
@@ -1592,17 +1572,15 @@ export async function handleReportsRoutes(
       const headerLogin = request.headers.get("x-user-login");
       const userLogin = headerLogin && headerLogin.trim() ? headerLogin : undefined;
 
-      ensureScheduledReportsTable(ctx.ensureTables());
-
       let reports: any[];
       if (query.trim()) {
         // Search with query (user-scoped)
-        reports = searchScheduledReports(ctx.ensureTables(), query, limit, { userLogin });
+        reports = await searchScheduledReports(ctx.env ?? {}, query, limit, { userLogin });
       } else {
         // List all (user-scoped), newest first
-        // Note: mas_reports has no report_url column (see #307 R2 discussion).
+        // Note: agent_reports has no report_url column (see #307 R2 discussion).
         // The PDF URL is constructed from the runId via /api/screener/report.pdf
-        reports = listScheduledReports(ctx.ensureTables(), { userLogin, sourceFilter, limit });
+        reports = await listScheduledReports(ctx.env ?? {}, { userLogin, sourceFilter, limit });
       }
 
       // Apply source filter to search results (search doesn't support it natively)
@@ -1678,16 +1656,15 @@ export async function handleReportsRoutes(
         resolveCanonicalReportBody,
       } = await import("../../services/scheduledReports");
       const { buildReplayFromRecord } = await import("../../workflows/reportReplay");
-      const sql = ctx.ensureTables();
       let hit: ScheduledReportHit | null = null;
       if (reportId) {
-        hit = getScheduledReportById(sql, reportId, { userLogin });
+        hit = await getScheduledReportById(ctx.env ?? {}, reportId, { userLogin });
       } else if (runId) {
-        hit = getScheduledReportByRunId(sql, runId, { userLogin });
+        hit = await getScheduledReportByRunId(ctx.env ?? {}, runId, { userLogin });
       } else {
         // Newest stored research report for the symbol: resolve
         // bodies newest-first until one names the symbol.
-        const rows = listScheduledReports(sql, {
+        const rows = await listScheduledReports(ctx.env ?? {}, {
           userLogin,
           sourceFilter: "research_report",
           limit: 100,
@@ -1766,7 +1743,7 @@ export async function handleReportsRoutes(
   if (path.endsWith("/reports/semantic-search") && request.method === "GET") {
     try {
       const { semanticSearchReports, mergeSearchHits } = await import("../../services/reportSemanticIndex");
-      const { searchScheduledReports, ensureScheduledReportsTable } = await import("../../services/scheduledReports");
+      const { searchScheduledReports } = await import("../../services/scheduledReports");
       const query = url.searchParams.get("q") || "";
       if (!query.trim()) {
         return Response.json({ hits: [], semantic: false });
@@ -1774,9 +1751,8 @@ export async function handleReportsRoutes(
       const env = ctx.env || {};
       const semantic = await semanticSearchReports(env, query, 8);
       // Merge with lexical for the hybrid ranking.
-      const lexical = searchScheduledReports(ctx.ensureTables(), query, 20).map((r: any) => String(r.id));
+      const lexical = (await searchScheduledReports(ctx.env ?? {}, query, 20)).map((r: any) => String(r.id));
       const merged = mergeSearchHits(lexical, semantic);
-      ensureScheduledReportsTable(ctx.ensureTables());
       return Response.json({
         hits: merged,
         semantic: semantic.length > 0,

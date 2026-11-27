@@ -503,15 +503,20 @@ function feedRunSettledObserverFor(ctx: ScheduledTasksPipelineContext) {
 }
 
 /**
- * Issue #4360 / #6609 — the host's durable stage-event store. The
- * ScheduledAgent pipeline is D1-resident, so the D1 adapter is
- * authoritative; the queue consumer's persist call lands here
- * through the agent's RPC surface.
+ * Issue #4360 — the host's durable stage-event store. Issue #6101
+ * (step 7): D1 `job_stage_events` is the store's home now; the DO
+ * leg is deleted. Null when AGENT_DB is unbound — unbound means no
+ * stage rows exist anywhere, so callers treat null as "nothing
+ * recorded" (record → false, list → []) rather than failing. The
+ * queue consumer's persist call lands here through the agent's RPC
+ * surface.
  */
 export function createScheduledAgentStageEventStore(
   ctx: ScheduledTasksPipelineContext,
-): JobStageEventStore {
-  return createD1JobStageEventStore(pipelineDb(ctx));
+): JobStageEventStore | null {
+  return ctx.env.AGENT_DB
+    ? createD1JobStageEventStore(ctx.env.AGENT_DB)
+    : null;
 }
 
 /**
@@ -544,6 +549,9 @@ export function createScheduledAgentPipelineControl(
   // steps run through them, and the screener steps bind their
   // quote/history deps over the same #3941 provider construction.
   const feedDeps = feedStepDepsForScheduledAgent(ctx, userLogin);
+  // Issue #6028 — the D1 stage-event store, shared with the
+  // stage-event consumer below (null when AGENT_DB is unbound).
+  const stageEvents = createScheduledAgentStageEventStore(ctx);
   // Issue #6250 — the OTel J1–J7 logging + metrics + traces stacks
   // are wired by the ONE factory (src/services/jobPipelineControlFactory),
   // not inline here: the feed-run observer stays as the deps'
@@ -556,9 +564,11 @@ export function createScheduledAgentPipelineControl(
       runRecorder: jobRunRecorderForScheduledAgent(ctx),
       runSettledObserver: feedRunSettledObserverFor(ctx),
       publisher: messaging.ports?.publisher ?? null,
-    // Issue #6609 — stage rows land in D1, the same store the
-    // stage-event consumer writes through this host's RPC surface.
-    stageEvents: createScheduledAgentStageEventStore(ctx),
+    // Issue #6028 — the stage-level terminal rows land in D1
+    // `job_stage_events` (the #6101 step-7 writer), the same store the
+    // stage-event consumer writes through this host's RPC surface;
+    // absent when AGENT_DB is unbound, and the engine writes nothing then.
+    ...(stageEvents ? { stageEvents } : {}),
     // Issue #3967 — a poison run lands in the platform's DLQ, the surface
     // an operator already inspects. Best-effort: an unbound AGENT_DB (or a
     // failing store) leaves the run's own failure exactly as it was.

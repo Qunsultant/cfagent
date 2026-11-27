@@ -135,7 +135,10 @@ import {
 } from "../src/services/stockCopilotLedger";
 import { copilotCycleLedgerOutcome } from "../src/services/scheduleWatchdog";
 import { OBS_LEDGER_WRITE_FAILED } from "../src/observability/otelMessages";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
 import { buildJobRunRecord } from "../src/services/jobRunRecords";
 import {
   getStockCopilotStatusViaDoor,
@@ -166,12 +169,57 @@ class SqliteTestStorage {
   }
 }
 
+/** Minimal D1Database stand-in over node:sqlite (the J1 suite's double). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: { changes: info.changes, last_row_id: info.lastInsertRowid },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+  async batch(stmts: { run: () => Promise<unknown> }[]) {
+    return Promise.all(stmts.map((stmt) => stmt.run()));
+  }
+}
+
+/** A fresh D1 ledger store over an in-memory mock binding (#6101). */
+function ledgerD1() {
+  const d1 = new MockD1Database();
+  const store = new D1JobRunRecordStore(createD1JobRunRecordDb(d1 as unknown as D1Database));
+  return { d1, store };
+}
+
 async function emptyCommercial(): Promise<InMemoryCommercialAdapter> {
   return new InMemoryCommercialAdapter();
 }
 
 function makeDoorCtx(
   sql: SqliteTestStorage,
+  d1: MockD1Database,
   overrides: Partial<StockCopilotDoorContext> = {},
 ): StockCopilotDoorContext {
   const settings = new Map<string, string>([
@@ -181,6 +229,8 @@ function makeDoorCtx(
     env: {
       STOCK_COPILOT_PAPER_ENABLED: "1",
       STOCK_COPILOT_AROUND_THE_CLOCK: "true",
+      // Issue #6101 — the door reads the D1 ledger.
+      AGENT_DB: d1,
     } as any,
     sql: sql as any,
     readSettingRaw: (k: string) => settings.get(k) ?? null,
@@ -190,15 +240,15 @@ function makeDoorCtx(
   };
 }
 
-function seedLedgerRow(
-  sql: SqliteTestStorage,
+async function seedLedgerRow(
+  store: D1JobRunRecordStore,
   started: string,
   outcome: "success" | "skipped" | "failure" = "success",
   descriptor = "cycle complete: no trade",
   detail?: string,
 ) {
-  const store = new SqlJobRunRecordStore(sql as any);
-  store.record(
+  // Issue #6101 — the seed lands in D1, not the DO.
+  await store.record(
     buildJobRunRecord({
       system: "orchestrator-schedule",
       jobId: STOCK_COPILOT_TASK_ID,
@@ -244,15 +294,17 @@ afterEach(() => {
 describe("Issue #5085 — a run with no artifact still records its job/run ids (#4002 rule, pin)", () => {
   it("records the job id, operation and outcome with no artifact refs", async () => {
     const sql = new SqliteTestStorage();
+    const { d1, store } = ledgerD1();
     await recordScheduleCallbackRun(
       sql as any,
       "stock-copilot-paper-cycle",
       { scheduleId: STOCK_COPILOT_TASK_ID, trigger: "scheduled" },
       { id: STOCK_COPILOT_TASK_ID },
       async () => ({ outcome: "success", descriptor: "cycle complete: no trade" }),
+      // Issue #6101 — the callback recorder resolves the D1 store from env.
+      { env: { AGENT_DB: d1 } },
     );
-    const store = new SqlJobRunRecordStore(sql as any);
-    const rows = store.listByJob(STOCK_COPILOT_TASK_ID);
+    const rows = await store.listByJob(STOCK_COPILOT_TASK_ID);
     expect(rows.length).toBe(1);
     expect(rows[0].jobId).toBe(STOCK_COPILOT_TASK_ID);
     expect(rows[0].operation).toBe("stock-copilot-paper-cycle");
@@ -264,9 +316,10 @@ describe("Issue #5085 — a run with no artifact still records its job/run ids (
 describe("Issue #5085 — the Loop status reads the ledger (door)", () => {
   it("a ledger row with no activity record still yields a lastCycle", async () => {
     const sql = new SqliteTestStorage();
+    const { d1, store } = ledgerD1();
     const started = new Date().toISOString();
-    seedLedgerRow(sql, started, "success", "cycle complete: no trade");
-    const ctx = makeDoorCtx(sql, { commercial: await emptyCommercial() });
+    await seedLedgerRow(store, started, "success", "cycle complete: no trade");
+    const ctx = makeDoorCtx(sql, d1, { commercial: await emptyCommercial() });
     const status = await getStockCopilotStatusViaDoor(ctx, "owner");
     expect(status.neverExecuted).toBe(false);
     expect(status.lastCycle).not.toBeNull();
@@ -277,8 +330,9 @@ describe("Issue #5085 — the Loop status reads the ledger (door)", () => {
 
   it("an activity record with no ledger row yields no lastCycle and never_executed", async () => {
     const sql = new SqliteTestStorage();
+    const { d1 } = ledgerD1();
     seedActivity(sql, new Date().toISOString(), "no_trade");
-    const ctx = makeDoorCtx(sql, { commercial: await emptyCommercial() });
+    const ctx = makeDoorCtx(sql, d1, { commercial: await emptyCommercial() });
     const status = await getStockCopilotStatusViaDoor(ctx, "owner");
     expect(status.lastCycle).toBeNull();
     expect(status.neverExecuted).toBe(true);
@@ -290,11 +344,12 @@ describe("Issue #5085 — the Loop status reads the ledger (door)", () => {
 
   it("with both present, lastCycle comes from the ledger, not the activity row", async () => {
     const sql = new SqliteTestStorage();
+    const { d1, store } = ledgerD1();
     const ledgerAt = "2026-11-04T15:00:00.000Z";
     const activityAt = "2026-11-04T14:00:00.000Z";
-    seedLedgerRow(sql, ledgerAt, "success", "cycle complete: traded");
+    await seedLedgerRow(store, ledgerAt, "success", "cycle complete: traded");
     seedActivity(sql, activityAt, "no_trade");
-    const ctx = makeDoorCtx(sql, { commercial: await emptyCommercial() });
+    const ctx = makeDoorCtx(sql, d1, { commercial: await emptyCommercial() });
     const status = await getStockCopilotStatusViaDoor(ctx, "owner");
     expect((status.lastCycle as Record<string, unknown>).cycleAt).toBe(ledgerAt);
     expect((status.lastCycle as Record<string, unknown>).outcome).toBe("traded");
@@ -305,8 +360,9 @@ describe("Issue #5085 — the Loop status reads the ledger (door)", () => {
 describe("Issue #5085 — the Loop status reads the ledger (REST route + introspection)", () => {
   it("REST status: a ledger row with no activity record yields a lastCycle", async () => {
     const sql = new SqliteTestStorage();
+    const { d1, store } = ledgerD1();
     const started = new Date().toISOString();
-    seedLedgerRow(sql, started, "success", "cycle complete: no trade");
+    await seedLedgerRow(store, started, "success", "cycle complete: no trade");
     const settings = new Map<string, string>([
       ["stock_copilot:sessions", "pre_market,regular,after_hours,exto"],
     ]);
@@ -317,6 +373,8 @@ describe("Issue #5085 — the Loop status reads the ledger (REST route + introsp
       env: {
         STOCK_COPILOT_PAPER_ENABLED: "1",
         STOCK_COPILOT_AROUND_THE_CLOCK: "true",
+        // Issue #6101 — the route reads the D1 ledger.
+        AGENT_DB: d1,
       } as any,
       sql: sql as any,
       getScreenerExecutionContext: async () => ({
@@ -339,8 +397,9 @@ describe("Issue #5085 — the Loop status reads the ledger (REST route + introsp
 
   it("introspection: lastCycleStatus comes from the ledger, not activity", async () => {
     const sql = new SqliteTestStorage();
+    const { d1, store } = ledgerD1();
     const started = new Date().toISOString();
-    seedLedgerRow(sql, started, "success", "cycle complete: traded");
+    await seedLedgerRow(store, started, "success", "cycle complete: traded");
     const positionPort = createStockCopilotPositionPort(sql as any);
     const activityPort = createStockCopilotActivityPort(sql as any);
     const controlPort = createStockCopilotControlPort(sql as any);
@@ -348,7 +407,8 @@ describe("Issue #5085 — the Loop status reads the ledger (REST route + introsp
     activityPort.ensureSchema();
     controlPort.ensureSchema();
     const result = await introspectStockCopilot({
-      env: { STOCK_COPILOT_PAPER_ENABLED: "true" } as any,
+      // Issue #6101 — introspection reads the D1 ledger.
+      env: { STOCK_COPILOT_PAPER_ENABLED: "true", AGENT_DB: d1 } as any,
       userLogin: "owner",
       readSettingRaw: () => null,
       positionPort,
@@ -362,6 +422,7 @@ describe("Issue #5085 — the Loop status reads the ledger (REST route + introsp
 
   it("introspection: activity with no ledger row reads no last cycle", async () => {
     const sql = new SqliteTestStorage();
+    const { d1 } = ledgerD1();
     seedActivity(sql, new Date().toISOString(), "no_trade");
     const positionPort = createStockCopilotPositionPort(sql as any);
     const activityPort = createStockCopilotActivityPort(sql as any);
@@ -370,7 +431,8 @@ describe("Issue #5085 — the Loop status reads the ledger (REST route + introsp
     activityPort.ensureSchema();
     controlPort.ensureSchema();
     const result = await introspectStockCopilot({
-      env: { STOCK_COPILOT_PAPER_ENABLED: "true" } as any,
+      // Issue #6101 — introspection reads the D1 ledger.
+      env: { STOCK_COPILOT_PAPER_ENABLED: "true", AGENT_DB: d1 } as any,
       userLogin: "owner",
       readSettingRaw: () => null,
       positionPort,
@@ -493,10 +555,10 @@ describe("Issue #5085 — the cycle outcome class rides the ledger row", () => {
     expect(legacyRefused.outcome).toBe("refused");
   });
 
-  it("latestCopilotCycleLedgerRow takes the newest of the task and callback ids", () => {
-    const sql = new SqliteTestStorage();
-    const store = new SqlJobRunRecordStore(sql as any);
-    store.record(
+  it("latestCopilotCycleLedgerRow takes the newest of the task and callback ids", async () => {
+    // Issue #6101 — the read takes the D1 store now.
+    const { store } = ledgerD1();
+    await store.record(
       buildJobRunRecord({
         system: "orchestrator-schedule",
         jobId: `callback:${STOCK_COPILOT_TASK_ID}`,
@@ -512,7 +574,7 @@ describe("Issue #5085 — the cycle outcome class rides the ledger row", () => {
         descriptor: "cycle complete: no trade",
       }),
     );
-    store.record(
+    await store.record(
       buildJobRunRecord({
         system: "orchestrator-schedule",
         jobId: STOCK_COPILOT_TASK_ID,
@@ -528,9 +590,9 @@ describe("Issue #5085 — the cycle outcome class rides the ledger row", () => {
         descriptor: "cycle complete: traded",
       }),
     );
-    const latest = latestCopilotCycleLedgerRow(sql as any);
+    const latest = await latestCopilotCycleLedgerRow(store);
     expect(latest?.started).toBe("2026-11-04T15:00:00.000Z");
-    expect(latestCopilotCycleLedgerRow(new SqliteTestStorage() as any)).toBeUndefined();
+    expect(await latestCopilotCycleLedgerRow(ledgerD1().store)).toBeUndefined();
   });
 });
 
@@ -635,15 +697,17 @@ describe("Issue #5085 — a failed ledger write is named through one shared name
 describe("Issue #5085 — the runs view reads the ledger (pin)", () => {
   it("a cycle row written through the one entry is listed by the ledger read", async () => {
     const sql = new SqliteTestStorage();
+    const { d1, store } = ledgerD1();
     await recordScheduleCallbackRun(
       sql as any,
       "stock-copilot-paper-cycle",
       { scheduleId: STOCK_COPILOT_TASK_ID, trigger: "scheduled" },
       { id: STOCK_COPILOT_TASK_ID },
       async () => ({ outcome: "success", descriptor: "cycle complete: traded" }),
+      // Issue #6101 — the callback recorder resolves the D1 store from env.
+      { env: { AGENT_DB: d1 } },
     );
-    const store = new SqlJobRunRecordStore(sql as any);
-    const recent = store.listRecent(10);
+    const recent = await store.listRecent(10);
     expect(recent.some((r) => r.jobId === STOCK_COPILOT_TASK_ID)).toBe(true);
   });
 });
@@ -651,11 +715,13 @@ describe("Issue #5085 — the runs view reads the ledger (pin)", () => {
 describe("Issue #5085 — every job/run writes through the one entry", () => {
   it("agent-schedule action rows land in the one ledger via the DO deps", async () => {
     const sql = new SqliteTestStorage();
+    const { d1, store } = ledgerD1();
     const { createAgentScheduleExecutorDepsForDo } = await import(
       "../src/services/agentScheduleCapability"
     );
     const deps = createAgentScheduleExecutorDepsForDo(
-      {} as any,
+      // Issue #6101 — the deps' recordLedger writes the D1 ledger.
+      { AGENT_DB: d1 } as any,
       sql as any,
       () => {},
       {},
@@ -674,14 +740,12 @@ describe("Issue #5085 — every job/run writes through the one entry", () => {
       detail: "test",
     });
     await deps.recordLedger(record);
-    const store = new SqlJobRunRecordStore(sql as any);
-    const rows = store.listByJob("agent-schedule-action-test");
+    const rows = await store.listByJob("agent-schedule-action-test");
     expect(rows.length).toBe(1);
     expect(rows[0].operation).toBe("agent.schedule.test");
-    // The routing itself (recordLedger -> recordLedgerRun, never a
+    // The routing itself (recordLedger -> recordLedgerRunD1, never a
     // direct store.record) is verified by grep: the only
-    // SqlJobRunRecordStore.record call in src is
-    // unifiedLedger.ts's recordLedgerRun (plus the D1 residency,
-    // filed as #4124).
+    // D1JobRunRecordStore.record call in src is
+    // createJobRunRecordPorts.ts's recordLedgerRunD1 (#6101).
   });
 });

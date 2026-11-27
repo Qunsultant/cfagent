@@ -29,6 +29,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import type { SqlStorage } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 import { resolveAiModelName } from "../src/agents/model";
 import { GatewayAllProvidersFailedError } from "../src/gateway/gatewayPorts";
 import {
@@ -181,7 +182,7 @@ describe("live-LLM comparison end-to-end (#4402)", () => {
     const env = stubGatewayEnv(calls);
     const runId = "cmp-live-1";
     const sql = new SqliteTestStorage();
-    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage);
+    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage, { AGENT_DB: new MockD1Database() });
     const ledgerSql = new MockSqlStorage() as any;
     const snap = snapshot([screened("XYZ261122C200", "CALL", 200), screened("XYZ261122C210", "CALL", 210)]);
     const quant = quantCandidates();
@@ -266,7 +267,7 @@ describe("live-LLM comparison end-to-end (#4402)", () => {
     const env = stubGatewayEnv(calls, new Error("stub gateway down"));
     const runId = "cmp-live-fail";
     const sql = new SqliteTestStorage();
-    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage);
+    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage, { AGENT_DB: new MockD1Database() });
     const snap = snapshot([screened("XYZ261122C200", "CALL", 200)]);
     const quant = quantCandidates();
 
@@ -308,7 +309,7 @@ describe("live-LLM comparison end-to-end (#4402)", () => {
     const env = stubGatewayEnv(calls);
     const runId = "cmp-live-empty";
     const sql = new SqliteTestStorage();
-    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage);
+    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage, { AGENT_DB: new MockD1Database() });
 
     const result = await runComparisonViaEngine(
       { runId, request: comparisonDispatchRequest(runId), engineStores },

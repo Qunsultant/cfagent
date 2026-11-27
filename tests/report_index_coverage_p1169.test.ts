@@ -18,6 +18,7 @@
  * call), so tests flush microtasks before asserting upserts.
  */
 import { describe, it, expect } from "vitest";
+import { MockD1Database } from "./mock-d1";
 import { MockSqlStorage } from "./mock-sql";
 import { DatabaseORM } from "../src/orm";
 import {
@@ -38,6 +39,9 @@ type Upserted = {
 
 function makeEnv(upserts: Upserted[]) {
   return {
+    // #6101: the canonical store lands in D1 — every env carries
+    // a fresh binding, so each test's rows are its own.
+    AGENT_DB: new MockD1Database(),
     AI: { run: async () => ({ data: [[0.1, 0.2, 0.3]] }) },
     VECTOR_MEMORY: {
       upsert: async (vectors: Upserted[]) => {
@@ -118,7 +122,7 @@ describe("#1169 S4-1 report index coverage", () => {
     const orm = new DatabaseORM(sql as any);
     const upserts: Upserted[] = [];
     const env = makeEnv(upserts);
-    const goal = orm.storeCanonicalReport(
+    const goal = await orm.storeCanonicalReport(
       {
         runId: "goal-screen:task-1",
         generationId: "goal-screen:task-1",
@@ -141,7 +145,7 @@ describe("#1169 S4-1 report index coverage", () => {
       env as any
     );
     expect(goal).not.toBeNull();
-    const scan = orm.storeCanonicalReport(
+    const scan = await orm.storeCanonicalReport(
       {
         runId: "options_scanner:2026-10-28T00:00:00Z",
         generationId: "options_scanner:2026-10-28T00:00:00Z",
@@ -166,7 +170,7 @@ describe("#1169 S4-1 report index coverage", () => {
     const orm = new DatabaseORM(sql as any);
     const upserts: Upserted[] = [];
     const env = makeEnv(upserts);
-    const stored = orm.storeCanonicalReport(
+    const stored = await orm.storeCanonicalReport(
       {
         runId: "retention:2026-10-28",
         generationId: "retention:2026-10-28",
@@ -186,7 +190,7 @@ describe("#1169 S4-1 report index coverage", () => {
   it("5. bindings absent → store still succeeds, no vector", async () => {
     const sql = new MockSqlStorage();
     const orm = new DatabaseORM(sql as any);
-    const stored = orm.storeCanonicalReport(screenerInput("screener:noenv") as any);
+    const stored = await orm.storeCanonicalReport(screenerInput("screener:noenv") as any, { AGENT_DB: new MockD1Database() } as any);
     expect(stored).not.toBeNull();
     expect(stored!.reportId.length).toBeGreaterThan(0);
   });
@@ -195,6 +199,7 @@ describe("#1169 S4-1 report index coverage", () => {
     const sql = new MockSqlStorage();
     const orm = new DatabaseORM(sql as any);
     const env = {
+      AGENT_DB: new MockD1Database(),
       AI: { run: async () => ({ data: [[0.1]] }) },
       VECTOR_MEMORY: {
         upsert: async () => {
@@ -203,7 +208,7 @@ describe("#1169 S4-1 report index coverage", () => {
         query: async () => ({ matches: [] }),
       },
     };
-    const stored = orm.storeCanonicalReport(screenerInput("screener:boom") as any, env as any);
+    const stored = await orm.storeCanonicalReport(screenerInput("screener:boom") as any, env as any);
     expect(stored).not.toBeNull();
     await flush();
     // No unhandled rejection: the test completing is the assertion.
@@ -215,13 +220,13 @@ describe("#1169 S4-1 report index coverage", () => {
     const orm = new DatabaseORM(sql as any);
     const upserts: Upserted[] = [];
     const env = makeEnv(upserts);
-    const first = orm.storeCanonicalReport(screenerInput("screener:redeliver") as any, env as any);
+    const first = await orm.storeCanonicalReport(screenerInput("screener:redeliver") as any, env as any);
     expect(first).not.toBeNull();
     expect(first!.created).toBe(true);
     await flush();
     expect(upserts).toHaveLength(1);
     const firstId = upserts[0].id;
-    const second = orm.storeCanonicalReport(screenerInput("screener:redeliver") as any, env as any);
+    const second = await orm.storeCanonicalReport(screenerInput("screener:redeliver") as any, env as any);
     expect(second).not.toBeNull();
     expect(second!.created).toBe(false);
     expect(second!.reportId).toBe(first!.reportId);
@@ -261,6 +266,7 @@ describe("#1169 S4-1 report index coverage", () => {
   it("9. backfill route: exact covered set, skips retention, re-runnable, 401 without login", async () => {
     const sql = new MockSqlStorage();
     const orm = new DatabaseORM(sql as any);
+    const d1 = new MockD1Database();
     const seeds: Array<{ generationId: string; source: string; title: string }> = [
       { generationId: "screener:bf-1", source: "screener", title: "Market screen — ALL (bf-1)" },
       { generationId: "goal-screen:bf-1", source: "goal_screen", title: "Goal screen — growth (bullish)" },
@@ -272,7 +278,7 @@ describe("#1169 S4-1 report index coverage", () => {
     ];
     for (const s of seeds) {
       // No env at seed time: no vectors yet (pre-hook rows).
-      const stored = orm.storeCanonicalReport(
+      const stored = await orm.storeCanonicalReport(
         {
           runId: s.generationId,
           generationId: s.generationId,
@@ -281,12 +287,13 @@ describe("#1169 S4-1 report index coverage", () => {
           summary: `Summary for ${s.title}.`,
           body: { seed: s.generationId },
           userLogin: "tester",
-        } as any
+        } as any,
+        { AGENT_DB: d1 } as any
       );
       expect(stored).not.toBeNull();
     }
     const upserts: Upserted[] = [];
-    const env = makeEnv(upserts);
+    const env = { ...makeEnv(upserts), AGENT_DB: d1 };
     const ctx = { ensureTables: () => sql, env } as any;
     const callBackfill = (login: string | null) =>
       handleReportsRoutes(

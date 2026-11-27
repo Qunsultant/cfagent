@@ -27,25 +27,29 @@ import { DynamicOptionsScreener } from "../src/trading/optionsScreener";
 import { executeOptionsScreen } from "../src/agents/routes/etradeOptionsScreen";
 import { MockSqlStorage } from "./mock-sql";
 import { DatabaseORM } from "../src/orm";
-import { listJobOutcomes } from "../src/services/jobOutcomes";
+import { listD1JobRunRecords } from "../src/services/jobRunRecordReads";
 import {
+  listScheduledReports,
   storeReportAtGeneration,
   type CanonicalStoreResult,
   type ScheduledReportInput,
 } from "../src/services/scheduledReports";
+import { MockD1Database } from "./mock-d1";
 import type { OptionsStageStorage } from "../src/workflows/optionsScreenPorts";
 
 /** Issue #4060: the fake orchestrator door for the manual entry's
  *  leg — a namespace whose record writes through the real canonical
- *  seam over this test's sql. */
-function fakeOrchestratorDoor(sql: MockSqlStorage) {
+ *  seam into this test's D1. #6101 step 8: the seam writes D1
+ *  agent_reports now, and the manual workflow also records its run
+ *  in the D1 run ledger, so ctx.env binds the same AGENT_DB. */
+function fakeOrchestratorDoor(env: { AGENT_DB: unknown }) {
   return {
     idFromName: (name: string) => name,
     get: () => ({
       recordPipelineGenerateReport: async (
         input: ScheduledReportInput,
       ): Promise<CanonicalStoreResult | null> =>
-        storeReportAtGeneration(sql as never, input),
+        storeReportAtGeneration(input, env as never),
     }),
   };
 }
@@ -109,6 +113,8 @@ describe("manual options screen through the one pipeline (#3186 step 3d)", () =>
     const sql = new MockSqlStorage();
     const orm = new DatabaseORM(sql as never);
     const storage = memoryStorage();
+    const mock = new MockD1Database();
+    const env = { AGENT_DB: mock as unknown as never };
     const fakeAgent = {
       generateAndStoreOptionsXlsx: async () => ({ key: "xlsx-key-1", fileName: "options.xlsx" }),
       generateAndStoreOptionsCsv: async () => ({ key: "csv-key-1", fileName: "options.csv" }),
@@ -117,7 +123,7 @@ describe("manual options screen through the one pipeline (#3186 step 3d)", () =>
       getOptionsCsvByKey: async () => ({ bytes: new Uint8Array([1]), fileName: "options.csv" }),
     };
     const ctx = {
-      env: { ORCHESTRATOR_AGENT: fakeOrchestratorDoor(sql) },
+      env: { ORCHESTRATOR_AGENT: fakeOrchestratorDoor(env), AGENT_DB: mock as unknown as never },
       getOrm: () => orm,
       agentCtx: { storage: { ...storage, sql } },
       ensureTables: () => sql,
@@ -147,9 +153,9 @@ describe("manual options screen through the one pipeline (#3186 step 3d)", () =>
     expect(body["csvKey"]).toBe("csv-key-1");
     expect(body["csvUrl"]).toBe("/api/options/report.csv?key=csv-key-1");
 
-    const rows = Array.from(sql.exec("SELECT * FROM mas_reports")) as any[];
+    const rows = await listScheduledReports(env, { userLogin: "owner@example.com" });
     expect(rows).toHaveLength(1);
-    expect(String(rows[0].run_id)).toMatch(/^options_scanner:manual:/);
+    expect(String(rows[0].runId)).toMatch(/^options_scanner:manual:/);
     expect(rows[0].source).toBe("options_scanner");
     const rowBody = JSON.parse(String(rows[0].body));
     expect(rowBody.xlsxKey).toBe("xlsx-key-1");
@@ -157,10 +163,17 @@ describe("manual options screen through the one pipeline (#3186 step 3d)", () =>
     expect(rowBody.filter.underlyingSymbols).toEqual(["AAPL"]);
     expect(rowBody.result.matchedCount).toBe(2);
 
-    const outcomes = listJobOutcomes(sql as never);
+    // #6101: the outcome folds onto the D1 run ledger now (the
+    // DO mas_job_outcomes table is frozen) — kind rides
+    // operation, completed rides outcome "success", origin verbatim.
+    // The engine's own run row lands beside the folded outcome
+    // row; the outcome is the job-outcome row for this manual run.
+    const outcomes = (await listD1JobRunRecords(env, 10)).filter(
+      (r) => r.jobId.startsWith("options-manual:"),
+    );
     expect(outcomes).toHaveLength(1);
-    expect(outcomes[0].kind).toBe("options");
-    expect(outcomes[0].status).toBe("completed");
+    expect(outcomes[0].operation).toBe("options");
+    expect(outcomes[0].outcome).toBe("success");
     expect(outcomes[0].origin).toBe("manual-options-inline");
 
     // The migration's additions: the pipeline left its evidence -
@@ -168,7 +181,7 @@ describe("manual options screen through the one pipeline (#3186 step 3d)", () =>
     // the canonical row is the pipeline's row (one row, not two -
     // the shapeReport re-record backfilled the keys onto it).
     expect(storage.keys()).toHaveLength(8);
-    const runId = String(rows[0].run_id);
+    const runId = String(rows[0].runId);
     expect(storage.keys().every((key) => key.startsWith(`options:${runId}:`))).toBe(true);
     const screenArtifact = await storage.get<{ result: Record<string, unknown> }>(
       `options:${runId}:screen`,
@@ -199,6 +212,8 @@ describe("manual options screen through the one pipeline (#3186 step 3d)", () =>
     const sql = new MockSqlStorage();
     const orm = new DatabaseORM(sql as never);
     const storage = memoryStorage();
+    const mock = new MockD1Database();
+    const env = { AGENT_DB: mock as unknown as never };
     const fakeAgent = {
       generateAndStoreOptionsXlsx: async () => {
         throw new Error("xlsx generation failed in test");
@@ -209,7 +224,7 @@ describe("manual options screen through the one pipeline (#3186 step 3d)", () =>
       getOptionsCsvByKey: async () => ({ bytes: new Uint8Array([1]), fileName: "options.csv" }),
     };
     const ctx = {
-      env: { ORCHESTRATOR_AGENT: fakeOrchestratorDoor(sql) },
+      env: { ORCHESTRATOR_AGENT: fakeOrchestratorDoor(env), AGENT_DB: mock as unknown as never },
       getOrm: () => orm,
       agentCtx: { storage: { ...storage, sql } },
       ensureTables: () => sql,
@@ -233,9 +248,9 @@ describe("manual options screen through the one pipeline (#3186 step 3d)", () =>
     expect(body["xlsxKey"]).toBeUndefined();
     expect(body["csvKey"]).toBe("csv-key-1");
 
-    const rows = Array.from(sql.exec("SELECT * FROM mas_reports")) as any[];
+    const rows = await listScheduledReports(env, { userLogin: "owner@example.com" });
     expect(rows).toHaveLength(1);
-    const runId = String(rows[0].run_id);
+    const runId = String(rows[0].runId);
     const rowBody = JSON.parse(String(rows[0].body));
     expect(rowBody.xlsxStatus).toBe("failed");
     expect(typeof rowBody.xlsxError).toBe("string");
@@ -253,8 +268,10 @@ describe("manual options screen through the one pipeline (#3186 step 3d)", () =>
 
     // All eight stages ran; the run outcome is completed, not failed.
     expect(storage.keys()).toHaveLength(8);
-    const outcomes = listJobOutcomes(sql as never);
+    const outcomes = (await listD1JobRunRecords(env, 10)).filter(
+      (r) => r.jobId.startsWith("options-manual:"),
+    );
     expect(outcomes).toHaveLength(1);
-    expect(outcomes[0].status).toBe("completed");
+    expect(outcomes[0].outcome).toBe("success");
   });
 });

@@ -18,11 +18,11 @@ import {
 import { generateStepDepsForScheduledAgent } from "../src/agents/scheduledTasksPipeline";
 import { generateStepDepsForWorkflow } from "../src/workflows/jobPipelineWorkflow";
 import {
+  listScheduledReports,
   storeReportAtGeneration,
   type CanonicalStoreResult,
   type ScheduledReportInput,
 } from "../src/services/scheduledReports";
-import { createCanonicalReportStorePorts } from "../src/data/createCanonicalReportStorePorts";
 import { DynamicOptionsScreener } from "../src/trading/optionsScreener";
 import {
   createOptionsScreenPorts,
@@ -37,6 +37,7 @@ import {
 import type { UnifiedOptionsRunRecord } from "../src/services/optionsServeRecord";
 import type { PlannerInput } from "../src/workflows/blocks/plannerPort";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 
 const OWNER = "owner@example.com";
 const FILTER = { underlyingSymbols: ["AAPL"] };
@@ -91,21 +92,24 @@ type PersistOutput = {
 };
 
 /** A door-bound seam whose record call writes through the REAL
- *  canonical seam (storeReportAtGeneration) over in-memory sql —
- *  the door's own storage, as the orchestrator door provides it. */
-function doorSeam(sql: MockSqlStorage, ownerLogin?: string) {
+ *  canonical seam (storeReportAtGeneration) over a fresh D1 —
+ *  the door's own storage, as the orchestrator door provides it.
+ *  #6101 step 8: the seam writes D1 agent_reports now. */
+function doorSeam(_sql: MockSqlStorage, ownerLogin?: string) {
+  const mock = new MockD1Database();
+  const env = { AGENT_DB: mock as unknown as never };
   const calls: ScheduledReportInput[] = [];
   const record = async (
     input: ScheduledReportInput,
   ): Promise<CanonicalStoreResult | null> => {
     calls.push(input);
-    return storeReportAtGeneration(sql as never, input);
+    return storeReportAtGeneration(input, env);
   };
   const seam = createTenantAwareCanonicalReportStore({
     ...(ownerLogin !== undefined ? { ownerLogin } : {}),
     record,
   });
-  return { calls, seam };
+  return { calls, seam, env };
 }
 
 function fakeNamespace(door: unknown) {
@@ -116,19 +120,21 @@ function fakeNamespace(door: unknown) {
 }
 
 /** A fake orchestrator door whose record writes through the REAL
- *  canonical seam over the given sql — the row lands where the
+ *  canonical seam over a fresh D1 — the row lands where the
  *  Reports-surface read looks for it. */
-function doorOverSql(sql: MockSqlStorage) {
+function doorOverSql(_sql: MockSqlStorage) {
+  const mock = new MockD1Database();
+  const env = { AGENT_DB: mock as unknown as never };
   const calls: ScheduledReportInput[] = [];
   const door = {
     recordPipelineGenerateReport: async (
       input: ScheduledReportInput,
     ): Promise<CanonicalStoreResult | null> => {
       calls.push(input);
-      return storeReportAtGeneration(sql as never, input);
+      return storeReportAtGeneration(input, env);
     },
   };
-  return { calls, door };
+  return { calls, door, env };
 }
 
 function portsWithLeg(
@@ -149,7 +155,7 @@ function portsWithLeg(
 describe("the options canonical leg (#4060)", () => {
   it("writes through the leg and the Reports read sees it", async () => {
     const sql = new MockSqlStorage();
-    const { calls, seam } = doorSeam(sql, "service-user");
+    const { calls, seam, env } = doorSeam(sql, "service-user");
     const storage = memoryStorage();
     const ports = portsWithLeg(storage, seam);
     await seedScreen(storage, "run-leg-1");
@@ -168,20 +174,19 @@ describe("the options canonical leg (#4060)", () => {
     // id IS the generation id.
     expect(calls[0]?.generationId).toBe("run-leg-1");
     expect((calls[0]?.body as { trigger?: string } | undefined)?.trigger).toBe("manual");
-    // The canonical row lands in mas_reports and the
+    // The canonical row lands in D1 agent_reports and the
     // Reports-surface read sees it there, owner-scoped.
-    const read = createCanonicalReportStorePorts(sql as never).read;
-    const rows = read.listRows(OWNER, undefined, 10);
+    const rows = await listScheduledReports(env, { userLogin: OWNER });
     expect(rows).toHaveLength(1);
     expect(rows[0]?.id).toBe(out.reportId);
-    expect(rows[0]?.run_id).toBe("run-leg-1");
+    expect(rows[0]?.runId).toBe("run-leg-1");
     expect(rows[0]?.source).toBe("options-screen-workflow");
-    expect(read.listRows("someone-else", undefined, 10)).toHaveLength(0);
+    expect(await listScheduledReports(env, { userLogin: "someone-else" })).toHaveLength(0);
   });
 
   it("the host residency wiring returns the same leg (never null)", async () => {
     const sql = new MockSqlStorage();
-    const { calls, door } = doorOverSql(sql);
+    const { calls, door, env } = doorOverSql(sql);
     const ctx = {
       env: {
         ORCHESTRATOR_AGENT: fakeNamespace(door),
@@ -202,14 +207,14 @@ describe("the options canonical leg (#4060)", () => {
     expect(out.canonicalLeg).toEqual({ status: "wired" });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.userLogin).toBe(OWNER);
-    const rows = createCanonicalReportStorePorts(sql as never).read.listRows(OWNER, undefined, 10);
+    const rows = await listScheduledReports(env, { userLogin: OWNER });
     expect(rows).toHaveLength(1);
     expect(rows[0]?.id).toBe(out.reportId);
   });
 
   it("the workflow residency wiring returns the same leg (never null)", async () => {
     const sql = new MockSqlStorage();
-    const { calls, door } = doorOverSql(sql);
+    const { calls, door, env: d1Env } = doorOverSql(sql);
     const env = {
       ORCHESTRATOR_AGENT: fakeNamespace(door),
       SERVICE_USER_LOGIN: "service-user",
@@ -230,14 +235,14 @@ describe("the options canonical leg (#4060)", () => {
     expect(out.canonicalLeg).toEqual({ status: "wired" });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.userLogin).toBe(OWNER);
-    const rows = createCanonicalReportStorePorts(sql as never).read.listRows(OWNER, undefined, 10);
+    const rows = await listScheduledReports(d1Env, { userLogin: OWNER });
     expect(rows).toHaveLength(1);
     expect(rows[0]?.id).toBe(out.reportId);
   });
 
   it("a re-run over the same runId dedupes through the leg", async () => {
     const sql = new MockSqlStorage();
-    const { seam } = doorSeam(sql, "service-user");
+    const { seam, env } = doorSeam(sql, "service-user");
     const storage = memoryStorage();
     const ports = portsWithLeg(storage, seam);
     await seedScreen(storage, "run-leg-2");
@@ -252,13 +257,13 @@ describe("the options canonical leg (#4060)", () => {
     expect(second.created).toBe(false);
     expect(second.canonicalLeg).toEqual({ status: "wired" });
     expect(second.reportId).toBe(first.reportId);
-    const rows = createCanonicalReportStorePorts(sql as never).read.listRows(OWNER, undefined, 10);
+    const rows = await listScheduledReports(env, { userLogin: OWNER });
     expect(rows).toHaveLength(1);
   });
 
   it("the manual record builder's shape maps onto the leg's input", async () => {
     const sql = new MockSqlStorage();
-    const { calls, seam } = doorSeam(sql, "service-user");
+    const { calls, seam, env } = doorSeam(sql, "service-user");
     const storage = memoryStorage();
     const ports = portsWithLeg(storage, seam, {
       record: async ({ runId, userLogin }: { runId: string; userLogin: string }) => ({
@@ -288,7 +293,7 @@ describe("the options canonical leg (#4060)", () => {
     expect(body["filter"]).toEqual(FILTER);
     expect(body["result"]).toEqual({ matchedCount: 1 });
     expect(body["provenance"]).toEqual({ dataProviderId: "etrade", brokerId: "etrade" });
-    const rows = createCanonicalReportStorePorts(sql as never).read.listRows(OWNER, undefined, 10);
+    const rows = await listScheduledReports(env, { userLogin: OWNER });
     expect(rows).toHaveLength(1);
     expect(rows[0]?.source).toBe("options_scanner");
   });
@@ -384,7 +389,7 @@ describe("the options canonical leg (#4060)", () => {
 
   it("the leg wins when both are bound — the direct store is never called", async () => {
     const sql = new MockSqlStorage();
-    const { seam } = doorSeam(sql, "service-user");
+    const { seam, env } = doorSeam(sql, "service-user");
     const storage = memoryStorage();
     let directCalls = 0;
     const ports = createOptionsScreenPorts({
@@ -407,13 +412,13 @@ describe("the options canonical leg (#4060)", () => {
     expect(out.created).toBe(true);
     expect(out.canonicalLeg).toEqual({ status: "wired" });
     expect(directCalls).toBe(0);
-    const rows = createCanonicalReportStorePorts(sql as never).read.listRows(OWNER, undefined, 10);
+    const rows = await listScheduledReports(env, { userLogin: OWNER });
     expect(rows).toHaveLength(1);
   });
 
   it("the shapeReport re-record through the leg backfills onto the same row", async () => {
     const sql = new MockSqlStorage();
-    const { seam } = doorSeam(sql, "service-user");
+    const { seam, env } = doorSeam(sql, "service-user");
     const storage = memoryStorage();
     const ports = portsWithLeg(storage, seam);
     await seedScreen(storage, "run-leg-9");
@@ -438,7 +443,7 @@ describe("the options canonical leg (#4060)", () => {
     expect(reRecorded.status).toBe("wired");
     expect(reRecorded.created).toBe(false);
     expect(reRecorded.reportId).toBe(out.reportId);
-    const rows = createCanonicalReportStorePorts(sql as never).read.listRows(OWNER, undefined, 10);
+    const rows = await listScheduledReports(env, { userLogin: OWNER });
     expect(rows).toHaveLength(1);
     const body = JSON.parse(rows[0]?.body ?? "{}") as Record<string, unknown>;
     expect(body["pdfKey"]).toBe("pdf-1");
