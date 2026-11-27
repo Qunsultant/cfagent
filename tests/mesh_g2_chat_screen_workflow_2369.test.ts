@@ -40,6 +40,8 @@ import type {
 } from "../src/workflows/workflowPorts";
 import { shardableUniverses } from "../src/trading";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import { listScheduledReports, resolveCanonicalReportBody } from "../src/services/scheduledReports";
 
 /* ------------------------------------------------------------------ */
 /* Fakes                                                               */
@@ -77,6 +79,7 @@ function fullResult(universe: string, overrides: Record<string, unknown> = {}) {
 interface Harness {
   ctx: NlqPortsContext;
   sql: MockSqlStorage;
+  d1: MockD1Database;
   shardStore: InMemoryShardJobAdapter;
   startedCommands: WorkflowJobCommand[];
   delivered: unknown[];
@@ -96,13 +99,16 @@ function makeHarness(opts: {
   withWorkflow?: boolean;
 } = {}): Harness {
   const sql = new MockSqlStorage();
+  const d1 = new MockD1Database();
   const shardStore = new InMemoryShardJobAdapter();
   const startedCommands: WorkflowJobCommand[] = [];
   const delivered: unknown[] = [];
   const agentCalls: Array<Record<string, unknown>> = [];
 
+  // #6101: the canonical report lands in D1 — the write side
+  // (reportCtx) and the port read side (ctx.env) share one d1.
   const reportCtx = {
-    env: {},
+    env: { AGENT_DB: d1 },
     ensureTables: () => sql,
   } as unknown as ReportDispatchContext;
 
@@ -172,7 +178,7 @@ function makeHarness(opts: {
     // on the paid gate's missing stored price. These tests pin the
     // FREE chat-screen workflow path, not payment, so the paid gate
     // stays off.
-    env: { MONETIZATION_ENABLED: "false" } as NlqPortsContext["env"],
+    env: { MONETIZATION_ENABLED: "false", AGENT_DB: d1 } as NlqPortsContext["env"],
     ensureTables: () => sql as never,
     ...(opts.workflowPort !== undefined
       ? { workflowPort: opts.workflowPort }
@@ -186,14 +192,19 @@ function makeHarness(opts: {
     sleep: async () => {},
     nowMs: () => Date.now(),
   };
-  return { ctx, sql, shardStore, startedCommands, delivered, agentCalls, adapter };
+  return { ctx, sql, d1, shardStore, startedCommands, delivered, agentCalls, adapter };
 }
 
-function storedReportBodies(sql: MockSqlStorage): Array<Record<string, unknown>> {
-  const rows = Array.from(
-    sql.exec("SELECT body FROM mas_reports WHERE source = ?", "screener"),
-  ) as Array<{ body: string }>;
-  return rows.map((r) => JSON.parse(r.body) as Record<string, unknown>);
+// #6101: the canonical rows live in D1 now — read them back
+// through the production list + body-resolve surface.
+async function storedReportBodies(d1: MockD1Database): Promise<Array<Record<string, unknown>>> {
+  const hits = await listScheduledReports({ AGENT_DB: d1 }, { userLogin: LOGIN, sourceFilter: "screener" });
+  const bodies: Array<Record<string, unknown>> = [];
+  for (const hit of hits) {
+    const body = await resolveCanonicalReportBody({ AGENT_DB: d1 }, hit);
+    if (body) bodies.push(JSON.parse(body) as Record<string, unknown>);
+  }
+  return bodies;
 }
 
 /* ------------------------------------------------------------------ */
@@ -248,7 +259,7 @@ describe("issue #2369 — chat screen as a ScreenerScreenWorkflow run", () => {
 
     // Exactly one canonical row was stored — by the workflow's
     // store step (the port itself stores nothing).
-    const bodies = storedReportBodies(h.sql);
+    const bodies = await storedReportBodies(h.d1);
     expect(bodies).toHaveLength(1);
     expect(bodies[0].universe).toBe("NASDAQ100");
   });
@@ -362,7 +373,7 @@ describe("issue #2369 — chat screen as a ScreenerScreenWorkflow run", () => {
     expect(result.totalScanned).toBe(10 * universes.length);
     expect(result.matchedCount).toBe(universes.length);
     expect(result.allStocks).toHaveLength(universes.length);
-    expect(storedReportBodies(h.sql)).toHaveLength(universes.length);
+    expect((await storedReportBodies(h.d1))).toHaveLength(universes.length);
   });
 
   it("refuses coded when the workflow port is unavailable — no direct fallback (issue #4278)", async () => {

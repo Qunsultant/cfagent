@@ -100,6 +100,7 @@ import { createInMemoryScreenRunLockPort } from "../src/data/createScreenRunLock
 import { createInMemoryAsyncJobPorts } from "../src/data/createAsyncJobPorts";
 import { startWorkflowInstance } from "../src/workflows/cfWorkflowAdapter";
 import { makeFakeSessionStore } from "./fake-session-store";
+import { makeLedgerStub } from "./ledger-stub";
 import { createMemoryIdentityBindingStore } from "../src/security/identityBinding";
 import { createMemoryAuditStore } from "../src/security/iaaaAudit";
 import { completeWiredLogin } from "../src/security/iaaaLogin";
@@ -404,6 +405,10 @@ describe("scheduled goals: cross-login in-flight guard (#2840 Q2)", () => {
       // #6503 — goals live in the D1 unified store only (fail-closed
       // without AGENT_DB); the agent never reads the "goals" KV key.
       AGENT_DB: new MockD1Database(),
+      // #6101 step 9 — the KV "jobRunRecords" key is retired: fired
+      // goals' runs land via the ledger post on ORCHESTRATOR_AGENT
+      // (the shared stub), and listJobRuns reads them back from it.
+      ORCHESTRATOR_AGENT: makeLedgerStub().namespace,
       PAYMENTS_AGENT: { idFromName: () => "default", get: () => ({ budgetCheck: async () => ({ allowed: true }) }) },
       SESSION_STORE: null,
     };

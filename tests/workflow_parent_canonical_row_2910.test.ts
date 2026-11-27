@@ -29,9 +29,11 @@
  *   feed) into the parent row on both joins, and never
  *   absorbs the parent row itself.
  * - persistParentScreenReportCanonical writes exactly one
- *   mas_reports row keyed generationId = jobId, with the
+ *   D1 agent_reports row keyed generationId = jobId, with the
  *   collation + linkage in the body, and a second write
  *   under the same job id adopts (never duplicates) it.
+ *   (#6101 step 8 — the DO mas_reports table is frozen at
+ *   cutover and receives no new writes.)
  *
  * Engine note on childRunIds: the retired flow derived one
  * distinct timestamp per child run; the engine derives each
@@ -45,7 +47,9 @@
 import { describe, expect, it } from "vitest";
 import { InMemoryShardJobAdapter } from "../src/data/inMemoryShardJobAdapter";
 import type { ShardJobStore } from "../src/data/shardJobPorts";
-import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+
+type D1Database = any;
 import type { ReportDispatchContext } from "../src/agents/orchestrator/reportDispatch";
 import { persistParentScreenReportCanonical } from "../src/agents/orchestrator/reportDispatch";
 import {
@@ -555,11 +559,19 @@ function testCollation(): WorkflowCollation {
 }
 
 describe("persistParentScreenReportCanonical (#2910)", () => {
+  function d1Env() {
+    const mock = new MockD1Database();
+    const env = { AGENT_DB: mock as unknown as D1Database, IAAA_TENANT_ID: "tenant-2910" };
+    return { mock, env };
+  }
+
   it("writes one row keyed generationId = jobId, with collation + linkage, and adopts on re-write", async () => {
-    const sql = new MockSqlStorage();
+    const { env } = d1Env();
     const ctx = {
-      ensureTables: () => sql,
-      env: {},
+      ensureTables: () => {
+        throw new Error("persistParentScreenReportCanonical must not touch the DO store (#6101)");
+      },
+      env,
     } as unknown as ReportDispatchContext;
     const input: ParentScreenReportInput = {
       jobId: "job-1",
@@ -573,10 +585,10 @@ describe("persistParentScreenReportCanonical (#2910)", () => {
     };
     const first = await persistParentScreenReportCanonical(ctx, input);
     expect(first).not.toBeNull();
-    const rows = listScheduledReports(sql, { userLogin: "alice", limit: 50 });
+    const rows = await listScheduledReports(env, { userLogin: "alice", limit: 50 });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.runId).toBe("job-1");
-    const stored = getCanonicalReport(sql, first!.reportId);
+    const stored = await getCanonicalReport(env, first!.reportId);
     expect(stored).not.toBeNull();
     const body = JSON.parse(stored!.body as string);
     expect(body.parentJobId).toBe("job-1");
@@ -590,14 +602,16 @@ describe("persistParentScreenReportCanonical (#2910)", () => {
     // A re-write under the same job id adopts the existing row: still one row.
     const second = await persistParentScreenReportCanonical(ctx, input);
     expect(second!.reportId).toBe(first!.reportId);
-    expect(listScheduledReports(sql, { userLogin: "alice", limit: 50 })).toHaveLength(1);
+    expect(await listScheduledReports(env, { userLogin: "alice", limit: 50 })).toHaveLength(1);
   });
 
   it("refuses a row without an owning userLogin, without throwing", async () => {
-    const sql = new MockSqlStorage();
+    const { env } = d1Env();
     const ctx = {
-      ensureTables: () => sql,
-      env: {},
+      ensureTables: () => {
+        throw new Error("persistParentScreenReportCanonical must not touch the DO store (#6101)");
+      },
+      env,
     } as unknown as ReportDispatchContext;
     const out = await persistParentScreenReportCanonical(ctx, {
       jobId: "job-1",
@@ -610,6 +624,6 @@ describe("persistParentScreenReportCanonical (#2910)", () => {
       createdAt: "2026-10-26T12:10:00.000Z",
     });
     expect(out).toBeNull();
-    expect(listScheduledReports(sql, { userLogin: undefined, limit: 50 })).toHaveLength(0);
+    expect(await listScheduledReports(env, { userLogin: undefined, limit: 50 })).toHaveLength(0);
   });
 });

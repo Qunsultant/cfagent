@@ -17,6 +17,8 @@ import {
   type StockCopilotDoorContext,
 } from "../src/agents/orchestrator/meshStockCopilotDoor";
 import { InMemoryCommercialAdapter } from "../src/data/inMemoryCommercialAdapter";
+import { MockD1Database } from "./mock-d1";
+import { createJobRunRecordAdapter } from "../src/data/createJobRunRecordPorts";
 import {
   StockCopilotStatusCommand,
   StockCopilotControlCommand,
@@ -201,29 +203,32 @@ describe("Issue #3513 Stock Copilot Chat Door", () => {
     // Issue #5085 (S6): the Loop status reads the runs ledger, so
     // the lastCycle comes from a cycle ledger row, not the activity
     // record above (the activity feed stays as detail).
-    sql.insertMockLedgerRun({
+    // #6101: the ledger row lives in D1 now — seed it there and
+    // bind AGENT_DB on the door ctx (the override env replaces the
+    // base env wholesale, so it carries the copilot flags too).
+    const d1 = new MockD1Database();
+    const now = new Date().toISOString();
+    const ledger = createJobRunRecordAdapter({ AGENT_DB: d1 } as never);
+    await ledger!.record({
       system: "orchestrator-schedule",
-      job_id: STOCK_COPILOT_TASK_ID,
+      jobId: STOCK_COPILOT_TASK_ID,
       operation: STOCK_COPILOT_TASK_ID,
-      started: new Date().toISOString(),
-      finished: new Date().toISOString(),
+      started: now,
+      finished: now,
       outcome: "success",
-      triggered_by: "scheduled",
-      trigger_text: "scheduled",
-      schedule_id: STOCK_COPILOT_TASK_ID,
-      async_job_id: null,
-      workflow_id: null,
-      error_text: null,
-      detail: null,
+      triggeredBy: "scheduled",
+      trigger: "scheduled",
+      scheduleId: STOCK_COPILOT_TASK_ID,
       descriptor: "cycle complete: no trade",
-      artifact_refs_json: null,
-      broker_id: null,
-      data_provider_id: null,
-      mode: null,
-      mode_source: null,
-    });
+    } as never);
 
-    const ctx = createTestDoorContext(sql);
+    const ctx = createTestDoorContext(sql, {
+      env: {
+        STOCK_COPILOT_PAPER_ENABLED: "true",
+        STOCK_COPILOT_MODE: "paper",
+        AGENT_DB: d1,
+      } as never,
+    });
     const status = await getStockCopilotStatusViaDoor(ctx, "trader_alice");
 
     expect(status.userLogin).toBe("trader_alice");

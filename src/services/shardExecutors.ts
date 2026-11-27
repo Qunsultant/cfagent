@@ -834,7 +834,7 @@ async function executeOptionsSymbol(
           queue: (deps.env.SCREENER_EVENTS as unknown as StageQueueSend | null) ?? null,
           // Issue #4068: the engine run record is durable in the
           // shard executor's SQLite.
-          engineStores: optionsEngineStoresFromSql(deps.sql),
+          engineStores: optionsEngineStoresFromSql(deps.sql, deps.env),
         },
       );
       if (shardOutcome.outcome !== "completed") {
@@ -1091,7 +1091,7 @@ async function storeFormat(
   const provenance = shardProvenanceIds(formatRows);
   const retriedShards = formatRows.filter((row) => row.retryOf).length;
   const shardAttempts = formatRows.reduce((total, row) => total + row.attempts, 0);
-  const row = deps.orm.storeCanonicalReport({
+  const row = await deps.orm.storeCanonicalReport({
     runId: `${chain.screenType === "options" ? "options" : "screener"}:${chain.chainId}`,
     generationId: `${chain.screenType === "options" ? "options" : "screener"}:${chain.chainId}:${format}`,
     title: chain.screenType === "options"

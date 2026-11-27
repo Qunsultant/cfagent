@@ -15,6 +15,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
+import { MockD1Database } from "./mock-d1";
 import {
   createScheduledAgentPipelineControl,
   settleOrphanedPipelineRuns,

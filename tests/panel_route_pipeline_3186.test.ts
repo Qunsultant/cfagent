@@ -28,6 +28,7 @@ import {
 import { DynamicOptionsScreener } from "../src/trading";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 import type { ETradeOptionChain } from "../src/trading/etrade/client";
 import type { OptionsStageStorage } from "../src/workflows/optionsScreenPorts";
 
@@ -121,7 +122,7 @@ describe("manual panel route through the pipeline (#3186 step 3e)", () => {
       generateAndStoreStrategyReport: async () => ({}),
     };
     const ctx = {
-      env: {},
+      env: { AGENT_DB: new MockD1Database() },
       requestedEnv: undefined,
       getOrm: () => orm,
       agentCtx: { storage: { ...storage, sql } },

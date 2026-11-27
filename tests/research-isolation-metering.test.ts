@@ -15,6 +15,7 @@ import {
 } from "../src/data/d1UsageEventMirrorAdapter";
 import {
   storeReportAtGeneration,
+  getScheduledReportById,
   searchScheduledReports,
   listScheduledReports,
   recordUsageEvent,
@@ -34,63 +35,66 @@ const baseInput = (over: Partial<ScheduledReportInput>): ScheduledReportInput =>
   ...over,
 });
 
+// #6101 step 8: the canonical seam writes D1 agent_reports now
+// (the DO mas_reports table is frozen); reads go through the D1
+// list/search/by-id functions with an env-bound MockD1Database.
+function d1Env() {
+  const mock = new MockD1Database();
+  return { AGENT_DB: mock as unknown as never };
+}
+
 describe("#584 report isolation (EP-003)", () => {
-  it("stores the owning user on the canonical report row", () => {
-    const sql = new MockSqlStorage();
-    const res = storeReportAtGeneration(sql, baseInput({ userLogin: "alice" }));
+  it("stores the owning user on the canonical report row", async () => {
+    const env = d1Env();
+    const res = await storeReportAtGeneration(baseInput({ userLogin: "alice" }), env);
     expect(res).not.toBeNull();
-    const rows = Array.from(
-      sql.exec("SELECT user_login FROM mas_reports WHERE id = ?", res!.reportId)
-    ) as Array<{ user_login?: string }>;
-    expect(rows[0]?.user_login).toBe("alice");
+    const hit = await getScheduledReportById(env, res!.reportId);
+    expect(hit?.userLogin).toBe("alice");
   });
 
-  it("lists only the requesting user's reports", () => {
-    const sql = new MockSqlStorage();
-    storeReportAtGeneration(sql, baseInput({ userLogin: "alice" }));
-    storeReportAtGeneration(sql, baseInput({ userLogin: "bob" }));
-    const alice = listScheduledReports(sql, { userLogin: "alice" });
-    const bob = listScheduledReports(sql, { userLogin: "bob" });
+  it("lists only the requesting user's reports", async () => {
+    const env = d1Env();
+    await storeReportAtGeneration(baseInput({ userLogin: "alice" }), env);
+    await storeReportAtGeneration(baseInput({ userLogin: "bob" }), env);
+    const alice = await listScheduledReports(env, { userLogin: "alice" });
+    const bob = await listScheduledReports(env, { userLogin: "bob" });
     expect(alice.length).toBe(1);
     expect(bob.length).toBe(1);
     expect(alice[0]).not.toEqual(bob[0]);
   });
 
-  it("search excludes other users' reports", () => {
-    const sql = new MockSqlStorage();
-    storeReportAtGeneration(
-      sql,
-      baseInput({ userLogin: "alice", summary: "zephyr bullish outlook" })
+  it("search excludes other users' reports", async () => {
+    const env = d1Env();
+    await storeReportAtGeneration(
+      baseInput({ userLogin: "alice", summary: "zephyr bullish outlook" }),
+      env,
     );
-    storeReportAtGeneration(
-      sql,
-      baseInput({ userLogin: "bob", summary: "zephyr bearish outlook" })
+    await storeReportAtGeneration(
+      baseInput({ userLogin: "bob", summary: "zephyr bearish outlook" }),
+      env,
     );
-    const hits = searchScheduledReports(sql, "zephyr", 50, {
+    const hits = await searchScheduledReports(env, "zephyr", 50, {
       userLogin: "bob",
     });
     expect(hits.length).toBe(1);
     expect(hits[0].summary).toContain("bearish");
   });
 
-  it("refuses to backfill an ownerless report into a synthetic tenant", () => {
-    const sql = new MockSqlStorage();
+  it("refuses to backfill an ownerless report into a synthetic tenant", async () => {
+    const env = d1Env();
     // Multi-tenant SaaS: no login means no tenant. The write is refused
     // rather than filed under "default".
-    expect(storeReportAtGeneration(sql, baseInput({ userLogin: "" }))).toBeNull();
-    const rows = Array.from(
-      sql.exec("SELECT user_login FROM mas_reports")
-    ) as Array<{ user_login?: string }>;
-    expect(rows).toHaveLength(0);
+    expect(await storeReportAtGeneration(baseInput({ userLogin: "" }), env)).toBeNull();
+    expect(await listScheduledReports(env, {})).toHaveLength(0);
   });
 
-  it("without a user, list and search keep legacy unfiltered behavior", () => {
-    const sql = new MockSqlStorage();
-    storeReportAtGeneration(sql, baseInput({ userLogin: "alice" }));
-    storeReportAtGeneration(sql, baseInput({ userLogin: "bob" }));
+  it("without a user, list and search keep legacy unfiltered behavior", async () => {
+    const env = d1Env();
+    await storeReportAtGeneration(baseInput({ userLogin: "alice" }), env);
+    await storeReportAtGeneration(baseInput({ userLogin: "bob" }), env);
     // No userLogin → no filter (identity strings not yet unified; #488).
-    expect(listScheduledReports(sql, {}).length).toBe(2);
-    expect(listScheduledReports(sql).length).toBe(2);
+    expect((await listScheduledReports(env, {})).length).toBe(2);
+    expect((await listScheduledReports(env)).length).toBe(2);
   });
 });
 

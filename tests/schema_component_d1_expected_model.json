@@ -4030,6 +4030,31 @@
           "name": "mode_source",
           "type": "TEXT",
           "pk": 0
+        },
+        {
+          "name": "platform_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "user_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "session_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "correlation_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "trace_id",
+          "type": "TEXT",
+          "pk": 0
         }
       ],
       "constraints": {}
@@ -5043,41 +5068,6 @@
         },
         {
           "name": "projected_at_ms",
-          "type": "INTEGER",
-          "pk": 0
-        }
-      ],
-      "constraints": {}
-    },
-    "agent_tenant_projection_carriers": {
-      "columns": [
-        {
-          "name": "tenant_id",
-          "type": "TEXT",
-          "pk": 1
-        },
-        {
-          "name": "queues_enabled",
-          "type": "INTEGER",
-          "pk": 0
-        },
-        {
-          "name": "orm_enabled",
-          "type": "INTEGER",
-          "pk": 0
-        },
-        {
-          "name": "sweep_enabled",
-          "type": "INTEGER",
-          "pk": 0
-        },
-        {
-          "name": "read_mode",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "updated_at_ms",
           "type": "INTEGER",
           "pk": 0
         }

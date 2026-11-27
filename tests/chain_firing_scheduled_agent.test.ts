@@ -31,6 +31,7 @@ import { compileGoal } from "../src/orchestrate";
 import { MockD1Database } from "./mock-d1";
 import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import { goalToRecord } from "../src/services/unifiedScheduleManagement";
+import { makeLedgerStub } from "./ledger-stub";
 
 function makeCtx() {
   const store = new Map<string, unknown>();
@@ -50,6 +51,10 @@ function makeEnv(budgetAllowed = true, mockD1 = new MockD1Database()) {
     // #6503 — goals live in the D1 unified store only (fail-closed
     // without AGENT_DB); the agent never reads the "goals" KV key.
     AGENT_DB: mockD1,
+    // #6101 step 9 — the KV "jobRunRecords" key is retired: fired
+    // goals' records land via the ledger post on ORCHESTRATOR_AGENT
+    // (the shared stub), and listJobRuns reads them back from it.
+    ORCHESTRATOR_AGENT: makeLedgerStub().namespace,
     PAYMENTS_AGENT: {
       idFromName: () => "payments-default",
       get: () => ({

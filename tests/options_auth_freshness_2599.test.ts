@@ -213,9 +213,9 @@ describe("record-layer freshness derivation (#2599 F1)", () => {
     return { orm: orm as never, get: () => captured };
   }
 
-  function recordWithScreen(screen: unknown, extra: Record<string, unknown> = {}) {
+  async function recordWithScreen(screen: unknown, extra: Record<string, unknown> = {}) {
     const { orm, get } = captureOrm();
-    recordStrategyScreenRun(orm, {
+    await recordStrategyScreenRun(orm, {
       userLogin: "venus",
       symbol: "TSLA",
       trigger: "manual",
@@ -228,8 +228,8 @@ describe("record-layer freshness derivation (#2599 F1)", () => {
     return get();
   }
 
-  it("a fresh scannedAt derives a fresh label on body.feed and the feed stage", () => {
-    const body = recordWithScreen({
+  it("a fresh scannedAt derives a fresh label on body.feed and the feed stage", async () => {
+    const body = await recordWithScreen({
       scannedAt: "2026-10-23T14:58:00.000Z",
       underlyingsScanned: 1,
       contractsEvaluated: 2,
@@ -241,8 +241,8 @@ describe("record-layer freshness derivation (#2599 F1)", () => {
     expect(body.body.stages[0].evidence.chainFreshnessLabel).toMatch(/live/);
   });
 
-  it("a stale scannedAt derives a stale label naming the threshold", () => {
-    const body = recordWithScreen({
+  it("a stale scannedAt derives a stale label naming the threshold", async () => {
+    const body = await recordWithScreen({
       scannedAt: "2026-10-23T14:00:00.000Z",
       underlyingsScanned: 1,
       contractsEvaluated: 2,
@@ -253,8 +253,8 @@ describe("record-layer freshness derivation (#2599 F1)", () => {
     expect(body.body.stages[0].evidence.chainFreshnessLabel).toMatch(/older than 15m/);
   });
 
-  it("a missing scannedAt leaves the label null (no probe), never guessed", () => {
-    const body = recordWithScreen({
+  it("a missing scannedAt leaves the label null (no probe), never guessed", async () => {
+    const body = await recordWithScreen({
       underlyingsScanned: 1,
       contractsEvaluated: 2,
       contractsMatched: 0,
@@ -263,8 +263,8 @@ describe("record-layer freshness derivation (#2599 F1)", () => {
     expect(body.body.stages[0].evidence.chainFreshnessState).toBeNull();
   });
 
-  it("an explicit input.chainFreshness wins over derivation", () => {
-    const body = recordWithScreen(
+  it("an explicit input.chainFreshness wins over derivation", async () => {
+    const body = await recordWithScreen(
       {
         scannedAt: "2026-10-23T14:58:00.000Z",
         underlyingsScanned: 1,

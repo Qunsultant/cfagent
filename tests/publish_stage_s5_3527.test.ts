@@ -52,6 +52,7 @@ import {
 } from "../src/services/jobOutcomes";
 import { MockSqlStorage } from "./mock-sql";
 import { MockD1Database } from "./mock-d1";
+import { listD1JobOutcomes } from "../src/services/runLedgerReads";
 import {
   createD1AuditEventDb,
   D1AuditEventStore,
@@ -329,7 +330,7 @@ describe("B. corpus sync route recording (#3527 S5)", () => {
       getOrm: () => ({ events: orm.events }),
       ...rest,
     };
-    return { ctx, orm, sql, d1Store };
+    return { ctx, orm, sql, d1Store, d1Mock };
   }
 
   function callSync(ctx: Record<string, unknown>, headers: Record<string, string> = {}) {
@@ -368,7 +369,7 @@ describe("B. corpus sync route recording (#3527 S5)", () => {
   });
 
   it("a fired run records the summary outcome AND the per-item run row (scheduled trigger)", async () => {
-    const { ctx, sql, d1Store } = corpusCtx();
+    const { ctx, sql, d1Store, d1Mock } = corpusCtx();
     const res = await callSync(ctx, backgroundHeaders);
     expect(res!.status).toBe(200);
     const body = (await res!.json()) as Record<string, any>;
@@ -379,7 +380,7 @@ describe("B. corpus sync route recording (#3527 S5)", () => {
     expect(outcomes[0].job).toBe("corpus-sync");
     expect(outcomes[0].outcome).toBe("ran");
 
-    const runs = listJobOutcomes(sql as any, 10);
+    const runs = await listD1JobOutcomes({ AGENT_DB: d1Mock }, { limit: 10 });
     expect(runs).toHaveLength(1);
     const run = runs[0];
     expect(run.id).toBe(`corpus-sync:${body.ranAt}`);
@@ -412,16 +413,16 @@ describe("B. corpus sync route recording (#3527 S5)", () => {
   });
 
   it("a manual invocation records trigger manual", async () => {
-    const { ctx, sql } = corpusCtx({ userLogin: "alice" });
+    const { ctx, sql, d1Mock } = corpusCtx({ userLogin: "alice" });
     const res = await callSync(ctx, { "x-user-login": "alice" });
     expect(res!.status).toBe(200);
-    const runs = listJobOutcomes(sql as any, 10);
+    const runs = await listD1JobOutcomes({ AGENT_DB: d1Mock }, { limit: 10 });
     expect(runs).toHaveLength(1);
     expect(runs[0].trigger).toBe("manual");
   });
 
   it("a guard-skipped tick records the skip outcome and NO run row", async () => {
-    const { ctx, sql, d1Store } = corpusCtx();
+    const { ctx, sql, d1Store, d1Mock } = corpusCtx();
     const first = await callSync(ctx, backgroundHeaders);
     expect(first!.status).toBe(200);
     const second = await callSync(ctx, backgroundHeaders);
@@ -433,11 +434,11 @@ describe("B. corpus sync route recording (#3527 S5)", () => {
     expect(outcomes.map((o) => o.outcome)).toEqual(["ran", "skipped"]);
     expect(outcomes[1].job).toBe("corpus-sync");
     expect(outcomes[1].reason).toBe("too-soon");
-    expect(listJobOutcomes(sql as any, 10)).toHaveLength(1);
+    expect(await listD1JobOutcomes({ AGENT_DB: d1Mock }, { limit: 10 })).toHaveLength(1);
   });
 
   it("a run whose integrity leg cannot execute records failed + the stable code in both stores", async () => {
-    const { ctx, sql, d1Store } = corpusCtx({
+    const { ctx, sql, d1Store, d1Mock } = corpusCtx({
       env: { SERVICE_USER_LOGIN: SERVICE_LOGIN },
     });
     const res = await callSync(ctx, backgroundHeaders);
@@ -450,7 +451,7 @@ describe("B. corpus sync route recording (#3527 S5)", () => {
     expect(outcomes[0].outcome).toBe("failed");
     expect(outcomes[0].errorCode).toBe("corpus_sync_incomplete");
 
-    const runs = listJobOutcomes(sql as any, 10);
+    const runs = await listD1JobOutcomes({ AGENT_DB: d1Mock }, { limit: 10 });
     expect(runs).toHaveLength(1);
     expect(runs[0].status).toBe("failed");
     expect(runs[0].codedError).toBe("corpus_sync_incomplete");
@@ -458,9 +459,12 @@ describe("B. corpus sync route recording (#3527 S5)", () => {
 
   it("a context without an ORM records nothing and still answers (never-fail invariant)", async () => {
     const sql = stubSql();
+    // #6101: the detail row folds onto D1, so the ctx needs
+    // AGENT_DB — sql alone no longer lands the row.
+    const d1Mock = new MockD1Database();
     const res = await callSync(
       {
-        env: { REPORTS_BUCKET: stubR2Bucket([[]]) },
+        env: { REPORTS_BUCKET: stubR2Bucket([[]]), AGENT_DB: d1Mock },
         storage: stubRecordStore({}),
         userLogin: "tester",
         sql,
@@ -470,8 +474,8 @@ describe("B. corpus sync route recording (#3527 S5)", () => {
     expect(res!.status).toBe(200);
     const body = (await res!.json()) as Record<string, any>;
     expect(body.success).toBe(true);
-    // The detail row needs only sql, which IS present.
-    expect(listJobOutcomes(sql as any, 10)).toHaveLength(1);
+    // The detail row needs AGENT_DB, which IS present.
+    expect(await listD1JobOutcomes({ AGENT_DB: d1Mock }, { limit: 10 })).toHaveLength(1);
   });
 });
 
@@ -534,7 +538,7 @@ describe("C. reports sweep route recording (#3527 S5)", () => {
     expect(outcomes[0].job).toBe("reports-index-backfill");
     expect(outcomes[0].outcome).toBe("ran");
 
-    const runs = listJobOutcomes(sql as any, 10);
+    const runs = await listD1JobOutcomes({ AGENT_DB: d1Mock }, { limit: 10 });
     expect(runs).toHaveLength(1);
     const run = runs[0];
     expect(run.id).toBe(`reports-index-backfill:${body.ranAt}`);
@@ -572,7 +576,7 @@ describe("C. reports sweep route recording (#3527 S5)", () => {
     expect(outcomes.map((o) => o.outcome)).toEqual(["ran", "skipped"]);
     expect(outcomes[1].job).toBe("reports-index-backfill");
     expect(outcomes[1].reason).toBe("too-soon");
-    expect(listJobOutcomes(sql as any, 10)).toHaveLength(1);
+    expect(await listD1JobOutcomes({ AGENT_DB: d1Mock }, { limit: 10 })).toHaveLength(1);
   });
 
   it("a throwing sweep records failed in both stores and still answers 500 with no marker", async () => {
@@ -593,7 +597,7 @@ describe("C. reports sweep route recording (#3527 S5)", () => {
     expect(outcomes[0].outcome).toBe("failed");
     expect(outcomes[0].errorCode).toBe("reports_index_backfill_failed");
 
-    const runs = listJobOutcomes(sql as any, 10);
+    const runs = await listD1JobOutcomes({ AGENT_DB: d1Mock }, { limit: 10 });
     expect(runs).toHaveLength(1);
     expect(runs[0].status).toBe("failed");
     expect(runs[0].codedError).toBe("reports_index_backfill_failed");

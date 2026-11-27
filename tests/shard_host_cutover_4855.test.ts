@@ -55,6 +55,7 @@
  * the residency's queue test covers it.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { MockD1Database } from "./mock-d1";
 import { DatabaseSync } from "node:sqlite";
 import { createInMemoryJobPipelineStores } from "../src/data/inMemoryJobPipelineAdapter";
 import { InMemoryJobRunRecordStore } from "../src/data/inMemoryJobRunRecordAdapter";
@@ -151,7 +152,10 @@ function boundEnv(extra: Record<string, unknown> = {}): Env {
   return {
     ETRADE_ENVIRONMENT: "sandbox",
     ...extra,
-    AGENT_DB: {},
+    // #6101: a real D1, not {} — the sync leg builds its engine
+    // stores from env, and {} is truthy enough to build the D1
+    // adapter, whose first Drizzle call dies on prepare().
+    AGENT_DB: new MockD1Database(),
     JOB_PIPELINE_WORKFLOW: {
       create: async () => ({ id: "never-created" }),
     },
@@ -653,7 +657,7 @@ describe("shard wiring (#4855)", () => {
     const chainOverrides = { brokerId: "etrade", mode: "paper", environment: "TEST" } as const;
 
     const syncResult = await executeShardJob(
-      makeShardDeps({}),
+      makeShardDeps({ AGENT_DB: new MockD1Database() }),
       makePayload({ ...chainOverrides }),
     );
 
@@ -678,7 +682,7 @@ describe("shard wiring (#4855)", () => {
     const startWorkflow = vi.fn(async () => ({ instanceId: "wf-4855-never" }));
     const { stores, runRecorder } = fakeStores();
     const result = (await executeShardJob(
-      makeShardDeps({}, { stores, runRecorder, startWorkflow }),
+      makeShardDeps({ AGENT_DB: new MockD1Database() }, { stores, runRecorder, startWorkflow }),
       makePayload({ brokerId: "etrade", mode: "paper", environment: "TEST" }),
     )) as any;
 

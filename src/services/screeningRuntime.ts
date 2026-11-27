@@ -387,7 +387,7 @@ export async function executeGoalScreenRun(input: {
     // UI lists label a mode run the same way the record
     // and the PDF do (mirrors the workflow store door).
     (result.yahooDataMode ? ` ${yahooDataModeLabel(result.yahooDataMode)}.` : "");
-  const canonical = input.orm.storeCanonicalReport({
+  const canonical = await input.orm.storeCanonicalReport({
     runId: `goal-screen:${run.task.id}`,
     generationId: `goal-screen:${run.task.id}`,
     title: `Goal screen — ${result.goalKind} (${result.outlook})`,
@@ -418,7 +418,10 @@ export async function executeGoalScreenRun(input: {
     },
     createdAt: result.completedAt,
     userLogin: input.userLogin,
-  });
+    // Issue #6101 (step 8): the canonical seam writes D1 agent_reports, so it needs
+    // the caller's env (AGENT_DB) — without it the write fails closed and the
+    // goal-screen run keeps no canonical report. Mirrors the fold below.
+  }, input.env as unknown as Partial<Env>);
   await recordGoalRunOutcome(input.orm.getSql(), {
     id: `goal-screen:${run.task.id}`,
     trigger: input.trigger,
