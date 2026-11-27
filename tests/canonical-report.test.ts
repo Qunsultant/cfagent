@@ -14,6 +14,14 @@
  *
  * Harness follows tests/report_dispatch_hitl.test.ts (OrchestratorAgent +
  * MockSqlStorage via onRequest).
+ *
+ * Issue #6101 (step 8): the canonical copy lives in D1 agent_reports
+ * now — the agent env binds a MockD1Database as AGENT_DB and the
+ * stored rows are read back through listScheduledReports /
+ * getCanonicalReport. The DO mas_reports table is frozen and receives
+ * no new writes; the pending-confirmation rows stay in the DO (that
+ * table is untouched by #6101). D1 rows are versioned, so "exactly
+ * one row" is asserted as exactly one reportId.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
@@ -62,13 +70,17 @@ vi.mock("agents/x402", () => {
 
 import { OrchestratorAgent } from "../src/agents/orchestrator";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 import {
   storeReportAtGeneration,
+  listScheduledReports,
   canonicalResearchEmailBody,
   canonicalResearchWebhookBody,
   parseResearchReportBody,
 } from "../src/services/scheduledReports";
 import type { Env } from "../src/types";
+
+type D1Database = any;
 
 // Minimal valid .xlsx payload: base64 whose decoded bytes start with "PK".
 const XLSX_B64 = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14]).toString("base64");
@@ -98,13 +110,17 @@ const makeEnv = (overrides: Record<string, unknown> = {}): Env =>
 
 const seedAgent = (env: Env) => {
   const sql = new MockSqlStorage();
+  // #6101 step 8: the agent's canonical-report seam writes D1, so
+  // the agent env binds a fresh MockD1Database for this agent.
+  const mock = new MockD1Database();
+  const envWithD1 = { ...env, AGENT_DB: mock as unknown as D1Database } as Env;
   const ctx = {
     id: { toString: () => "system_report_308" },
     storage: { sql },
     waitUntil: vi.fn(),
   };
-  const agent = new OrchestratorAgent(ctx as any, env);
-  return { agent, sql };
+  const agent = new OrchestratorAgent(ctx as any, envWithD1);
+  return { agent, sql, mock, env: envWithD1 };
 };
 
 const post = (agent: OrchestratorAgent, path: string, body: unknown) =>
@@ -122,8 +138,8 @@ const get = (agent: OrchestratorAgent, path: string) =>
 const setHitl = (agent: OrchestratorAgent, enabled: boolean) =>
   post(agent, "/trading/settings/report-dispatch-hitl", { enabled });
 
-const reportRows = (sql: MockSqlStorage) =>
-  Array.from(sql.exec("SELECT * FROM mas_reports")) as any[];
+/** Canonical rows in D1, newest first (exactly one reportId per store). */
+const reportRows = (env: Env) => listScheduledReports(env as never);
 
 const pendingRows = (sql: MockSqlStorage) =>
   Array.from(sql.exec("SELECT * FROM mas_report_confirmations")) as any[];
@@ -133,8 +149,9 @@ describe("Issue #308 — one canonical report copy", () => {
     vi.restoreAllMocks();
   });
 
-  it("seam idempotency: same generation id stores exactly one row", () => {
-    const sql = new MockSqlStorage();
+  it("seam idempotency: same generation id stores exactly one row", async () => {
+    const mock = new MockD1Database();
+    const env = { AGENT_DB: mock as unknown as D1Database, IAAA_TENANT_ID: "tenant-308" };
     const input = {
       runId: "gen-1",
       generationId: "gen-1",
@@ -144,19 +161,19 @@ describe("Issue #308 — one canonical report copy", () => {
       body: { a: 1 },
       userLogin: "tenant@example.com",
     };
-    const first = storeReportAtGeneration(sql, input);
-    const second = storeReportAtGeneration(sql, input);
+    const first = await storeReportAtGeneration(input, env as never);
+    const second = await storeReportAtGeneration(input, env as never);
     expect(first).not.toBeNull();
     expect(first!.created).toBe(true);
     expect(second).not.toBeNull();
     expect(second!.created).toBe(false);
     expect(second!.reportId).toBe(first!.reportId);
-    expect(reportRows(sql)).toHaveLength(1);
+    expect(await reportRows(env as unknown as Env)).toHaveLength(1);
   });
 
   it("HITL ON: generation stores 1 row, pending references it, approve delivers stored bytes", async () => {
     const emailSend = vi.fn(async () => true);
-    const { agent, sql } = seedAgent(makeEnv({ EMAIL: { send: emailSend } }));
+    const { agent, sql, env } = seedAgent(makeEnv({ EMAIL: { send: emailSend } }));
     // Spy the send leg: pins "what is delivered == what is stored".
     const sendSpy = vi.spyOn(agent as any, "sendReportEmail");
     await setHitl(agent, true);
@@ -164,10 +181,10 @@ describe("Issue #308 — one canonical report copy", () => {
       .confirmationId;
 
     // One canonical row stored at generation.
-    const rows = reportRows(sql);
+    const rows = await reportRows(env);
     expect(rows).toHaveLength(1);
     expect(rows[0].source).toBe("research_report");
-    expect(rows[0].generation_id).toBeTruthy();
+    expect(rows[0].generationId).toBeTruthy();
 
     // The pending row references the stored copy (no report bytes embedded).
     const pending = pendingRows(sql);
@@ -204,12 +221,12 @@ describe("Issue #308 — one canonical report copy", () => {
     expect(sendSpy.mock.calls[0][3]).toBe(XLSX_B64);
 
     // Still exactly one stored row after delivery.
-    expect(reportRows(sql)).toHaveLength(1);
+    expect(await reportRows(env)).toHaveLength(1);
   });
 
   it("dedupe: generate once, deliver via multiple channels → exactly 1 stored row", async () => {
     const emailSend = vi.fn(async () => true);
-    const { agent, sql } = seedAgent(makeEnv({ EMAIL: { send: emailSend } }));
+    const { agent, sql, env } = seedAgent(makeEnv({ EMAIL: { send: emailSend } }));
     await setHitl(agent, true);
     // Same report posted twice → two pending holds, one canonical row.
     const id1 = ((await (await post(agent, "/trading/reports/email", EMAIL_BODY)).json()) as any)
@@ -218,32 +235,32 @@ describe("Issue #308 — one canonical report copy", () => {
       .confirmationId;
     expect(id1).not.toBe(id2);
     expect(pendingRows(sql)).toHaveLength(2);
-    expect(reportRows(sql)).toHaveLength(1);
+    expect(await reportRows(env)).toHaveLength(1);
 
     // Deliver both holds → both deliver, still one row.
     await post(agent, "/trading/reports/confirm", { confirmationId: id1, decision: "approved" });
     await post(agent, "/trading/reports/confirm", { confirmationId: id2, decision: "approved" });
     expect(emailSend).toHaveBeenCalledTimes(2);
-    expect(reportRows(sql)).toHaveLength(1);
+    expect(await reportRows(env)).toHaveLength(1);
 
     // Same webhook report posted twice → one row.
     const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as any);
     vi.stubGlobal("fetch", fetchMock);
     await post(agent, "/trading/reports/webhook", WEBHOOK_BODY);
     await post(agent, "/trading/reports/webhook", WEBHOOK_BODY);
-    expect(reportRows(sql).filter((r) => r.source === "research_report")).toHaveLength(2); // email + webhook kinds
+    expect((await reportRows(env)).filter((r) => r.source === "research_report")).toHaveLength(2); // email + webhook kinds
     vi.unstubAllGlobals();
   });
 
   it("webhook: approve delivers the stored canonical payload (data == stored body)", async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as any);
     vi.stubGlobal("fetch", fetchMock);
-    const { agent, sql } = seedAgent(makeEnv());
+    const { agent, env } = seedAgent(makeEnv());
     await setHitl(agent, true);
     const id = ((await (await post(agent, "/trading/reports/webhook", WEBHOOK_BODY)).json()) as any)
       .confirmationId;
 
-    const rows = reportRows(sql);
+    const rows = await reportRows(env);
     expect(rows).toHaveLength(1);
     const expectedBody = canonicalResearchWebhookBody({
       title: "Weekly scan",
@@ -261,19 +278,19 @@ describe("Issue #308 — one canonical report copy", () => {
     // Byte-identity: the dispatched data envelope carries the stored body.
     const dispatched = JSON.parse(String(fetchMock.mock.calls[0][1].body));
     expect(dispatched.data).toEqual(JSON.parse(rows[0].body));
-    expect(reportRows(sql)).toHaveLength(1);
+    expect(await reportRows(env)).toHaveLength(1);
     vi.unstubAllGlobals();
   });
 
   it("HITL OFF: generation still stores first, then delivers the stored copy", async () => {
     const emailSend = vi.fn(async () => true);
-    const { agent, sql } = seedAgent(makeEnv({ EMAIL: { send: emailSend } }));
+    const { agent, sql, env } = seedAgent(makeEnv({ EMAIL: { send: emailSend } }));
     await setHitl(agent, false);
     const sendSpy = vi.spyOn(agent as any, "sendReportEmail");
     const res = await post(agent, "/trading/reports/email", EMAIL_BODY);
     expect((await res.json()) as any).toEqual({ success: true });
     expect(emailSend).toHaveBeenCalledTimes(1);
-    const rows = reportRows(sql);
+    const rows = await reportRows(env);
     expect(rows).toHaveLength(1);
     expect(sendSpy.mock.calls[0][3]).toBe(
       parseResearchReportBody(rows[0].body)!.attachmentBase64
@@ -322,7 +339,7 @@ describe("Issue #308 — one canonical report copy", () => {
   });
 
   it("scheduled seam via DatabaseORM stores exactly once per generation", async () => {
-    const { agent, sql } = seedAgent(makeEnv());
+    const { agent, env } = seedAgent(makeEnv());
     const orm = (agent as any).getOrm();
     const input = {
       runId: "screener:2026-10-18T00:00:00.000Z",
@@ -334,14 +351,14 @@ describe("Issue #308 — one canonical report copy", () => {
       createdAt: "2026-10-18T00:00:00.000Z",
       userLogin: "tenant@example.com",
     };
-    const first = orm.storeCanonicalReport(input);
-    const second = orm.storeCanonicalReport(input);
+    const first = await orm.storeCanonicalReport(input, env);
+    const second = await orm.storeCanonicalReport(input, env);
     expect(first).not.toBeNull();
     expect(second).not.toBeNull();
     expect(second!.created).toBe(false);
     expect(second!.reportId).toBe(first!.reportId);
     expect(
-      reportRows(sql).filter((r) => r.generation_id === "screener:2026-10-18T00:00:00.000Z")
+      (await reportRows(env)).filter((r) => r.generationId === "screener:2026-10-18T00:00:00.000Z")
     ).toHaveLength(1);
   });
 });

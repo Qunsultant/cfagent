@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditReportDb,
+  D1AuditReportAdapter,
+  ensureAuditReportSchema,
+} from "../src/data/d1AuditReportAdapter";
 import {
   handleReportsRoutes,
   type ReportsRouteContext,
@@ -52,6 +58,38 @@ const makeCtx = (env: unknown): ReportsRouteContext =>
     env,
   }) as unknown as ReportsRouteContext;
 
+// #6101: the lexical half searches D1 (searchScheduledReports),
+  // so the LEX_ROW is seeded there per test — the DO makeSql stub
+  // below only serves the detail lookup's "semantic-search" miss.
+  async function seedLexRow() {
+    const d1 = new MockD1Database();
+    const auditDb = createD1AuditReportDb(d1 as never);
+    await ensureAuditReportSchema(auditDb);
+    const audit = new D1AuditReportAdapter(auditDb);
+    const createdAtMs = Date.parse("2026-10-28T00:00:00Z");
+    await audit.recordReport({
+      tenantId: "primary",
+      workspaceId: "primary",
+      reportId: "r-lex",
+      runId: "run-1",
+      generationId: "run-1",
+      title: "Bullish tech outlook",
+      source: "screener",
+      summary: "bullish tech summary",
+      body: "bullish tech body",
+      createdAtMs,
+      updatedAtMs: createdAtMs,
+      version: 1,
+      provenanceWriter: "test-d1-seed",
+      provenanceSourceDo: "test",
+      provenanceSourceVersion: "1",
+      linkedJobRunId: null,
+      userLogin: null,
+      bodyR2Key: null,
+    });
+    return d1;
+  }
+
 const semanticEnv = {
   AI: { run: async () => ({ data: [[0.1]] }) },
   VECTOR_MEMORY: {
@@ -85,7 +123,8 @@ describe("#2120 slice 0 reports semantic env", () => {
   });
 
   it("semantic route returns semantic:true with stubbed bindings through ctx.env", async () => {
-    const res = await callRoute(makeCtx(semanticEnv));
+    const d1 = await seedLexRow();
+    const res = await callRoute(makeCtx({ ...semanticEnv, AGENT_DB: d1 }));
     expect(res).not.toBeNull();
     const body = await (res as Response).json();
     expect(body.semantic).toBe(true);
@@ -95,7 +134,10 @@ describe("#2120 slice 0 reports semantic env", () => {
   });
 
   it("lexical half is unchanged when bindings are absent ({} fallback guard)", async () => {
-    const res = await callRoute(makeCtx({}));
+    // The {} fallback keeps AI/VECTOR_MEMORY absent but gains
+    // AGENT_DB — the lexical half needs D1, not the index bindings.
+    const d1 = await seedLexRow();
+    const res = await callRoute(makeCtx({ AGENT_DB: d1 }));
     expect(res).not.toBeNull();
     const body = await (res as Response).json();
     expect(body.semantic).toBe(false);

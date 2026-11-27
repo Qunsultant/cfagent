@@ -64,8 +64,21 @@ import {
 import { defaultAccountTypeForCallback } from "../src/config/accountBindings";
 import { TradingPlatformRegistry } from "../src/trading";
 import { recordScheduleCallbackRun } from "../src/agents/orchestrator/scheduleCallbackRunRecords";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
+import { MockD1Database } from "./mock-d1";
 import type { SqlStorage } from "../src/orm";
+
+/** Issue #6101 — the D1 run ledger over a fresh in-memory mock binding. */
+function ledgerD1() {
+  const d1 = new MockD1Database();
+  const store = new D1JobRunRecordStore(
+    createD1JobRunRecordDb(d1 as unknown as D1Database),
+  );
+  return { d1, store };
+}
 
 vi.mock("../src/services/accountBindings", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/services/accountBindings")>();
@@ -306,7 +319,7 @@ describe("enforceScheduleBinding (#6301)", () => {
 describe("recordScheduleCallbackRun ledger stamping (#6301)", () => {
   it("the outcome's resolved binding is stamped onto the record for a blank payload", async () => {
     const storage = new SqliteTestStorage();
-    const store = new SqlJobRunRecordStore(storage.sql as never);
+    const { d1, store } = ledgerD1();
     await recordScheduleCallbackRun(
       storage.sql as never,
       "autonomousOptionsAnalysis",
@@ -319,8 +332,10 @@ describe("recordScheduleCallbackRun ledger stamping (#6301)", () => {
         mode: "paper",
         modeSource: "inference",
       }),
+      // Issue #6101 — the recorder resolves the D1 store from env.
+      { env: { AGENT_DB: d1 } },
     );
-    const runs = store.listByJob("sched-6301-blank");
+    const runs = await store.listByJob("sched-6301-blank");
     expect(runs).toHaveLength(1);
     expect(runs[0].brokerId).toBe("alpaca");
     expect(runs[0].mode).toBe("paper");
@@ -329,7 +344,7 @@ describe("recordScheduleCallbackRun ledger stamping (#6301)", () => {
 
   it("the outcome's binding wins over a stamped payload (a re-resolved run records what it ran as)", async () => {
     const storage = new SqliteTestStorage();
-    const store = new SqlJobRunRecordStore(storage.sql as never);
+    const { d1, store } = ledgerD1();
     await recordScheduleCallbackRun(
       storage.sql as never,
       "autonomousOptionsAnalysis",
@@ -342,8 +357,10 @@ describe("recordScheduleCallbackRun ledger stamping (#6301)", () => {
         mode: "paper",
         modeSource: "selection",
       }),
+      // Issue #6101 — the recorder resolves the D1 store from env.
+      { env: { AGENT_DB: d1 } },
     );
-    const runs = store.listByJob("sched-6301-stamped");
+    const runs = await store.listByJob("sched-6301-stamped");
     expect(runs).toHaveLength(1);
     expect(runs[0].brokerId).toBe("alpaca");
     expect(runs[0].mode).toBe("paper");
@@ -353,15 +370,17 @@ describe("recordScheduleCallbackRun ledger stamping (#6301)", () => {
 
   it("a stamped payload's broker survives when the outcome carries none", async () => {
     const storage = new SqliteTestStorage();
-    const store = new SqlJobRunRecordStore(storage.sql as never);
+    const { d1, store } = ledgerD1();
     await recordScheduleCallbackRun(
       storage.sql as never,
       "autonomousMarketScreen",
       { userLogin: "alice", brokerId: "etrade", mode: "paper", accountType: "stock", accountId: "ET-GONE" },
       { id: "sched-6301-legacy" },
       async () => ({ outcome: "skipped", detail: "FAILURE_ACCOUNT_UNKNOWN" }),
+      // Issue #6101 — the recorder resolves the D1 store from env.
+      { env: { AGENT_DB: d1 } },
     );
-    const runs = store.listByJob("sched-6301-legacy");
+    const runs = await store.listByJob("sched-6301-legacy");
     expect(runs).toHaveLength(1);
     expect(runs[0].brokerId).toBe("etrade");
     expect(runs[0].mode).toBe("paper");

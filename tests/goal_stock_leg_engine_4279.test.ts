@@ -39,7 +39,12 @@ import {
   runGoalScreenViaEngine,
 } from "../src/workflows/runGoalScreenViaEngine";
 import { MockSqlStorage } from "./mock-sql";
-import { ensureScheduledReportsTable } from "../src/services/scheduledReports";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditReportDb,
+  D1AuditReportAdapter,
+  ensureAuditReportSchema,
+} from "../src/data/d1AuditReportAdapter";
 import type { ScreenerRunResult } from "../src/agents/screener-agent";
 import type { StockScreenRunSpec } from "../src/workflows/stockScreenRunSpec";
 
@@ -156,23 +161,40 @@ describe("goal screen through the A2A seam (#4279)", () => {
     completedAt: "2026-11-12T18:00:00.000Z",
   };
 
-  function seedCanonicalRow(sql: MockSqlStorage, reportId: string) {
-    ensureScheduledReportsTable(sql as never);
-    sql.exec(
-      "INSERT INTO mas_reports (id, run_id, title, source, summary, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  // #6101: the canonical row lives in D1 now — seed it through
+  // the D1 audit-report adapter with the explicit report id the
+  // collation names (getCanonicalReport looks the row up by reportId,
+  // and the default tenant "primary" is what the read resolves).
+  async function seedCanonicalRow(d1: MockD1Database, reportId: string) {
+    const auditDb = createD1AuditReportDb(d1 as never);
+    await ensureAuditReportSchema(auditDb);
+    const audit = new D1AuditReportAdapter(auditDb);
+    const createdAtMs = Date.parse("2026-11-12T18:00:00.000Z");
+    await audit.recordReport({
+      tenantId: "primary",
+      workspaceId: "primary",
       reportId,
-      reportId,
-      "Goal screen — income (bullish)",
-      "goal_screen",
-      "Goal screen (income/bullish) complete: 2 hit(s).",
-      JSON.stringify({
+      runId: reportId,
+      generationId: reportId,
+      title: "Goal screen — income (bullish)",
+      source: "goal_screen",
+      summary: "Goal screen (income/bullish) complete: 2 hit(s).",
+      body: JSON.stringify({
         trigger: "manual",
         scenarioSource: "built",
         taskId: "task-1",
         result: GOAL_RESULT,
       }),
-      "2026-11-12T18:00:00.000Z",
-    );
+      createdAtMs,
+      updatedAtMs: createdAtMs,
+      version: 1,
+      provenanceWriter: "test-d1-seed",
+      provenanceSourceDo: "test",
+      provenanceSourceVersion: "1",
+      linkedJobRunId: null,
+      userLogin: "svc-user",
+      bodyR2Key: null,
+    });
   }
 
   function goalCollation(reportId: string): any {
@@ -229,10 +251,11 @@ describe("goal screen through the A2A seam (#4279)", () => {
 
   it("submits the goal command and returns the ledger task + stored result", async () => {
     const sql = new MockSqlStorage();
-    seedCanonicalRow(sql, "goal-screen:task-1");
+    const d1 = new MockD1Database();
+    await seedCanonicalRow(d1, "goal-screen:task-1");
     const starts: unknown[] = [];
     const outcome = await runGoalScreenViaEngine({
-      env: {} as never,
+      env: { AGENT_DB: d1 } as never,
       submission: {
         jobId: "goal-screen:a2a-k-1",
         source: "a2a",
@@ -277,9 +300,10 @@ describe("goal screen through the A2A seam (#4279)", () => {
 
   it("a duplicate submission returns executed:false with the existing outcome", async () => {
     const sql = new MockSqlStorage();
-    seedCanonicalRow(sql, "goal-screen:task-1");
+    const d1 = new MockD1Database();
+    await seedCanonicalRow(d1, "goal-screen:task-1");
     const outcome = await runGoalScreenViaEngine({
-      env: {} as never,
+      env: { AGENT_DB: d1 } as never,
       submission: {
         jobId: "goal-screen:a2a-k-1",
         source: "a2a",

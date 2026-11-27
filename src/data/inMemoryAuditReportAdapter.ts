@@ -60,9 +60,17 @@ export class InMemoryAuditReportAdapter implements AuditReportStore {
     return { ...matches.reduce((a, b) => (b.version > a.version ? b : a)) };
   }
 
-  async listReports(tenantId: string): Promise<CanonicalReportRow[]> {
+  async listReports(
+    tenantId: string,
+    opts?: { userLogin?: string; limit?: number; source?: string },
+  ): Promise<CanonicalReportRow[]> {
     const byId = new Map<string, CanonicalReportRow>();
-    for (const row of this.reportRows.filter((r) => r.tenantId === tenantId)) {
+    for (const row of this.reportRows.filter(
+      (r) =>
+        r.tenantId === tenantId &&
+        (!opts?.userLogin || r.userLogin === opts.userLogin) &&
+        (!opts?.source || r.source === opts.source),
+    )) {
       const current = byId.get(row.reportId);
       if (!current || row.version > current.version) {
         byId.set(row.reportId, row);
@@ -73,7 +81,72 @@ export class InMemoryAuditReportAdapter implements AuditReportStore {
       .sort(
         (a, b) =>
           b.updatedAtMs - a.updatedAtMs || a.reportId.localeCompare(b.reportId),
-      );
+      )
+      .slice(0, Math.max(1, opts?.limit ?? 100));
+  }
+
+  /**
+   * Issue #6101 (step 8) — token substring search over
+   * title/summary/body, same match set as the D1 adapter's LIKE
+   * groups (SQLite LIKE is ASCII case-insensitive).
+   */
+  async searchReports(
+    tenantId: string,
+    tokens: string[],
+    opts?: { userLogin?: string; limit?: number },
+  ): Promise<CanonicalReportRow[]> {
+    if (tokens.length === 0) return [];
+    const lowered = tokens.map((t) => t.toLowerCase());
+    const matches = this.reportRows.filter(
+      (r) =>
+        r.tenantId === tenantId &&
+        (!opts?.userLogin || r.userLogin === opts.userLogin) &&
+        lowered.some((t) =>
+          [r.title, r.summary, r.body].some((field) =>
+            field.toLowerCase().includes(t),
+          ),
+        ),
+    );
+    return latestPerReportInMemory(matches).slice(0, Math.max(1, opts?.limit ?? 100));
+  }
+
+  /** Issue #6101 (step 8) — newest version for a generation id, or null. */
+  async latestReportByGeneration(
+    tenantId: string,
+    generationId: string,
+    userLogin?: string,
+  ): Promise<CanonicalReportRow | null> {
+    const matches = this.reportRows.filter(
+      (r) =>
+        r.tenantId === tenantId &&
+        r.generationId === generationId &&
+        (!userLogin || r.userLogin === userLogin),
+    );
+    if (matches.length === 0) return null;
+    return { ...matches.reduce((a, b) => (b.version > a.version ? b : a)) };
+  }
+
+  /** Issue #6101 (step 8) — newest row for a run id, or null. */
+  async latestReportByRunId(
+    tenantId: string,
+    runId: string,
+    userLogin?: string,
+  ): Promise<CanonicalReportRow | null> {
+    const matches = this.reportRows.filter(
+      (r) =>
+        r.tenantId === tenantId &&
+        r.runId === runId &&
+        (!userLogin || r.userLogin === userLogin),
+    );
+    if (matches.length === 0) return null;
+    return {
+      ...matches.reduce((a, b) =>
+        b.createdAtMs > a.createdAtMs ||
+        (b.createdAtMs === a.createdAtMs && b.version > a.version)
+          ? b
+          : a,
+      ),
+    };
   }
 
   async deleteReport(tenantId: string, reportId: string): Promise<void> {
@@ -91,5 +164,21 @@ function newestFirst(rows: AuditEventRow[]): AuditEventRow[] {
     .map((r) => ({ ...r }))
     .sort(
       (a, b) => b.occurredAtMs - a.occurredAtMs || a.id.localeCompare(b.id),
+    );
+}
+
+/** Latest row per report, newest first — mirrors the D1 adapter. */
+function latestPerReportInMemory(rows: CanonicalReportRow[]): CanonicalReportRow[] {
+  const byId = new Map<string, CanonicalReportRow>();
+  for (const row of rows) {
+    const current = byId.get(row.reportId);
+    if (!current || row.version > current.version) {
+      byId.set(row.reportId, row);
+    }
+  }
+  return [...byId.values()]
+    .map((r) => ({ ...r }))
+    .sort(
+      (a, b) => b.updatedAtMs - a.updatedAtMs || a.reportId.localeCompare(b.reportId),
     );
 }

@@ -13,6 +13,7 @@
  * and the scan-run save both run for real.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { MockD1Database } from "./mock-d1";
 // Issue #3460 slice 3: the unified service reads the broker through the
 // presence-aware seam (no default). These tests drive the E*TRADE path,
 // so the selection is explicit here instead of relying on the default.
@@ -133,7 +134,9 @@ describe("unified opportunities through the pipeline (#3186 step 3e)", () => {
       getOptionsCsvByKey: async () => ({ bytes: new Uint8Array([1]), fileName: "options.csv" }),
     };
     const ctx = {
-      env: {},
+      // #6101: the engine settlement records the run to D1;
+      // without AGENT_DB the recorder fails closed.
+      env: { AGENT_DB: new MockD1Database() },
       requestedEnv: undefined,
       getOrm: () => orm,
       agentCtx: { storage: { ...storage, sql } },

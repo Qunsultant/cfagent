@@ -287,7 +287,9 @@ describe("D1UnifiedScheduleAdapter (ScheduleStore contract)", () => {
     const rows = mock.sqlite
       .prepare("SELECT COUNT(*) AS n FROM _migrations")
       .all() as Array<{ n: number }>;
-    expect(rows[0].n).toBe(92);
+    // #6101 adds migration 0093 (job_run_records identity columns):
+    // 92 → 93.
+    expect(rows[0].n).toBe(93);
   });
 
   it("ensureUnifiedScheduleSchema applies all pending migrations", async () => {
@@ -295,7 +297,9 @@ describe("D1UnifiedScheduleAdapter (ScheduleStore contract)", () => {
     const db = createD1UnifiedScheduleDb(mock as unknown as D1Database);
     const applied = await ensureUnifiedScheduleSchema(db);
     expect(applied).toContain(92);
-    expect(applied).toHaveLength(92);
+    // #6101 adds migration 0093 (job_run_records identity columns):
+    // 92 → 93.
+    expect(applied).toHaveLength(93);
     const again = await ensureUnifiedScheduleSchema(db);
     expect(again).toEqual([]);
   });

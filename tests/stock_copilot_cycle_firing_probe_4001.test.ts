@@ -118,9 +118,51 @@ import {
 } from "../src/agents/orchestrator/scheduledTasksCopilot";
 import { TradingPlatformRegistry } from "../src/trading";
 import { InMemoryCommercialAdapter } from "../src/data/inMemoryCommercialAdapter";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
 import { BROKER_ENVIRONMENT_SETTING_KEY } from "../src/agents/routes/brokerEnvironment";
 import { handleStockCopilotRoutes } from "../src/agents/routes/stockCopilot";
+
+/** Minimal D1Database stand-in over node:sqlite (the #6101 double). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: { changes: info.changes, last_row_id: info.lastInsertRowid },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+}
+
+/** The D1 run-ledger store over one mock binding (#6101). */
+function ledgerD1(d1: MockD1Database) {
+  return new D1JobRunRecordStore(createD1JobRunRecordDb(d1 as unknown as D1Database));
+}
 
 class SqliteTestStorage {
   readonly sqlite = new DatabaseSync(":memory:");
@@ -167,12 +209,16 @@ async function runDeclaredHandler(
   sql: SqliteTestStorage,
   audits: Array<{ type: string; payload: Record<string, unknown> }>,
   kv?: Kv,
+  // Issue #6101 — the firing records its ledger row in D1: the
+  // handler resolves the store from env.AGENT_DB.
+  d1?: MockD1Database,
 ) {
   const settings = copilotSettings();
   const tasks = await declareStockCopilotTasks({
     env: {
       STOCK_COPILOT_PAPER_ENABLED: "1",
       STOCK_COPILOT_AROUND_THE_CLOCK: "true",
+      ...(d1 ? { AGENT_DB: d1 } : {}),
     } as any,
     agentCtx: {
       storage: kv
@@ -207,6 +253,8 @@ async function runDeclaredHandler(
 async function statusBody(
   sql: SqliteTestStorage,
   kv: Kv | undefined,
+  // Issue #6101 — the status route reads the D1 ledger.
+  d1?: MockD1Database,
 ): Promise<Record<string, unknown>> {
   const settings = copilotSettings();
   const req = new Request("http://localhost/api/stock-copilot/status", {
@@ -221,6 +269,7 @@ async function statusBody(
       env: {
         STOCK_COPILOT_PAPER_ENABLED: "1",
         STOCK_COPILOT_AROUND_THE_CLOCK: "true",
+        ...(d1 ? { AGENT_DB: d1 } : {}),
       } as any,
       sql: sql as any,
       ...(kv ? { storage: kv } : {}),
@@ -249,6 +298,7 @@ describe("Issue #4001 follow-up — the firing leaves a dispatch-boundary probe"
   it("a firing writes a dispatch probe to KV storage before the cycle runs, even when setup throws", async () => {
     const sql = new SqliteTestStorage();
     const kv = makeKv();
+    const d1 = new MockD1Database();
     const audits: Array<{ type: string; payload: Record<string, unknown> }> =
       [];
     vi.spyOn(TradingPlatformRegistry, "getPlatform").mockImplementation(
@@ -256,7 +306,7 @@ describe("Issue #4001 follow-up — the firing leaves a dispatch-boundary probe"
         throw new Error("Trading platform registry unavailable.");
       },
     );
-    const scheduledFor = await runDeclaredHandler(sql, audits, kv);
+    const scheduledFor = await runDeclaredHandler(sql, audits, kv, d1);
     const probe = (await kv.get(
       STOCK_COPILOT_CYCLE_FIRING_PROBE_KEY,
     )) as Record<string, unknown> | undefined;
@@ -266,9 +316,9 @@ describe("Issue #4001 follow-up — the firing leaves a dispatch-boundary probe"
     expect(probe!.occurrenceKey).toBe("4001-probe-1");
     expect(typeof probe!.receivedAt).toBe("string");
     // The #4008 behavior still holds: the throw also records a
-    // failure ledger row.
-    const store = new SqlJobRunRecordStore(sql as any);
-    const rows = store.listByJob(STOCK_COPILOT_TASK_ID);
+    // failure ledger row (in D1 now, #6101).
+    const store = ledgerD1(d1);
+    const rows = await store.listByJob(STOCK_COPILOT_TASK_ID);
     expect(rows.length).toBe(1);
     expect(rows[0].outcome).toBe("failure");
   });
@@ -276,25 +326,27 @@ describe("Issue #4001 follow-up — the firing leaves a dispatch-boundary probe"
   it("a successful firing writes the probe too", async () => {
     const sql = new SqliteTestStorage();
     const kv = makeKv();
+    const d1 = new MockD1Database();
     const audits: Array<{ type: string; payload: Record<string, unknown> }> =
       [];
-    await runDeclaredHandler(sql, audits, kv);
+    await runDeclaredHandler(sql, audits, kv, d1);
     const probe = (await kv.get(
       STOCK_COPILOT_CYCLE_FIRING_PROBE_KEY,
     )) as Record<string, unknown> | undefined;
     expect(probe).toBeDefined();
     expect(probe!.taskId).toBe(STOCK_COPILOT_TASK_ID);
-    const store = new SqlJobRunRecordStore(sql as any);
-    expect(store.listByJob(STOCK_COPILOT_TASK_ID).length).toBe(1);
+    const store = ledgerD1(d1);
+    expect((await store.listByJob(STOCK_COPILOT_TASK_ID)).length).toBe(1);
   });
 
   it("the probe write is best-effort: a storage handle without KV leaves the firing working", async () => {
     const sql = new SqliteTestStorage();
+    const d1 = new MockD1Database();
     const audits: Array<{ type: string; payload: Record<string, unknown> }> =
       [];
-    await runDeclaredHandler(sql, audits);
-    const store = new SqlJobRunRecordStore(sql as any);
-    const rows = store.listByJob(STOCK_COPILOT_TASK_ID);
+    await runDeclaredHandler(sql, audits, undefined, d1);
+    const store = ledgerD1(d1);
+    const rows = await store.listByJob(STOCK_COPILOT_TASK_ID);
     expect(rows.length).toBe(1);
     expect(rows[0].outcome).not.toBe("failure");
   });
@@ -302,9 +354,10 @@ describe("Issue #4001 follow-up — the firing leaves a dispatch-boundary probe"
   it("readCopilotCycleDispatchProbe returns the stored probe and the last non-declaration cause", async () => {
     const sql = new SqliteTestStorage();
     const kv = makeKv();
+    const d1 = new MockD1Database();
     const audits: Array<{ type: string; payload: Record<string, unknown> }> =
       [];
-    await runDeclaredHandler(sql, audits, kv);
+    await runDeclaredHandler(sql, audits, kv, d1);
     // A flag-off declaration on the same storage records the
     // non-declaration cause under the existing dedup key.
     await declareStockCopilotTasks({
@@ -340,10 +393,11 @@ describe("Issue #4001 follow-up — the firing leaves a dispatch-boundary probe"
   it("REST status surfaces lastCycleFiringAttempt after a firing", async () => {
     const sql = new SqliteTestStorage();
     const kv = makeKv();
+    const d1 = new MockD1Database();
     const audits: Array<{ type: string; payload: Record<string, unknown> }> =
       [];
-    await runDeclaredHandler(sql, audits, kv);
-    const body = await statusBody(sql, kv);
+    await runDeclaredHandler(sql, audits, kv, d1);
+    const body = await statusBody(sql, kv, d1);
     const attempt = body.lastCycleFiringAttempt as Record<string, unknown> | null;
     expect(attempt).not.toBeNull();
     expect(attempt!.taskId).toBe(STOCK_COPILOT_TASK_ID);
@@ -353,6 +407,7 @@ describe("Issue #4001 follow-up — the firing leaves a dispatch-boundary probe"
   it("REST status surfaces lastCycleNotDeclared when the cycle was never declared", async () => {
     const sql = new SqliteTestStorage();
     const kv = makeKv();
+    const d1 = new MockD1Database();
     const audits: Array<{ type: string; payload: Record<string, unknown> }> =
       [];
     await declareStockCopilotTasks({
@@ -370,7 +425,7 @@ describe("Issue #4001 follow-up — the firing leaves a dispatch-boundary probe"
         audits.push({ type, payload });
       },
     });
-    const body = await statusBody(sql, kv);
+    const body = await statusBody(sql, kv, d1);
     expect(body.lastCycleFiringAttempt).toBeNull();
     const notDeclared = body.lastCycleNotDeclared as Record<string, unknown> | null;
     expect(notDeclared).not.toBeNull();

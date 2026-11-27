@@ -31,6 +31,10 @@ import type { Env } from "../../types";
 import type { SqlStorage } from "../../orm";
 import { parseCronDispatchRecordPayload } from "../../services/consolidatedCronEntries";
 import { recordCronDispatchRun } from "../orchestrator/scheduleCallbackRunRecords";
+import {
+  createJobRunRecordAdapter,
+  resolveLedgerAttribution,
+} from "../../data/createJobRunRecordPorts";
 
 export interface CronDispatchRecordRouteContext {
   /** Worker environment (service-login lookup). */
@@ -63,7 +67,14 @@ export async function handleCronDispatchRecordRoute(
     );
   }
   try {
-    recordCronDispatchRun(ctx.sql, parsed);
+    // Issue #6101 — the dispatch row lands in D1 (the store
+    // resolves from the route env); an unbound D1 throws the named
+    // error and the route answers 500, as before.
+    await recordCronDispatchRun(
+      createJobRunRecordAdapter(ctx.env),
+      parsed,
+      resolveLedgerAttribution(ctx.env),
+    );
   } catch {
     return Response.json(
       { success: false, error: "Cron dispatch record failed." },

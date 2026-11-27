@@ -37,8 +37,10 @@ describe("#5170 — engine options chain writes the serve-record summary row", (
       },
     );
     expect(ok).toBe(true);
+    // #6101: persistOptionsServeReport threads ctx.env through to
+    // recordOptionsServeReport (the D1 fold needs it).
     expect(spy).toHaveBeenCalledWith(
-      { orm, storage },
+      { orm, storage, env: {} },
       expect.objectContaining({
         kind: "options",
         timestamp: "2026-11-19T19:00:00.000Z",

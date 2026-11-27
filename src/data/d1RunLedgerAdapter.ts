@@ -1,22 +1,17 @@
 /**
- * Issue #4116 — D1 adapter for the run-ledger projection (the D1
- * side of the DO → D1 projection). The ONLY module (with its
+ * Issue #6101 — D1 adapter for the frozen agent_async_jobs read.
+ * The #6099 projector is deleted: no code writes this table
+ * anymore (new async-job executions get no row until F5 restores
+ * the list via the engine run record). This adapter is the READ
+ * side only — listAsyncJobs serves the Workflow Runs jobs list
+ * (pre-cutover projected rows). The ONLY module (with its
  * in-memory test double) that may import drizzle-orm for the
- * agent_async_jobs / agent_tenant_projection_carriers rows, and
- * the only module that knows their column names.
- *
- * Ordering rule (the ruling's shared rule, in its conditional-upsert
- * form — see the design doc §1.1): one row per natural key; a replay
- * is a no-op, a stale write never overwrites a newer row, a newer
- * write lands. Single statement: INSERT … ON CONFLICT DO UPDATE …
- * WHERE stored.updated_at < excluded.updated_at.
+ * agent_async_jobs rows, and the only module that knows their
+ * column names.
  */
-import { and, desc, eq, lt } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { createDrizzleD1Db } from "./d1QueryLogger";
-import {
-  agentAsyncJobs,
-  agentTenantProjectionCarriers,
-} from "./drizzleSchema";
+import { agentAsyncJobs } from "./drizzleSchema";
 import {
   MIGRATION_0004_AGENT_AUDIT_REPORTS,
   MIGRATION_0047_JOB_RUN_RECORDS,
@@ -26,21 +21,13 @@ import {
   applyMigrations,
   type MigrationDb,
 } from "./migrationRunner";
-import type {
-  AsyncJobProjectionInput,
-  ProjectedAsyncJobRow,
-  ProjectionCarriers,
-  RunLedgerReadMode,
-  TenantProjectionCarriersRow,
-} from "./runLedgerPorts";
-import { DML_CATALOGUE } from "./schemaComponent/dmlCatalogue";
-import { dmlFragment } from "./schemaComponent/dmlExecutor";
+import type { ProjectedAsyncJobRow } from "./runLedgerPorts";
 
 export type D1RunLedgerDb = ReturnType<typeof createD1RunLedgerDb>;
 
 export function createD1RunLedgerDb(d1: unknown) {
   return createDrizzleD1Db(d1 as never, {
-    schema: { agentAsyncJobs, agentTenantProjectionCarriers },
+    schema: { agentAsyncJobs },
   });
 }
 
@@ -104,78 +91,6 @@ export class D1RunLedgerAdapter {
     return this.ensured;
   }
 
-  /**
-   * Conditional upsert for one projected async-job row. The adapter
-   * stamps projectedAtMs from nowMs — callers never stamp projection
-   * time themselves. Returns true when the write landed (insert or
-   * newer-update) and false when it was a no-op (exact replay, or a
-   * stale write losing to a newer stored row). The detection reads
-   * the driver's meta.changes — SQLite reports 0 modified rows when
-   * the upsert's WHERE refuses the update — and falls back to
-   * "written" when the driver carries no meta (never misreports a
-   * landed write as skipped).
-   */
-  async recordAsyncJob(row: AsyncJobProjectionInput, nowMs: number): Promise<boolean> {
-    await this.ensure();
-    const values = {
-      jobId: row.jobId,
-      tenantId: row.tenantId,
-      sessionId: row.sessionId,
-      capability: row.capability,
-      displayName: row.displayName,
-      status: row.status,
-      payloadJson: row.payloadJson,
-      resultJson: row.resultJson,
-      responseStatus: row.responseStatus,
-      error: row.error,
-      errorCode: row.errorCode,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-      startedAt: row.startedAt,
-      completedAt: row.completedAt,
-      parentJobId: row.parentJobId,
-      jobKind: row.jobKind,
-      channel: row.channel,
-      notBefore: row.notBefore,
-      stage: row.stage,
-      chainId: row.chainId,
-      stuckAlertedAt: row.stuckAlertedAt,
-      trigger: row.trigger,
-      triggeredBy: row.triggeredBy,
-      scheduleId: row.scheduleId,
-      lastActivityAt: row.lastActivityAt,
-      projectedAtMs: nowMs,
-    };
-    const result = (await this.db
-      .insert(agentAsyncJobs)
-      .values(values)
-      .onConflictDoUpdate({
-        target: agentAsyncJobs.jobId,
-        set: { ...values, jobId: row.jobId },
-        where: lt(
-          agentAsyncJobs.updatedAt,
-          dmlFragment(DML_CATALOGUE, "dml.d1.agent_async_jobs.stale_guard"),
-        ),
-      })) as unknown as { meta?: { changes?: number } };
-    const changes = result?.meta?.changes;
-    return typeof changes === "number" ? changes > 0 : true;
-  }
-
-  async getAsyncJob(tenantId: string, jobId: string): Promise<ProjectedAsyncJobRow | null> {
-    await this.ensure();
-    const rows = await this.db
-      .select()
-      .from(agentAsyncJobs)
-      .where(
-        and(
-          eq(agentAsyncJobs.tenantId, tenantId),
-          eq(agentAsyncJobs.jobId, jobId),
-        ),
-      )
-      .limit(1);
-    return rows.length === 0 ? null : toProjectedRow(rows[0]);
-  }
-
   async listAsyncJobs(
     tenantId: string,
     limit: number,
@@ -195,69 +110,4 @@ export class D1RunLedgerAdapter {
     return rows.map(toProjectedRow);
   }
 
-  /**
-   * The stored carrier config for one tenant. Null when no row
-   * exists — absent row = unconfigured (no default, never a
-   * DEFAULT_*). Callers map null to the unconfigured refusal.
-   */
-  async getTenantProjectionCarriers(
-    tenantId: string,
-  ): Promise<TenantProjectionCarriersRow | null> {
-    await this.ensure();
-    const rows = await this.db
-      .select()
-      .from(agentTenantProjectionCarriers)
-      .where(eq(agentTenantProjectionCarriers.tenantId, tenantId))
-      .limit(1);
-    if (rows.length === 0) return null;
-    const row = rows[0];
-    const readMode = row.readMode === "d1-only" ? "d1-only" : "merged";
-    return {
-      tenantId: row.tenantId,
-      carriers: {
-        queues: row.queuesEnabled === 1,
-        orm: row.ormEnabled === 1,
-        sweep: row.sweepEnabled === 1,
-      },
-      readMode,
-      updatedAtMs: row.updatedAtMs,
-    };
-  }
-
-  /**
-   * Operator write for the carrier config. Unconditional upsert —
-   * config is set explicitly by the operator, so last write wins
-   * by arrival; the no-default rule constrains READS, not this
-   * write (the caller supplies every flag explicitly).
-   */
-  async setTenantProjectionCarriers(
-    tenantId: string,
-    carriers: ProjectionCarriers,
-    readMode: RunLedgerReadMode,
-    nowMs: number,
-  ): Promise<TenantProjectionCarriersRow> {
-    await this.ensure();
-    const values = {
-      tenantId,
-      queuesEnabled: carriers.queues ? 1 : 0,
-      ormEnabled: carriers.orm ? 1 : 0,
-      sweepEnabled: carriers.sweep ? 1 : 0,
-      readMode,
-      updatedAtMs: nowMs,
-    };
-    await this.db
-      .insert(agentTenantProjectionCarriers)
-      .values(values)
-      .onConflictDoUpdate({
-        target: agentTenantProjectionCarriers.tenantId,
-        set: {
-          queuesEnabled: values.queuesEnabled,
-          ormEnabled: values.ormEnabled,
-          sweepEnabled: values.sweepEnabled,
-          readMode: values.readMode,
-          updatedAtMs: values.updatedAtMs,
-        },
-      });
-    return { tenantId, carriers: { ...carriers }, readMode, updatedAtMs: nowMs };
-  }
 }

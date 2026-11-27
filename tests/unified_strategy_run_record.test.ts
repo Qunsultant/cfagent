@@ -118,13 +118,13 @@ describe("unified strategy stages", () => {
 });
 
 describe("recordStrategyScreenRun unified record", () => {
-  it("stores input, provenance, feed evidence, and stages in the canonical body", () => {
+  it("stores input, provenance, feed evidence, and stages in the canonical body", async () => {
     const sql = new MockSqlStorage();
     const orm = {
       storeCanonicalReport: vi.fn(() => ({ reportId: "strategy-tsla", created: true })),
       getSql: () => sql,
     };
-    const stored = recordStrategyScreenRun(orm as any, tslaInput());
+    const stored = await recordStrategyScreenRun(orm as any, tslaInput());
     expect(stored).toMatchObject({ reportId: "strategy-tsla" });
     const body = orm.storeCanonicalReport.mock.calls[0][0].body as Record<string, any>;
     expect(body.input).toMatchObject({ symbols: ["TSLA"], thesis: "bullish", strategyMode: "thesis", dteMin: 7, dteMax: 90 });
