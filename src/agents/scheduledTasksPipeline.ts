@@ -9,13 +9,13 @@
  * and controls the pipeline; the OrchestratorAgent's doors are
  * invoking surfaces over the same control plane. Concretely:
  *
- * - The control plane is built over this agent's DO SQLite (the
- *   pipeline stores' DO residency), its run records go through
- *   the platform JobRunRecordStore — the D1 adapter when AGENT_DB
- *   is bound, so a settled host run is an engine D1 record the
- *   D1-only run ledger reads (#6103/#6235), with the DO adapter
- *   only as the unbound-deployment fallback — and its status
- *   publication rides the JOB_PIPELINE_EVENTS queue substrate.
+ * - The control plane is built over the shared D1 AgentDB
+ *   (AGENT_DB): definitions, artifacts, journal, run records,
+ *   and stage events are D1-resident on this host too (#6609).
+ *   An unbound AGENT_DB refuses by name
+ *   (`job_stores_unavailable`) — there is no DO SQLite fallback
+ *   on the feed path. Status publication rides the
+ *   JOB_PIPELINE_EVENTS queue substrate.
  * - getScheduledTasks() declarations are built from the control
  *   plane's registerSchedules output over a recording
  *   JobScheduleHost: each registered (job, node) becomes one
@@ -24,9 +24,9 @@
  *   same dispatch the UX and copilot doors make (#3514).
  * - The workflow start path dispatches a run as a
  *   JobPipelineWorkflow instance (ids-only payload — the claim-
- *   check discipline): the definition is mirrored into the
- *   workflow residency through the control plane's own defineJob
- *   first, because a workflow has no host DO to read it from.
+ *   check discipline): the definition is ensured and read in
+ *   the same D1 residency the workflow reads, because a
+ *   workflow has no host DO to read it from.
  *
  * Identity: a scheduled firing threads the platform's named
  * service login (SERVICE_USER_LOGIN, #1185) into the per-login
@@ -49,8 +49,6 @@ import {
   getServiceUserLogin,
   SHARED_ORCHESTRATOR_INSTANCE,
 } from "../security/serviceIdentity";
-import { createJobPipelineStoresFromSql } from "../data/createJobPipelinePorts";
-import { createDoSqliteJobStageEventStore } from "../data/doSqliteJobStageEventAdapter";
 import { createD1JobStageEventStore } from "../data/d1JobStageEventAdapter";
 import type { JobStageEventStore } from "../data/jobStageEventPorts";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
@@ -60,13 +58,12 @@ import {
   startManagedWorkflowInstance,
   type ManagedWorkflowBinding,
 } from "../workflows/workflowInstanceSeam";
-import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
 import {
   createD1JobRunRecordDb,
   D1JobRunRecordStore,
 } from "../data/d1JobRunRecordAdapter";
 import { createProviderCaptureAdapter } from "../data/createProviderCapturePorts";
-import type { CaptureBlobStorage } from "../data/providerCapturePorts";
+import { createR2CaptureBlobStorage } from "../data/r2CaptureBlobAdapter";
 import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
 import { createEnrichedDatasetAdapter } from "../data/createEnrichedDatasetPorts";
 import { createAnalyzedDatasetPorts } from "../data/createAnalyzedDatasetPorts";
@@ -82,11 +79,11 @@ import { createDeadLetterStoreAdapter } from "../data/createDeadLetterStorePorts
 import { deadLetterRunSink } from "../services/jobPipelineDeadLetter";
 import {
   JobPipelineControl,
-  jobRunRecorderFromStore,
   type JobDispatchResult,
   type JobScheduleHost,
   type JobStatusView,
 } from "../services/jobPipelineEngine";
+import { JobPipelineError } from "../services/jobPipelineConfig";
 import { createJobPipelineControl } from "../services/jobPipelineControlFactory";
 import { buildFeedJobRegistry, buildFeedStatus } from "../services/feedJobs";
 import { resolveFeedJobTimeouts } from "../services/feedJobTimeouts";
@@ -183,7 +180,12 @@ export interface ScheduledTasksPipelineContext {
   ) => Promise<{ instanceId: string }>;
 }
 
-/** Issue #4780: exported for the options-chain step deps — the chain residency reads the same host SQL. */
+/**
+ * The host DO's SQLite handle. Retained only for the deliver
+ * suppressor's lazy claims-store getter until the deliver-stage
+ * cutover; the pipeline stores, run records, stage events, and
+ * feed capture wiring no longer read it (#6609).
+ */
 export function pipelineSql(ctx: ScheduledTasksPipelineContext): SqlStorage {
   const sql = (
     ctx.agentCtx?.storage as unknown as { sql?: SqlStorage } | undefined
@@ -196,13 +198,40 @@ export function pipelineSql(ctx: ScheduledTasksPipelineContext): SqlStorage {
   return sql;
 }
 
-/** The feed-step wiring for this host residency (DO storage + D1 dataset/index stores). */
+/** The D1 binding the ScheduledAgent pipeline stores live in (#6609). */
+function pipelineDb(ctx: ScheduledTasksPipelineContext): D1Database {
+  if (!ctx.env.AGENT_DB) {
+    throw new JobPipelineError(
+      "job_stores_unavailable",
+      "ScheduledAgent pipeline cannot build its stores: the AGENT_DB (D1 AgentDB) binding is not configured.",
+    );
+  }
+  return ctx.env.AGENT_DB as D1Database;
+}
+
+/** The ScheduledAgent pipeline stores: D1 only, never a DO fallback (#6609). */
+function pipelineStores(ctx: ScheduledTasksPipelineContext) {
+  return createJobPipelineStoresFromD1(pipelineDb(ctx));
+}
+
+/** One job's shard keys, read from the same D1 definitions the control executes. */
+async function shardsForPipelineJob(
+  ctx: ScheduledTasksPipelineContext,
+  jobId: string,
+): Promise<string[]> {
+  const stores = pipelineStores(ctx);
+  return (
+    (await stores.definitions.getDefinition(jobId))?.config.processing.shards ?? []
+  );
+}
+
+/** The feed-step wiring for this host residency (D1 stores + R2 capture blobs). */
 export function feedStepDepsForScheduledAgent(
   ctx: ScheduledTasksPipelineContext,
   userLogin?: string,
 ): FeedStepDeps {
-  const sql = pipelineSql(ctx);
-  const capturePort = createProviderCaptureAdapter(ctx.env);
+  const capturePort = createProviderCaptureAdapter(ctx.env) ?? undefined;
+  const blobStorage = createR2CaptureBlobStorage(ctx.env) ?? undefined;
   const universeStore = ctx.env.AGENT_DB
     ? new D1IndexListStore(createD1IndexListDb(ctx.env.AGENT_DB as D1Database))
     : null;
@@ -216,8 +245,7 @@ export function feedStepDepsForScheduledAgent(
     providerFor: (def, opts) =>
       createCaptureWiredFeedProvider(def, {
         env: ctx.env,
-        sql,
-        blobStorage: ctx.agentCtx.storage as unknown as CaptureBlobStorage,
+        blobStorage,
         capturePort,
         ...(opts?.userLogin ?? userLogin
           ? { userLogin: (opts?.userLogin ?? userLogin) as string }
@@ -247,13 +275,7 @@ export function feedStepDepsForScheduledAgent(
           }),
         }
       : null,
-    shardsFor: async (jobId) => {
-      const stores = createJobPipelineStoresFromSql(sql);
-      return (
-        (await stores.definitions.getDefinition(jobId))?.config.processing
-          .shards ?? []
-      );
-    },
+    shardsFor: (jobId) => shardsForPipelineJob(ctx, jobId),
     ...(userLogin ? { userLogin } : {}),
     // #3932 — the Worker env the sentiment job classifies
     // through (the #132 classifier's AI binding, via the
@@ -274,18 +296,11 @@ export function feedStepDepsForScheduledAgent(
 export function enrichStepDepsForScheduledAgent(
   ctx: ScheduledTasksPipelineContext,
 ): EnrichStepDeps {
-  const sql = pipelineSql(ctx);
   return {
     registry: buildEnrichJobRegistry(envStrings(ctx.env)),
     datasetStore: createFeedDatasetAdapter(ctx.env),
     enrichedStore: createEnrichedDatasetAdapter(ctx.env),
-    shardsFor: async (jobId) => {
-      const stores = createJobPipelineStoresFromSql(sql);
-      return (
-        (await stores.definitions.getDefinition(jobId))?.config.processing
-          .shards ?? []
-      );
-    },
+    shardsFor: (jobId) => shardsForPipelineJob(ctx, jobId),
   };
 }
 
@@ -300,18 +315,11 @@ export function enrichStepDepsForScheduledAgent(
 export function analyzeStepDepsForScheduledAgent(
   ctx: ScheduledTasksPipelineContext,
 ): AnalyzeStepDeps {
-  const sql = pipelineSql(ctx);
   return {
     registry: buildAnalyzeJobRegistry(envStrings(ctx.env)),
     enrichedStore: createEnrichedDatasetAdapter(ctx.env),
     analyzedStore: createAnalyzedDatasetPorts(ctx.env),
-    shardsFor: async (jobId) => {
-      const stores = createJobPipelineStoresFromSql(sql);
-      return (
-        (await stores.definitions.getDefinition(jobId))?.config.processing
-          .shards ?? []
-      );
-    },
+    shardsFor: (jobId) => shardsForPipelineJob(ctx, jobId),
   };
 }
 
@@ -341,7 +349,6 @@ export function analyzeStepDepsForScheduledAgent(
 export function generateStepDepsForScheduledAgent(
   ctx: ScheduledTasksPipelineContext,
 ): GenerateStepDeps {
-  const sql = pipelineSql(ctx);
   return {
     registry: buildGenerateJobRegistry(envStrings(ctx.env)),
     analyzedStore: createAnalyzedDatasetPorts(ctx.env),
@@ -356,13 +363,7 @@ export function generateStepDepsForScheduledAgent(
         return door.recordPipelineGenerateReport(input);
       },
     }),
-    shardsFor: async (jobId) => {
-      const stores = createJobPipelineStoresFromSql(sql);
-      return (
-        (await stores.definitions.getDefinition(jobId))?.config.processing
-          .shards ?? []
-      );
-    },
+    shardsFor: (jobId) => shardsForPipelineJob(ctx, jobId),
   };
 }
 
@@ -388,7 +389,6 @@ export function generateStepDepsForScheduledAgent(
 export function deliverStepDepsForScheduledAgent(
   ctx: ScheduledTasksPipelineContext,
 ): DeliverStepDeps {
-  const sql = pipelineSql(ctx);
   const { senders, unconfiguredReasons } = createDeliverChannelSenders(
     ctx.env as unknown as Record<string, unknown>,
   );
@@ -410,15 +410,9 @@ export function deliverStepDepsForScheduledAgent(
     // so all residencies share the one table, is follow-up
     // work, not this slice.
     suppressor: createDeliverySuppressor(
-      createSqlDeliverySuppressionStore(() => sql),
+      createSqlDeliverySuppressionStore(() => pipelineSql(ctx)),
     ),
-    shardsFor: async (jobId) => {
-      const stores = createJobPipelineStoresFromSql(sql);
-      return (
-        (await stores.definitions.getDefinition(jobId))?.config.processing
-          .shards ?? []
-      );
-    },
+    shardsFor: (jobId) => shardsForPipelineJob(ctx, jobId),
     // Issue #5885 (6c): the flipped deliver node runs generic
     // deliver.apply, so the host wires the real sink — the
     // deliver door — instead of leaving the screener sink
@@ -430,9 +424,9 @@ export function deliverStepDepsForScheduledAgent(
 
 /**
  * The options-step wiring for this host residency (issue #4452):
- * the mirror of optionsStepDepsForWorkflow, over the host's own
- * storage. The definition + artifact stores are the DO-SQLite
- * adapters the host control plane itself reads, so the resolving
+ * the mirror of optionsStepDepsForWorkflow, over the same D1
+ * stores. The definition + artifact stores are the D1 adapters
+ * the host control plane itself reads, so the resolving
  * steps read the dispatch request back from the definition the
  * host defined; the chain source resolves per invocation from
  * the run's broker stage input (#3960, the shared residency
@@ -446,8 +440,7 @@ export function deliverStepDepsForScheduledAgent(
 export function optionsStepDepsForScheduledAgent(
   ctx: ScheduledTasksPipelineContext,
 ): OptionsWorkflowStepDeps {
-  const sql = pipelineSql(ctx);
-  const stores = createJobPipelineStoresFromSql(sql);
+  const stores = pipelineStores(ctx);
   return {
     definitions: stores.definitions,
     artifacts: stores.artifacts,
@@ -508,34 +501,26 @@ function feedRunSettledObserverFor(ctx: ScheduledTasksPipelineContext) {
 }
 
 /**
- * Issue #4360 — the host's durable stage-event store. The ScheduledAgent
- * DO owns the pipeline, so its SQLite is the store's home; the queue
- * consumer's persist call lands here through the agent's RPC surface.
+ * Issue #4360 / #6609 — the host's durable stage-event store. The
+ * ScheduledAgent pipeline is D1-resident, so the D1 adapter is
+ * authoritative; the queue consumer's persist call lands here
+ * through the agent's RPC surface.
  */
 export function createScheduledAgentStageEventStore(
   ctx: ScheduledTasksPipelineContext,
 ): JobStageEventStore {
-  return createDoSqliteJobStageEventStore(pipelineSql(ctx));
+  return createD1JobStageEventStore(pipelineDb(ctx));
 }
 
 /**
- * Issue #6235 — the host's run recorder. The run ledger reads D1
- * only (#6103), so a terminal record written only to this host's
- * DO SQLite is invisible there unless a projection carrier copies
- * it — and the carrier is tenant configuration this host cannot
- * assume. When AGENT_DB is bound the host therefore records
- * through the same D1 adapter the workflow residency uses (the
- * engine's D1 records show with no carrier configured); the DO
- * adapter remains only for deployments with no D1 binding.
+ * Issue #6235 / #6609 — the host's run recorder. The run ledger
+ * reads D1 only (#6103), and the ScheduledAgent pipeline stores
+ * are D1-only, so terminal records go through the same D1
+ * adapter the workflow residency uses. An unbound AGENT_DB
+ * refuses by name in pipelineDb; there is no DO fallback.
  */
-function jobRunRecorderForScheduledAgent(
-  ctx: ScheduledTasksPipelineContext,
-  sql: SqlStorage,
-) {
-  if (!ctx.env.AGENT_DB) {
-    return jobRunRecorderFromStore(new SqlJobRunRecordStore(sql));
-  }
-  const runs = new D1JobRunRecordStore(createD1JobRunRecordDb(ctx.env.AGENT_DB));
+function jobRunRecorderForScheduledAgent(ctx: ScheduledTasksPipelineContext) {
+  const runs = new D1JobRunRecordStore(createD1JobRunRecordDb(pipelineDb(ctx)));
   return {
     recordRun: (record: Parameters<typeof runs.record>[0]) => runs.record(record),
     listRuns: (jobId: string, limit?: number) => runs.listByJob(jobId, limit),
@@ -548,8 +533,7 @@ export function createScheduledAgentPipelineControl(
   userLogin?: string,
 ): JobPipelineControl {
   if (ctx.control) return ctx.control;
-  const sql = pipelineSql(ctx);
-  const stores = createJobPipelineStoresFromSql(sql);
+  const stores = pipelineStores(ctx);
   const messaging = createJobPipelineMessaging(ctx.env);
   // Issue #3967 — the one dead-letter store, or null when this deployment
   // has no D1 binding (the run's failure is unchanged either way).
@@ -567,17 +551,12 @@ export function createScheduledAgentPipelineControl(
   // per-domain j1j7 switch first and no-op when it is OFF.
   return createJobPipelineControl({
     stores,
-      runRecorder: jobRunRecorderForScheduledAgent(ctx, sql),
+      runRecorder: jobRunRecorderForScheduledAgent(ctx),
       runSettledObserver: feedRunSettledObserverFor(ctx),
       publisher: messaging.ports?.publisher ?? null,
-    // Issue #6028 — the stage-level terminal rows land in this host's
-    // own DO SQLite (the same store the stage-event consumer writes).
+    // Issue #6609 — stage rows land in D1, the same store the
+    // stage-event consumer writes through this host's RPC surface.
     stageEvents: createScheduledAgentStageEventStore(ctx),
-    // Issue #6202 — the D1 mirror of the stage rows, when this deployment
-    // has a D1 binding. Best-effort; the DO row is authoritative.
-    ...(ctx.env.AGENT_DB
-      ? { stageEventsMirror: createD1JobStageEventStore(ctx.env.AGENT_DB) }
-      : {}),
     // Issue #3967 — a poison run lands in the platform's DLQ, the surface
     // an operator already inspects. Best-effort: an unbound AGENT_DB (or a
     // failing store) leaves the run's own failure exactly as it was.
@@ -628,7 +607,7 @@ export async function ensureScheduledAgentFeedJobs(
   ctx: ScheduledTasksPipelineContext,
   control: JobPipelineControl,
 ): Promise<string[]> {
-  const stores = createJobPipelineStoresFromSql(pipelineSql(ctx));
+  const stores = pipelineStores(ctx);
   return ensureFeedPipelineJobs(control, stores, envStrings(ctx.env));
 }
 
@@ -637,7 +616,7 @@ export async function ensureScheduledAgentEnrichJobs(
   ctx: ScheduledTasksPipelineContext,
   control: JobPipelineControl,
 ): Promise<string[]> {
-  const stores = createJobPipelineStoresFromSql(pipelineSql(ctx));
+  const stores = pipelineStores(ctx);
   return ensureEnrichPipelineJobs(control, stores, envStrings(ctx.env));
 }
 
@@ -646,7 +625,7 @@ export async function ensureScheduledAgentAnalyzeJobs(
   ctx: ScheduledTasksPipelineContext,
   control: JobPipelineControl,
 ): Promise<string[]> {
-  const stores = createJobPipelineStoresFromSql(pipelineSql(ctx));
+  const stores = pipelineStores(ctx);
   return ensureAnalyzePipelineJobs(control, stores, envStrings(ctx.env));
 }
 
@@ -655,7 +634,7 @@ export async function ensureScheduledAgentGenerateJobs(
   ctx: ScheduledTasksPipelineContext,
   control: JobPipelineControl,
 ): Promise<string[]> {
-  const stores = createJobPipelineStoresFromSql(pipelineSql(ctx));
+  const stores = pipelineStores(ctx);
   return ensureGeneratePipelineJobs(control, stores, envStrings(ctx.env));
 }
 
@@ -664,7 +643,7 @@ export async function ensureScheduledAgentDeliverJobs(
   ctx: ScheduledTasksPipelineContext,
   control: JobPipelineControl,
 ): Promise<string[]> {
-  const stores = createJobPipelineStoresFromSql(pipelineSql(ctx));
+  const stores = pipelineStores(ctx);
   return ensureDeliverPipelineJobs(control, stores, envStrings(ctx.env));
 }
 
@@ -673,7 +652,7 @@ export async function ensureScheduledAgentChainJobs(
   ctx: ScheduledTasksPipelineContext,
   control: JobPipelineControl,
 ): Promise<string[]> {
-  const stores = createJobPipelineStoresFromSql(pipelineSql(ctx));
+  const stores = pipelineStores(ctx);
   return ensureChainPipelineJobs(control, stores, envStrings(ctx.env));
 }
 
@@ -734,7 +713,7 @@ export async function refreshScheduledAgentChainDefinition(
       `${PIPELINE_CHAIN_CODES.chainNotFound}: no pipeline chain with id "${jobId}" exists in the chain catalog.`,
     );
   }
-  const stores = createJobPipelineStoresFromSql(pipelineSql(ctx));
+  const stores = pipelineStores(ctx);
   await refreshChainDefinitionFromStoredStages(control, stores, chain);
 }
 
@@ -832,8 +811,8 @@ export async function dispatchScheduledPipelineJob(
 /**
  * The workflow start path: dispatch a run as a JobPipelineWorkflow
  * instance. The payload is ids + trigger only (claim-check); the
- * job's definition is mirrored into the workflow (D1) residency
- * through defineJob first — configuration moves through the
+ * job's definition is ensured and read in the D1 residency
+ * the workflow reads — configuration moves through the
  * control plane's own operation, never through the payload.
  * Refuses by name when the workflow binding is not configured.
  */
@@ -872,69 +851,17 @@ export async function startPipelineJobWorkflow(
       "job_pipeline_workflow_not_configured: the AGENT_DB binding the workflow residency reads is not configured in this deployment.",
     );
   }
-  // Mirror the definition into the workflow residency.
+  // Ensure and read the definition in the D1 residency the
+  // workflow reads — the host control and the workflow share
+  // the same stores now, so there is no DO→D1 mirror step.
   const hostControl = createScheduledAgentPipelineControl(ctx);
   await ensureScheduledAgentPipelineJobs(ctx, hostControl);
-  const hostStores = createJobPipelineStoresFromSql(pipelineSql(ctx));
-  const definition = await hostStores.definitions.getDefinition(jobId);
+  const stores = pipelineStores(ctx);
+  const definition = await stores.definitions.getDefinition(jobId);
   if (!definition) {
     throw new Error(
       `job_not_found: no pipeline job "${jobId}" is defined on the ScheduledAgent host; nothing was dispatched to the workflow.`,
     );
-  }
-  const d1Stores = createJobPipelineStoresFromD1(ctx.env.AGENT_DB);
-  const d1Runs = new D1JobRunRecordStore(createD1JobRunRecordDb(ctx.env.AGENT_DB));
-  const messaging = createJobPipelineMessaging(ctx.env);
-  // Issue #5823: the feed deps are built once and shared, as in the
-  // host control — the screener steps bind over the same provider.
-  const mirrorFeedDeps = feedStepDepsForScheduledAgent(ctx);
-  // Issue #6250 — the mirror control is built by the ONE factory,
-  // so a mirrored definition's later dispatch emits job.run.settled
-  // exactly like the host control's (the steps never execute here,
-  // but the wiring must not depend on that).
-  const workflowControl = createJobPipelineControl({
-    stores: d1Stores,
-    // The D1 run-record adapter is async; wrap it in the async
-    // recorder seam directly (the workflow adapter's own shape).
-    runRecorder: {
-      recordRun: (record) => d1Runs.record(record),
-      listRuns: (jobId, limit) => d1Runs.listByJob(jobId, limit),
-      latestRun: (jobId) => d1Runs.latestByJob(jobId),
-    },
-    publisher: messaging.ports?.publisher ?? null,
-    steps: createPipelineStepRegistry(
-      mirrorFeedDeps,
-      enrichStepDepsForScheduledAgent(ctx),
-      analyzeStepDepsForScheduledAgent(ctx),
-      generateStepDepsForScheduledAgent(ctx),
-      deliverStepDepsForScheduledAgent(ctx),
-      // Issue #4190 (#3550 S1, wired in #4192; #5823): the screener steps
-      // compose here too — their quote/history deps are bound over the
-      // #3941 provider from the feed deps, not at stage time.
-      screenerStepDepsForScheduledAgent(ctx, mirrorFeedDeps),
-      // Issue #4452: the options steps compose here too, as in the
-      // host control — the same registry in both compositions.
-      // (This control only mirrors the definition; the steps never
-      // execute here, exactly as for the screener steps.)
-      optionsStepDepsForScheduledAgent(ctx),
-      // Issue #4780: the options-chain steps compose here too, as in
-      // the host control — the same registry in both compositions.
-      optionsChainStepDepsForScheduledAgent(ctx),
-      // Issue #5237: research steps (`analyze.ooda` and `evaluate.apply`) compose
-      // into the shared registry in the scheduled-agent residency.
-      createDefaultResearchStepDeps(),
-    ),
-    invocation: "workflow-shard",
-    // Issue #4782 S3 — as the host control above: env only, no
-    // host-global settings map (see the note there).
-    env: envStrings(ctx.env),
-  }, { env: ctx.env });
-  const existing = await d1Stores.definitions.getDefinition(jobId);
-  if (
-    !existing ||
-    JSON.stringify(existing.rawConfig) !== JSON.stringify(definition.rawConfig)
-  ) {
-    await workflowControl.defineJob(definition.rawConfig);
   }
   const started = await startManagedWorkflowInstance(
     workflow as unknown as ManagedWorkflowBinding,
@@ -960,16 +887,13 @@ export async function startPipelineJobWorkflow(
 export async function declarePipelineTasks(
   ctx: ScheduledTasksPipelineContext,
 ): Promise<ThinkScheduledTasks> {
-  // A host without DO SQLite has no pipeline stores and therefore
-  // nothing to declare — the declaration reconciles on every
-  // boot, so absence is a state, not a crash of the agent.
-  const sql = (
-    ctx.agentCtx?.storage as unknown as { sql?: SqlStorage } | undefined
-  )?.sql;
-  if (!sql) {
-    structuredLog.warn("job_pipeline.schedule_declarations_skipped_no_storage", {
+  // A host without AGENT_DB has no D1 pipeline stores and
+  // therefore nothing to declare — the declaration reconciles
+  // on every boot, so absence is a state, not a crash.
+  if (!ctx.env.AGENT_DB) {
+    structuredLog.warn("job_pipeline.schedule_declarations_skipped_no_d1", {
       message:
-        "[job-pipeline] host has no DO SQLite storage; no pipeline schedule declarations were made.",
+        "[job-pipeline] AGENT_DB is not bound; no pipeline schedule declarations were made.",
     });
     return {};
   }
@@ -1018,8 +942,7 @@ export async function declarePipelineTasks(
   }
   // Issue #4351 — one declaration filter for every declarer: a pipeline task the
   // user paused or deleted is not declared, so Think cancels its schedule and
-  // never arms it again. The store is the D1 unified store (#6503);
-  // with no AGENT_DB binding the filter declares as before.
+  // never arms it again. The store is the D1 unified store (#6503).
   const d1 = ctx.env.AGENT_DB;
   if (!d1) return declared;
   const { unifiedSchedules } = createD1UnifiedSchedulePorts({ d1 });

@@ -12,8 +12,8 @@
  * options.runRoot.
  *
  * This slice composes the options steps into the host-side registry
- * with host-side deps (definition + artifact stores over the host's
- * DO storage, chain source from the host's seams, the stage-message
+ * with host-side deps (definition + artifact stores over D1,
+ * chain source from the host's seams, the stage-message
  * queue from env), following the screener precedent in both
  * residencies (#4192). The registration is the shared resolving one
  * (registerOptionsWorkflowSteps) — the same step names, the same
@@ -31,11 +31,13 @@ import {
   optionsStepDepsForScheduledAgent,
   type ScheduledTasksPipelineContext,
 } from "../src/agents/scheduledTasksPipeline";
-import { createJobPipelineStoresFromSql } from "../src/data/createJobPipelinePorts";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import { createJobPipelineStoresFromD1 } from "../src/data/createJobPipelinePorts";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
 import { createInMemoryJobPipelineStores } from "../src/data/inMemoryJobPipelineAdapter";
 import { InMemoryJobRunRecordStore } from "../src/data/inMemoryJobRunRecordAdapter";
-import type { SqlStorage } from "../src/orm";
 import {
   JobPipelineControl,
   jobRunRecorderFromStore,
@@ -59,6 +61,7 @@ import {
 } from "../src/workflows/optionsStepPorts";
 import type { StageQueueSend } from "../src/workflows/stageQueueTransport";
 import { OPTIONS_PIPELINE_STAGES } from "../src/workflows/stageRuntimeIds";
+import { MockD1Database } from "./mock-d1";
 
 /** The node:sqlite DO-storage double (tests/job_pipeline_3534 idiom). */
 class SqliteTestStorage {
@@ -75,6 +78,7 @@ class SqliteTestStorage {
 
 function makeHostContext(env: Partial<Env> = {}) {
   const sql = new SqliteTestStorage();
+  const d1 = new MockD1Database();
   const kv = new Map<string, unknown>();
   const agentCtx = {
     storage: {
@@ -86,10 +90,10 @@ function makeHostContext(env: Partial<Env> = {}) {
     },
   };
   const ctx = {
-    env: env as Env,
+    env: { AGENT_DB: d1 as unknown as Env["AGENT_DB"], ...env } as Env,
     agentCtx: agentCtx as unknown as ScheduledTasksPipelineContext["agentCtx"],
   } satisfies ScheduledTasksPipelineContext;
-  return { ctx, sql: sql as unknown as SqlStorage, kv };
+  return { ctx, d1, kv };
 }
 
 /** A recording queue binding: the SCREENER_EVENTS send seam. */
@@ -227,7 +231,7 @@ describe("options steps in the ScheduledAgent host registry (#4452)", () => {
       input: undefined,
       now: new Date().toISOString(),
     };
-    // Host side: the definition lives in the host DO store, the
+    // Host side: the definition lives in the host D1 store, the
     // registration is fed the host builder's deps.
     const { ctx } = makeHostContext();
     const hostControl = createScheduledAgentPipelineControl(ctx, "tester");
@@ -273,7 +277,7 @@ describe("options steps in the ScheduledAgent host registry (#4452)", () => {
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: makeChain("AAPL") });
     try {
       const { sent, queue } = recordingQueue();
-      const { ctx, sql } = makeHostContext({ SCREENER_EVENTS: queue } as unknown as Partial<Env>);
+      const { ctx, d1 } = makeHostContext({ SCREENER_EVENTS: queue } as unknown as Partial<Env>);
       const control = createScheduledAgentPipelineControl(ctx, "tester");
       const runId = "host-4452:scan:1";
       const jobId = strategyScreenJobId(runId);
@@ -296,9 +300,11 @@ describe("options steps in the ScheduledAgent host registry (#4452)", () => {
         expect(message.artifactKeys.length).toBeGreaterThan(0);
         expect(message.idempotencyKey).toBe(`${runId}::options::${message.stageId}`);
       }
-      const record = new SqlJobRunRecordStore(sql).latestByJob(jobId);
+      const record = await new D1JobRunRecordStore(
+        createD1JobRunRecordDb(d1 as never),
+      ).latestByJob(jobId);
       expect(record?.outcome).toBe("success");
-      const stores = createJobPipelineStoresFromSql(sql);
+      const stores = createJobPipelineStoresFromD1(d1 as never);
       const keys = await stores.artifacts.listArtifactKeys(dispatch.runId);
       // The store also holds the engine's own bookkeeping keys
       // (<nodePath>/output, /stage-output, /step-0); the eight
@@ -317,14 +323,16 @@ describe("options steps in the ScheduledAgent host registry (#4452)", () => {
   });
 
   it("a host-dispatched comparison-shape job refuses by name, as in the workflow residency", async () => {
-    const { ctx, sql } = makeHostContext();
+    const { ctx, d1 } = makeHostContext();
     const control = createScheduledAgentPipelineControl(ctx, "tester");
     const runId = "host-4452:comparison:1";
     const jobId = strategyScreenJobId(runId);
     await control.defineJob(strategyScreenJobDefinition(jobId, COMPARISON_REQUEST, "tester"));
     const dispatch = await control.runJob(jobId, { trigger: "scheduled" });
     expect(dispatch.state).toBe("failed");
-    const record = new SqlJobRunRecordStore(sql).latestByJob(jobId);
+    const record = await new D1JobRunRecordStore(
+      createD1JobRunRecordDb(d1 as never),
+    ).latestByJob(jobId);
     expect(record?.outcome).toBe("failure");
     // The run record carries the refusal's message; the code
     // (stage_port_unavailable) lives on the thrown error, pinned

@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
  * Issue #4002 — the pipeline host's half of the orphan recovery,
- * at the ScheduledAgent host wiring level (DO SQLite, the real
+ * at the ScheduledAgent host wiring level (D1 stores, the real
  * host control): settleOrphanedPipelineRuns ensures the job
  * definitions, then settles every `running` instance as failed
  * with a named orphan error, so the job is dispatchable again.
@@ -11,7 +11,7 @@
  * control, with an idle instance untouched.
  *
  * Harness mirrors tests/analyze_pipeline_host_3537.test.ts: the
- * node:sqlite DO-storage double + the host context.
+ * D1 double + the host context.
  */
 import { describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
@@ -20,9 +20,9 @@ import {
   settleOrphanedPipelineRuns,
   type ScheduledTasksPipelineContext,
 } from "../src/agents/scheduledTasksPipeline";
-import { createJobPipelineStoresFromSql } from "../src/data/createJobPipelinePorts";
-import type { SqlStorage } from "../src/orm";
+import { createJobPipelineStoresFromD1 } from "../src/data/createJobPipelinePorts";
 import type { Env } from "../src/types";
+import { MockD1Database } from "./mock-d1";
 
 /** The node:sqlite DO-storage double (tests/feed_pipeline_host_3543 idiom). */
 class SqliteTestStorage {
@@ -39,6 +39,7 @@ class SqliteTestStorage {
 
 function makeHostContext(env: Partial<Env> = {}) {
   const sql = new SqliteTestStorage();
+  const d1 = new MockD1Database();
   const kv = new Map<string, unknown>();
   const agentCtx = {
     storage: {
@@ -50,10 +51,10 @@ function makeHostContext(env: Partial<Env> = {}) {
     },
   };
   const ctx = {
-    env: env as Env,
+    env: { AGENT_DB: d1 as unknown as Env["AGENT_DB"], ...env } as Env,
     agentCtx: agentCtx as unknown as ScheduledTasksPipelineContext["agentCtx"],
   } satisfies ScheduledTasksPipelineContext;
-  return { ctx, sql };
+  return { ctx, sql, d1 };
 }
 
 const DUMMY = {
@@ -68,10 +69,10 @@ const DUMMY = {
 
 describe("settleOrphanedPipelineRuns on the host (#4002)", () => {
   it("settles a running instance as failed and the job dispatches again", async () => {
-    const { ctx, sql } = makeHostContext();
+    const { ctx, d1 } = makeHostContext();
     const control = createScheduledAgentPipelineControl(ctx);
     await control.defineJob(DUMMY);
-    const stores = createJobPipelineStoresFromSql(sql as unknown as SqlStorage);
+    const stores = createJobPipelineStoresFromD1(d1 as never);
     const instance = await stores.instances.getInstance("dummy");
     if (!instance) throw new Error("no dummy instance");
     await stores.instances.saveInstance({

@@ -10,9 +10,9 @@
  *   becomes a task named
  *   `pipeline-job:<jobId>` whose firing dispatches runJob on the
  *   host's own control plane (a run record lands even when the
- *   run itself refuses — here the dataset store is unbound, so
+ *   run itself refuses — here no R2 capture bucket is bound, so
  *   the firing's run fails FEED_JOB_NOT_CONFIGURED BY NAME);
- * - a host without DO SQLite declares nothing (never crashes);
+ * - a host without AGENT_DB declares nothing (never crashes);
  * - the workflow start path: the injected seam wins; otherwise
  *   the JOB_PIPELINE_WORKFLOW binding + AGENT_DB are required by
  *   name (job_pipeline_workflow_not_configured);
@@ -43,7 +43,10 @@ import {
   PIPELINE_TASK_ID_PREFIX,
   type ScheduledTasksPipelineContext,
 } from "../src/agents/scheduledTasksPipeline";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
 import {
   createJobPipelineEventsHandler,
   extractJobPipelineCompletion,
@@ -56,6 +59,7 @@ import {
   STAGE_IDS_BY_FAMILY,
 } from "../src/workflows/stageMessage";
 import type { Env } from "../src/types";
+import { MockD1Database } from "./mock-d1";
 
 /** The node:sqlite DO-storage double (tests/job_pipeline_3534 idiom). */
 class SqliteTestStorage {
@@ -72,6 +76,7 @@ class SqliteTestStorage {
 
 function makeHostContext(env: Partial<Env> = {}) {
   const sql = new SqliteTestStorage();
+  const d1 = new MockD1Database();
   const kv = new Map<string, unknown>();
   const agentCtx = {
     storage: {
@@ -83,10 +88,10 @@ function makeHostContext(env: Partial<Env> = {}) {
     },
   };
   const ctx = {
-    env: env as Env,
+    env: { AGENT_DB: d1 as unknown as Env["AGENT_DB"], ...env } as Env,
     agentCtx: agentCtx as unknown as ScheduledTasksPipelineContext["agentCtx"],
   } satisfies ScheduledTasksPipelineContext;
-  return { ctx, sql, kv };
+  return { ctx, sql, kv, d1 };
 }
 
 function jobEvent(type: string, data: Record<string, unknown>): MessageEnvelope {
@@ -194,24 +199,25 @@ describe("pipeline host wiring (#3543)", () => {
   });
 
   it("a firing dispatches runJob on the host plane — a run record lands", async () => {
-    const { ctx, sql } = makeHostContext();
+    const { ctx, d1 } = makeHostContext();
     const tasks = await declarePipelineTasks(ctx);
     await tasks[`${PIPELINE_TASK_ID_PREFIX}yahoo-nasdaq100-quotes`].handler({} as never);
-    const store = new SqlJobRunRecordStore(sql as unknown as SqlStorage);
-    let records = store.listByJob("yahoo-nasdaq100-quotes", 5);
+    const store = new D1JobRunRecordStore(createD1JobRunRecordDb(d1 as never));
+    let records = await store.listByJob("yahoo-nasdaq100-quotes", 5);
     for (let i = 0; i < 40 && records.length === 0; i++) {
       await new Promise((r) => setTimeout(r, 50));
-      records = store.listByJob("yahoo-nasdaq100-quotes", 5);
+      records = await store.listByJob("yahoo-nasdaq100-quotes", 5);
     }
     expect(records).toHaveLength(1);
     expect(records[0].system).toBe("job-pipeline");
-    // No AGENT_DB in this host context ⇒ the dataset store is
-    // unbound and the run refuses BY NAME (never a silent fetch).
+    // D1 is bound but no R2 capture bucket is, so the provider
+    // cannot be capture-wired and the run refuses BY NAME
+    // (never a silent fetch).
     expect(records[0].outcome).toBe("failure");
     expect(records[0].error ?? "").toContain("FEED_JOB_NOT_CONFIGURED");
   });
 
-  it("a host without DO SQLite declares nothing and does not throw", async () => {
+  it("a host without AGENT_DB declares nothing and does not throw", async () => {
     const ctx = {
       env: {} as Env,
       agentCtx: { storage: {} } as unknown as ScheduledTasksPipelineContext["agentCtx"],
@@ -241,10 +247,11 @@ describe("pipeline host wiring (#3543)", () => {
       startPipelineJobWorkflow(ctx, "yahoo-nasdaq100-quotes", { trigger: "manual" }),
     ).rejects.toThrow(/job_pipeline_workflow_not_configured/);
     const withBinding = makeHostContext({
+      AGENT_DB: undefined,
       JOB_PIPELINE_WORKFLOW: {
         create: async () => ({ id: "wf-1" }),
       } as unknown as Env["JOB_PIPELINE_WORKFLOW"],
-    });
+    } as unknown as Partial<Env>);
     await expect(
       startPipelineJobWorkflow(withBinding.ctx, "yahoo-nasdaq100-quotes", { trigger: "manual" }),
     ).rejects.toThrow(/job_pipeline_workflow_not_configured/);

@@ -100,11 +100,7 @@ import { createAnalyzedDatasetPorts } from "../data/createAnalyzedDatasetPorts";
 import { defaultUniverseId } from "../config/defaultUniverse";
 import type { GoalScreenArtifactOutcome } from "./goalScreenReports";
 import { resolveJobDefinition } from "./jobPipelineConfig";
-import {
-  createJobPipelineStoresFromD1,
-  createJobPipelineStoresFromSql,
-} from "../data/createJobPipelinePorts";
-import type { SqlStorage } from "../orm";
+import { createJobPipelineStoresFromD1 } from "../data/createJobPipelinePorts";
 import {
   OPTIONS_SCREEN_ROOT_STEP,
   OPTIONS_SCREEN_STEP,
@@ -2149,25 +2145,23 @@ export function buildDeliverDoor(env: Env): ScreenerStepDeps["deliverOutcome"] {
  * store / deliver doors are real (the orchestrator stub, lazy).
  */
 export function screenerStepDepsForScheduledAgent(
-  ctx: { env: Env; agentCtx?: { storage?: { sql?: SqlStorage } } },
+  ctx: { env: Env },
   feedDeps: FeedStepDeps,
 ): ScreenerStepDeps {
   const env = ctx.env;
-  // Issue #6074 — the goal options leg's pipeline stores over
-  // this host's DO SQLite (the same construction
-  // optionsStepDepsForScheduledAgent uses, so the leg's writer
-  // writes the store the registry's optionsDeps reads). The guard
-  // is pipelineSql's (job_pipeline_host_unavailable) — the
-  // residency's own guard, not the leg's: the control plane
-  // cannot be built without this storage at all.
-  const optionsLegStores = (): JobPipelineStores => {
-    const sql = ctx.agentCtx?.storage?.sql;
-    if (!sql) {
+  // Issue #6074 / #6609 — the goal options leg's pipeline stores
+  // over D1 (the same stores optionsStepDepsForScheduledAgent
+  // reads). Unbound AGENT_DB refuses by name at leg time, never
+  // a DO SQLite fallback.
+  const optionsLegStores = (kind: "definition" | "artifact"): JobPipelineStores => {
+    if (!env.AGENT_DB) {
       throw new Error(
-        "job_pipeline_host_unavailable: the ScheduledAgent host has no DO SQLite storage to build the pipeline stores over.",
+        kind === "definition"
+          ? "GOAL_OPTIONS_LEG_NO_DEFINITION_STORE: the goal options leg needs the AGENT_DB binding for the residency's definition store — refusing a goal options leg with nowhere to define its job (#6074)."
+          : "GOAL_OPTIONS_LEG_NO_ARTIFACT_STORE: the goal options leg needs the AGENT_DB binding for the residency's artifact store — refusing a goal options leg with nowhere to read the screen artifact (#6074).",
       );
     }
-    return createJobPipelineStoresFromSql(sql);
+    return createJobPipelineStoresFromD1(env.AGENT_DB);
   };
   return {
     agentFor: (userLogin) => screenerAgentStub(env, userLogin),
@@ -2208,9 +2202,9 @@ export function screenerStepDepsForScheduledAgent(
     // screen reader, over this residency's pipeline stores (the
     // same stores the resolving options steps read).
     goalOptionsLegDefineFor: async (raw: Record<string, unknown>) =>
-      saveGoalOptionsLegDefinition(optionsLegStores(), raw),
+      saveGoalOptionsLegDefinition(optionsLegStores("definition"), raw),
     goalOptionsLegScreenFor: async (legRunId: string) =>
-      readGoalOptionsLegScreen(optionsLegStores(), legRunId),
+      readGoalOptionsLegScreen(optionsLegStores("artifact"), legRunId),
   };
 }
 
