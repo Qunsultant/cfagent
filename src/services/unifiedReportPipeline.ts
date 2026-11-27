@@ -281,19 +281,19 @@ export interface CanonicalReportInput {
  * absence is returned as null (the caller records it; a missing row
  * must never fail the run that already produced its result).
  */
-export function storeReportStage(
+export async function storeReportStage(
   orm: {
     storeCanonicalReport: (
       input: CanonicalReportInput,
       env?: { AI?: any; VECTOR_MEMORY?: any }
-    ) => { reportId: string; created: boolean } | null;
+    ) => Promise<{ reportId: string; created: boolean } | null>;
   } | null | undefined,
   input: CanonicalReportInput,
   env?: { AI?: any; VECTOR_MEMORY?: any }
-): { reportId: string; created: boolean } | null {
+): Promise<{ reportId: string; created: boolean } | null> {
   if (!orm || typeof orm.storeCanonicalReport !== "function") return null;
   try {
-    return orm.storeCanonicalReport(input, env);
+    return await orm.storeCanonicalReport(input, env);
   } catch {
     return null;
   }

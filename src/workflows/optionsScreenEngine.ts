@@ -56,8 +56,8 @@ import type { JobArtifactStore } from "../data/jobPipelinePorts";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { normalizeJobRunTrigger } from "../data/jobRunRecordPorts";
 import { createInMemoryJobPipelineStores } from "../data/inMemoryJobPipelineAdapter";
-import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
 import { InMemoryJobRunRecordStore } from "../data/inMemoryJobRunRecordAdapter";
+import { jobRunRecorderFromEnv } from "../data/createJobRunRecordPorts";
 import type { OtelJobPipelineObservers } from "../observability/otelJobPipelineObservers";
 import {
   jobRunRecorderFromStore,
@@ -353,11 +353,21 @@ export interface OptionsEngineStores {
  * Engine stores over a host Durable Object's SQLite: the run record is
  * durable in the caller's DO (the same handle the leg's stage claims and
  * delivery suppressor already use).
+ *
+ * Issue #6101 — the run record itself lives in D1, not the DO: the
+ * recorder resolves from `env` (AGENT_DB + the ledger attribution).
+ * A host with no env binding gets the fail-closed recorder — a write
+ * throws a named error rather than silently vanishing, reads return
+ * empty. The pipeline stores stay DO (`job_pipeline_*` framework
+ * state); only the run recorder moved.
  */
-export function optionsEngineStoresFromSql(sql: SqlStorage): OptionsEngineStores {
+export function optionsEngineStoresFromSql(
+  sql: SqlStorage,
+  env?: { AGENT_DB?: unknown; IAAA_TENANT_ID?: unknown; PLATFORM_ID?: unknown } | null,
+): OptionsEngineStores {
   return {
     stores: createJobPipelineStoresFromSql(sql),
-    runRecorder: jobRunRecorderFromStore(new SqlJobRunRecordStore(sql)),
+    runRecorder: jobRunRecorderFromEnv(env ?? null),
   };
 }
 

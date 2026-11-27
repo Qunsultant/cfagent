@@ -106,7 +106,6 @@ import {
   deleteCanonicalReport,
   ensureScheduledReportsTable,
   getCanonicalReport,
-  getCanonicalReportFanoutOutcome,
   getScheduledReportById,
   listScheduledReports,
   listUsageEvents,
@@ -117,7 +116,9 @@ import {
   storeReportAtGenerationWithR2,
 } from "../src/services/scheduledReports";
 import { runCanonicalIndexBackfillPage } from "../src/services/reportSemanticIndex";
+import { DoSqliteCanonicalReportStore } from "../src/data/doSqliteCanonicalReportStoreAdapter";
 import { DoSqliteUsageEventStore } from "../src/data/doSqliteUsageEventAdapter";
+import { MockD1Database } from "./mock-d1";
 
 /** SqlStorage-shaped executor over node:sqlite (real semantics).
  *  Write results carry rowsWritten, mirroring the DO cursor. */
@@ -474,15 +475,24 @@ describe("characterization 4d [module]: report confirmations + settings pair", (
   it("GET /trading/reports/confirmations joins a run through its canonical report row", async () => {
     const { agent, sql } = makeAgent();
     const ctx = dispatchCtx(agent);
-    const stored = storeReportAtGeneration(sql as never, {
-      runId: "screener:2026-10-29T10:00:00.000Z",
-      generationId: "screener:2026-10-29T10:00:00.000Z",
-      userLogin: "alice",
-      title: "Screen",
-      source: "screener",
-      summary: "s",
-      body: {},
-    });
+    // #6101 step 8: seeded through the D1 seam now. NOTE — the
+    // route's join still serves through the DO read port in src
+    // (findIdByRunId over mas_reports), so it sees no row until
+    // that join is migrated to D1; flagged to the parent, left failing.
+    const mock = new MockD1Database();
+    const env = { AGENT_DB: mock as unknown as never };
+    const stored = await storeReportAtGeneration(
+      {
+        runId: "screener:2026-10-29T10:00:00.000Z",
+        generationId: "screener:2026-10-29T10:00:00.000Z",
+        userLogin: "alice",
+        title: "Screen",
+        source: "screener",
+        summary: "s",
+        body: {},
+      },
+      env,
+    );
     expect(stored).not.toBeNull();
     const cid = createReportConfirmation(ctx, "screener", JSON.stringify({ delivery: { channel: "email" } }), stored!.reportId);
     const res = await handleReportsRoutes(
@@ -492,6 +502,7 @@ describe("characterization 4d [module]: report confirmations + settings pair", (
       SESSION,
       {
         ensureTables: () => agent.ensureTables(),
+        env,
         reportConfirmationTtlMs: () => 24 * 60 * 60 * 1000,
         decideReportConfirmation: (id: string, status: "approved" | "rejected" | "expired", by: string | null) =>
           decideReportConfirmation(ctx, id, status, by),
@@ -507,6 +518,7 @@ describe("characterization 4d [module]: report confirmations + settings pair", (
       SESSION,
       {
         ensureTables: () => agent.ensureTables(),
+        env,
         reportConfirmationTtlMs: () => 24 * 60 * 60 * 1000,
         decideReportConfirmation: (id: string, status: "approved" | "rejected" | "expired", by: string | null) =>
           decideReportConfirmation(ctx, id, status, by),
@@ -636,6 +648,15 @@ describe("characterization 4d [seam]: canonical report store", () => {
   function seamSql() {
     return new SqliteTestStorage() as never;
   }
+  // #6101 step 8: the canonical seam writes D1 agent_reports now
+  // (the DO mas_reports table is frozen); reads go through the D1
+  // list/search/by-id functions with an env-bound MockD1Database.
+  // The DO sql handle stays for the usage-metering companion tests
+  // below, which still own their DO store.
+  function seamEnv() {
+    const mock = new MockD1Database();
+    return { AGENT_DB: mock as unknown as never };
+  }
   const input = (over: Record<string, unknown> = {}) => ({
     runId: "run-1",
     generationId: "gen-1",
@@ -647,73 +668,62 @@ describe("characterization 4d [seam]: canonical report store", () => {
     ...over,
   });
 
-  async function settledFanout(sql: never, reportId: string) {
-    for (let i = 0; i < 50; i++) {
-      const outcome = getCanonicalReportFanoutOutcome(sql, reportId);
-      if (outcome && outcome.aiSearch !== "pending") return outcome;
-      await new Promise((r) => setTimeout(r, 10));
-    }
-    return getCanonicalReportFanoutOutcome(sql, reportId);
-  }
-
   it("stores inline with a recorded fan-out outcome; reads back byte-identical", async () => {
-    const sql = seamSql();
-    const stored = storeReportAtGeneration(sql, input());
+    const env = seamEnv();
+    const stored = await storeReportAtGeneration(input(), env);
     expect(stored?.created).toBe(true);
     expect(stored?.fanout.outcome).toBe("stored_inline");
     expect(stored?.fanout.body).toBe("inline");
-    const hit = getCanonicalReport(sql, stored!.reportId);
+    const hit = await getCanonicalReport(env, stored!.reportId);
     expect(hit?.title).toBe("Daily screen");
     expect(hit?.body).toBe(JSON.stringify({ hello: "world" }));
     expect(hit?.bodyR2Key).toBeNull();
-    const outcome = await settledFanout(sql, stored!.reportId);
-    expect(outcome?.outcome).toBe("stored_inline");
-    expect(outcome?.vectorize).toBe("not_attempted");
-    expect(outcome?.aiSearch).toBe("not_attempted");
+    // #6101: D1 carries no fan-out column — the read-back outcome
+    // is ALWAYS null (named loss). The store result above still
+    // carries the outcome as known at return time.
+    expect(hit?.fanoutOutcome).toBeNull();
   });
 
   it("dedupes on (generation, owner): second store returns the same row, still one row", async () => {
-    const sql = seamSql();
-    const first = storeReportAtGeneration(sql, input());
-    const second = storeReportAtGeneration(sql, input({ title: "Changed title" }));
+    const env = seamEnv();
+    const first = await storeReportAtGeneration(input(), env);
+    const second = await storeReportAtGeneration(input({ title: "Changed title" }), env);
     expect(second?.created).toBe(false);
     expect(second?.reportId).toBe(first?.reportId);
     expect(second?.fanout.outcome).toBe("deduped");
-    expect(listScheduledReports(sql, { userLogin: "alice" })).toHaveLength(1);
-    expect(getCanonicalReport(sql, first!.reportId)?.title).toBe("Daily screen");
+    expect(await listScheduledReports(env, { userLogin: "alice" })).toHaveLength(1);
+    expect((await getCanonicalReport(env, first!.reportId))?.title).toBe("Daily screen");
     // INVERTED for #2398 (§7 — this was the #2359 as-found pin):
     // the generation UNIQUE index is tenant-scoped now —
     // (user_login, generation_id), matching the dedupe SELECT —
     // so a second tenant storing the same generation id lands
     // its OWN row (a stored outcome, no REPORT_FANOUT_FAILED),
     // and the first tenant's row is untouched.
-    const other = storeReportAtGeneration(sql, input({ userLogin: "bob", title: "Bob screen" }));
+    const other = await storeReportAtGeneration(input({ userLogin: "bob", title: "Bob screen" }), env);
     expect(other?.created).toBe(true);
     expect(other?.reportId).not.toBe(first?.reportId);
     expect(other?.fanout.outcome).toBe("stored_inline");
-    const otherOutcome = await settledFanout(sql, other!.reportId);
-    expect(otherOutcome?.outcome).toBe("stored_inline");
-    expect(listScheduledReports(sql, {})).toHaveLength(2);
-    expect(listScheduledReports(sql, { userLogin: "alice" })).toHaveLength(1);
-    expect(listScheduledReports(sql, { userLogin: "bob" })).toHaveLength(1);
-    expect(getCanonicalReport(sql, other!.reportId)?.title).toBe("Bob screen");
-    expect(getCanonicalReport(sql, first!.reportId)?.title).toBe("Daily screen");
+    expect(await listScheduledReports(env, {})).toHaveLength(2);
+    expect(await listScheduledReports(env, { userLogin: "alice" })).toHaveLength(1);
+    expect(await listScheduledReports(env, { userLogin: "bob" })).toHaveLength(1);
+    expect((await getCanonicalReport(env, other!.reportId))?.title).toBe("Bob screen");
+    expect((await getCanonicalReport(env, first!.reportId))?.title).toBe("Daily screen");
     // And bob's own re-store dedupes against HIS row, not alice's.
-    const bobAgain = storeReportAtGeneration(sql, input({ userLogin: "bob", title: "Bob changed" }));
+    const bobAgain = await storeReportAtGeneration(input({ userLogin: "bob", title: "Bob changed" }), env);
     expect(bobAgain?.created).toBe(false);
     expect(bobAgain?.reportId).toBe(other?.reportId);
-    expect(listScheduledReports(sql, {})).toHaveLength(2);
+    expect(await listScheduledReports(env, {})).toHaveLength(2);
   });
 
-  it("refuses an owner-less write (null, no row) and bad input", () => {
-    const sql = seamSql();
-    expect(storeReportAtGeneration(sql, input({ userLogin: "" }))).toBeNull();
-    expect(storeReportAtGeneration(sql, input({ runId: "" }))).toBeNull();
-    expect(listScheduledReports(sql, {})).toEqual([]);
+  it("refuses an owner-less write (null, no row) and bad input", async () => {
+    const env = seamEnv();
+    expect(await storeReportAtGeneration(input({ userLogin: "" }), env)).toBeNull();
+    expect(await storeReportAtGeneration(input({ runId: "" }), env)).toBeNull();
+    expect(await listScheduledReports(env, {})).toEqual([]);
   });
 
   it("R2 path: body put BEFORE the row insert; the row keeps only the pointer", async () => {
-    const sql = seamSql();
+    const env = seamEnv();
     const objects = new Map<string, string>();
     const order: string[] = [];
     const bucket = {
@@ -729,46 +739,46 @@ describe("characterization 4d [seam]: canonical report store", () => {
         objects.delete(key);
       },
     };
-    const stored = await storeReportAtGenerationWithR2(sql, { REPORTS_BUCKET: bucket as never }, input());
+    const stored = await storeReportAtGenerationWithR2({ ...env, REPORTS_BUCKET: bucket as never }, input());
     expect(stored?.created).toBe(true);
     expect(stored?.fanout.outcome).toBe("stored_r2");
-    const hit = getCanonicalReport(sql, stored!.reportId);
+    const hit = await getCanonicalReport(env, stored!.reportId);
     expect(hit?.body).toBe("");
     expect(hit?.bodyR2Key).toBe(`reports/${stored!.reportId}.json`);
     expect(objects.get(hit!.bodyR2Key!)).toBe(JSON.stringify({ hello: "world" }));
     // The coupled delete removes the object with the row.
-    expect(await deleteCanonicalReport(sql, { REPORTS_BUCKET: bucket as never }, stored!.reportId)).toBe(true);
+    expect(await deleteCanonicalReport({ ...env, REPORTS_BUCKET: bucket as never }, stored!.reportId)).toBe(true);
     expect(objects.size).toBe(0);
-    expect(getCanonicalReport(sql, stored!.reportId)).toBeNull();
+    expect(await getCanonicalReport(env, stored!.reportId)).toBeNull();
   });
 
   it("R2 put failure falls back to the inline shape and records inline_fallback", async () => {
-    const sql = seamSql();
+    const env = seamEnv();
     const bucket = {
       put: async () => {
         throw new Error("r2 down");
       },
     };
-    const stored = await storeReportAtGenerationWithR2(sql, { REPORTS_BUCKET: bucket as never }, input());
+    const stored = await storeReportAtGenerationWithR2({ ...env, REPORTS_BUCKET: bucket as never }, input());
     expect(stored?.created).toBe(true);
     expect(stored?.fanout.outcome).toBe("stored_inline_fallback");
     expect(stored?.fanout.code).toBe("DATA_REPORT_FANOUT_DEGRADED");
-    const hit = getCanonicalReport(sql, stored!.reportId);
+    const hit = await getCanonicalReport(env, stored!.reportId);
     expect(hit?.body).toBe(JSON.stringify({ hello: "world" }));
     expect(hit?.bodyR2Key).toBeNull();
   });
 
-  it("search/list/by-id honour owner scoping exactly as the legacy reads", () => {
-    const sql = seamSql();
-    storeReportAtGeneration(sql, input());
-    storeReportAtGeneration(sql, input({ runId: "run-2", generationId: "gen-2", userLogin: "bob", title: "Bob screen" }));
-    expect(searchScheduledReports(sql, "screen", 5, { userLogin: "alice" }).map((h) => h.title)).toEqual(["Daily screen"]);
-    expect(searchScheduledReports(sql, "screen", 5)).toHaveLength(2);
-    expect(listScheduledReports(sql, { userLogin: "bob" }).map((h) => h.title)).toEqual(["Bob screen"]);
-    const aliceId = listScheduledReports(sql, { userLogin: "alice" })[0].id;
-    expect(getScheduledReportById(sql, aliceId, { userLogin: "bob" })).toBeNull();
-    expect(getScheduledReportById(sql, aliceId, { userLogin: "alice" })?.title).toBe("Daily screen");
-    expect(getScheduledReportById(sql, aliceId)?.title).toBe("Daily screen");
+  it("search/list/by-id honour owner scoping exactly as the legacy reads", async () => {
+    const env = seamEnv();
+    await storeReportAtGeneration(input(), env);
+    await storeReportAtGeneration(input({ runId: "run-2", generationId: "gen-2", userLogin: "bob", title: "Bob screen" }), env);
+    expect((await searchScheduledReports(env, "screen", 5, { userLogin: "alice" })).map((h) => h.title)).toEqual(["Daily screen"]);
+    expect(await searchScheduledReports(env, "screen", 5)).toHaveLength(2);
+    expect((await listScheduledReports(env, { userLogin: "bob" })).map((h) => h.title)).toEqual(["Bob screen"]);
+    const aliceId = (await listScheduledReports(env, { userLogin: "alice" }))[0].id;
+    expect(await getScheduledReportById(env, aliceId, { userLogin: "bob" })).toBeNull();
+    expect((await getScheduledReportById(env, aliceId, { userLogin: "alice" }))?.title).toBe("Daily screen");
+    expect((await getScheduledReportById(env, aliceId))?.title).toBe("Daily screen");
   });
 
   it("usage metering round-trips per tenant and refuses bad input", () => {
@@ -846,10 +856,34 @@ describe("characterization 4d [seam]: canonical report store", () => {
 
   it("the index backfill page reads stored rows in creation order", async () => {
     const sql = seamSql();
+    // #6101 step 8: the backfill page is DO-only BY DECISION (the
+    // route + weekly sweep read frozen DO rows via
+    // listIndexBackfillRows; a D1 backfill would need a different
+    // design — list recent D1 rows, re-publish idempotently — and
+    // is not in this slice). So the rows are seeded into the
+    // frozen DO table through its store port, not the D1 seam:
+    // D1-seeded rows are invisible to this page by design.
     ensureScheduledReportsTable(sql);
-    storeReportAtGeneration(sql, input({ createdAt: "2026-10-29T10:00:00.000Z" }));
-    storeReportAtGeneration(sql, input({ runId: "run-2", generationId: "gen-2", createdAt: "2026-10-29T10:01:00.000Z" }));
-    storeReportAtGeneration(sql, input({ runId: "run-3", generationId: "gen-3", createdAt: "2026-10-29T10:02:00.000Z" }));
+    const store = new DoSqliteCanonicalReportStore(sql as never);
+    const seedDo = (over: Record<string, unknown>) => {
+      const base = input(over);
+      store.insertRow({
+        id: `rep-${base.generationId}`,
+        runId: base.runId as string,
+        title: base.title as string,
+        source: base.source as string,
+        summary: base.summary as string,
+        body: JSON.stringify(base.body),
+        createdAt: base.createdAt as string,
+        generationId: base.generationId as string,
+        owner: base.userLogin as string,
+        bodyR2Key: null,
+        fanoutOutcomeJson: "{}",
+      });
+    };
+    seedDo({ createdAt: "2026-10-29T10:00:00.000Z" });
+    seedDo({ runId: "run-2", generationId: "gen-2", createdAt: "2026-10-29T10:01:00.000Z" });
+    seedDo({ runId: "run-3", generationId: "gen-3", createdAt: "2026-10-29T10:02:00.000Z" });
     const page1 = await runCanonicalIndexBackfillPage(undefined, sql, { limit: 2, offset: 0 });
     expect(page1.rows).toBe(2);
     expect(page1.upserted).toBe(0);

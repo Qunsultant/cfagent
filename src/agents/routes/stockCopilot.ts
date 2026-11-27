@@ -54,6 +54,7 @@ import {
   createStockCopilotMemoryPort,
   createStockCopilotPositionPort,
 } from "../../data/createStockCopilotStorePorts";
+import { createJobRunRecordAdapter } from "../../data/createJobRunRecordPorts";
 import type {
   CopilotPositionRecord,
   StockCopilotStoreSqlExecutor,
@@ -310,7 +311,7 @@ export async function handleStockCopilotRoutes(
       // "did the run happen" — lastCycle is a projection of the
       // newest copilot cycle ledger row, never the activity table.
       // The activity list stays as the "Cycle activity" detail feed.
-      const ledgerRow = latestCopilotCycleLedgerRow(ctx.sql);
+      const ledgerRow = await latestCopilotCycleLedgerRow(createJobRunRecordAdapter(ctx.env));
       const lastCycle = ledgerRow
         ? (projectCopilotLedgerRowToLastCycle(ledgerRow) as unknown as Record<string, unknown>)
         : null;

@@ -37,9 +37,8 @@ export async function executeOptionsRegenerate(args: {
     if (!userLogin) return unauthenticatedResponse();
     const payload = (await request.json().catch(() => ({}))) as { reportId?: unknown };
     const wanted = typeof payload.reportId === "string" ? payload.reportId : "";
-    const sql = ctx.ensureTables();
     // Owner-scoped by construction: only the caller's own rows are candidates.
-    const optionsHits = listScheduledReports(sql, { userLogin, limit: 200 }).filter((hit) =>
+    const optionsHits = (await listScheduledReports(ctx.env, { userLogin, limit: 200 })).filter((hit) =>
       hit.source.startsWith("options"),
     );
     const hit = wanted ? optionsHits.find((candidate) => candidate.id === wanted) : optionsHits[0];
@@ -48,7 +47,6 @@ export async function executeOptionsRegenerate(args: {
     }
     const storedBody =
       (await resolveCanonicalReportBodyWithBackfill(
-        sql,
         (ctx as { env?: unknown }).env ?? {},
         hit,
       )) ?? "";

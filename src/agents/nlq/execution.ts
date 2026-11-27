@@ -136,7 +136,7 @@ function nlqUnifiedOptionsService(
  * store never breaks the answer (storeReportAtGeneration logs the
  * failure loudly itself, #876).
  */
-function persistNlqOptionsScreenReport(
+async function persistNlqOptionsScreenReport(
   orm: DatabaseORM,
   userLogin: string,
   filter: { underlyingSymbols?: string[] },
@@ -147,10 +147,10 @@ function persistNlqOptionsScreenReport(
   },
   generatedAt: string,
   env?: Env
-): void {
+): Promise<void> {
   try {
     const generationId = `options_scanner:nlq:${generatedAt}`;
-    orm.storeCanonicalReport(
+    await orm.storeCanonicalReport(
       {
         runId: generationId,
         generationId,
@@ -177,15 +177,15 @@ function persistNlqOptionsScreenReport(
  * body's trigger ("nlq"; REST manual runs record "manual"). Same
  * best-effort rule.
  */
-function persistNlqStockScreenReport(
+async function persistNlqStockScreenReport(
   orm: DatabaseORM,
   userLogin: string,
   run: NLQStockScreenRunResult,
   env?: Env
-): void {
+): Promise<void> {
   try {
     const generationId = `screener:${run.timestamp}`;
-    orm.storeCanonicalReport(
+    await orm.storeCanonicalReport(
       {
         runId: generationId,
         generationId,
@@ -2100,7 +2100,7 @@ async function executeNLQQueryAsyncCore(
       if (deps?.stockScreenPort) {
         try {
           const run = await deps.stockScreenPort.runScreen({ filters: screenFilters, userLogin: login });
-          persistNlqStockScreenReport(orm, login, run, env);
+          await persistNlqStockScreenReport(orm, login, run, env);
           return stockScreenEnvelopeFromServiceRun(plan, run, screenFilters, executedAt);
         } catch (err) {
           return {
@@ -2708,7 +2708,7 @@ async function executeNLQQueryAsyncCore(
         limit: parsedFilters.value.limit,
       });
       const res = serviceResponse.data as OptionScreenResult;
-      persistNlqOptionsScreenReport(orm, login, parsedFilters.value, res, executedAt, env);
+      await persistNlqOptionsScreenReport(orm, login, parsedFilters.value, res, executedAt, env);
       const freshnessNote = res.quoteQuality?.staleContractsReturned || res.quoteQuality?.unknownFreshnessContracts
         ? ` Freshness: ${res.quoteQuality.staleContractsReturned} returned contracts are stale and ${res.quoteQuality.unknownFreshnessContracts} have unknown timestamps; freshest stale quote was ${Math.round(res.quoteQuality.freshestStaleQuoteAgeSeconds || 0)}s old (freshness reference ${res.quoteQuality.referenceAgeSeconds ?? res.quoteQuality.maxAgeSeconds ?? 60}s).`
         : "";
