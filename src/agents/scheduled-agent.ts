@@ -149,6 +149,7 @@ import {
   createScheduledAgentPipelineControl,
   createScheduledAgentStageEventStore,
   declarePipelineTasks,
+  dispatchFeedJobWorkflow,
   dispatchAnalyzeAfterEnrichCompletion,
   dispatchDeliverAfterGenerateCompletion,
   dispatchEnrichAfterFeedCompletion,
@@ -1187,6 +1188,20 @@ export class ScheduledAgent extends PortThink {
     };
   }
 
+  /** String-valued env entries (the registries' knob source). */
+  private feedEnvStrings(): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(this.env as Record<string, unknown>)) {
+      if (typeof value === "string") out[key] = value;
+    }
+    return out;
+  }
+
+  /** True when the job id is a feed-catalog job (#4171 residency routing). */
+  private isFeedPipelineJob(jobId: string): boolean {
+    return buildFeedJobRegistry(this.feedEnvStrings()).get(jobId) !== undefined;
+  }
+
   /** Think scheduled-task declarations for the pipeline's jobs. */
   override async getScheduledTasks(): Promise<ThinkScheduledTasks> {
     return declarePipelineTasks(this.pipelineContext());
@@ -1403,6 +1418,24 @@ export class ScheduledAgent extends PortThink {
         : resolveRunNowTrigger(definition);
     // Issue #6557 — a scheduled firing passes the payload's provenance;
     // every other caller passes none and the run records nulls.
+    // Issue #4171 — a feed job dispatches to workflow residency:
+    // this host is the control plane/dispatcher, and the workflow
+    // instance executes the run. Non-feed jobs keep the host
+    // dispatch below.
+    if (isFeedJob) {
+      const outcome = await dispatchFeedJobWorkflow(ctx, dispatchJobId, {
+        trigger,
+        ...(opts?.userLogin ? { userLogin: opts.userLogin } : {}),
+        ...(opts?.provenance ? { provenance: opts.provenance } : {}),
+        operation: "run",
+      });
+      return {
+        jobId,
+        runId: outcome.runId,
+        state: outcome.state,
+        ...(outcome.error ? { error: outcome.error } : {}),
+      };
+    }
     const dispatch = await control.runJob(dispatchJobId, {
       trigger,
       ...(opts?.provenance ? { provenance: opts.provenance } : {}),
@@ -1452,6 +1485,23 @@ export class ScheduledAgent extends PortThink {
     const ctx = this.pipelineContext();
     const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
     await ensureScheduledAgentPipelineJobs(ctx, control);
+    // Issue #4171 — a scoped feed dispatch executes in workflow
+    // residency, like every feed run.
+    if (this.isFeedPipelineJob(jobId)) {
+      const outcome = await dispatchFeedJobWorkflow(ctx, jobId, {
+        trigger: normalizeJobRunTrigger(opts?.trigger ?? "scheduled"),
+        scopePath: opts?.nodePath ?? "",
+        ...(opts?.scheduleId ? { scheduleId: opts.scheduleId } : {}),
+        ...(opts?.userLogin ? { userLogin: opts.userLogin } : {}),
+        operation: "run",
+      });
+      return {
+        jobId,
+        runId: outcome.runId,
+        state: outcome.state,
+        ...(outcome.error ? { error: outcome.error } : {}),
+      };
+    }
     const dispatch = await control.runJob(jobId, {
       // Issue #4767 — the scoped run inherits the dispatch trigger
       // (Q5); the default caller is the schedule callback, so an
@@ -1502,6 +1552,19 @@ export class ScheduledAgent extends PortThink {
     const ctx = this.pipelineContext();
     const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
     await ensureScheduledAgentPipelineJobs(ctx, control);
+    // Issue #4171 — a feed resume executes in workflow residency.
+    if (this.isFeedPipelineJob(jobId)) {
+      const outcome = await dispatchFeedJobWorkflow(ctx, jobId, {
+        ...(opts?.userLogin ? { userLogin: opts.userLogin } : {}),
+        operation: "resume",
+      });
+      return {
+        jobId,
+        runId: outcome.runId,
+        state: outcome.state,
+        ...(outcome.error ? { error: outcome.error } : {}),
+      };
+    }
     const dispatch = await control.resumeJob(jobId);
     if (!dispatch.completion) {
       return { jobId, runId: dispatch.runId, state: dispatch.state };
@@ -1531,6 +1594,19 @@ export class ScheduledAgent extends PortThink {
     const ctx = this.pipelineContext();
     const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
     await ensureScheduledAgentPipelineJobs(ctx, control);
+    // Issue #4171 — a feed retry executes in workflow residency.
+    if (this.isFeedPipelineJob(jobId)) {
+      const outcome = await dispatchFeedJobWorkflow(ctx, jobId, {
+        ...(opts?.userLogin ? { userLogin: opts.userLogin } : {}),
+        operation: "retry",
+      });
+      return {
+        jobId,
+        runId: outcome.runId,
+        state: outcome.state,
+        ...(outcome.error ? { error: outcome.error } : {}),
+      };
+    }
     const dispatch = await control.retryJob(jobId);
     if (!dispatch.completion) {
       return { jobId, runId: dispatch.runId, state: dispatch.state };
@@ -1615,6 +1691,32 @@ export class ScheduledAgent extends PortThink {
     if (!resolved.ok) throw new Error(resolved.reason);
     const nodePath = resolved.subJob.nodePath;
     const stageId = resolved.subJob.stageId;
+    // Issue #4171 — feed stage execution (run / re-run / resume)
+    // dispatches to workflow residency; stop/cancel stay control
+    // plane writes on this host.
+    if (
+      this.isFeedPipelineJob(jobId) &&
+      (operation === "run" || operation === "rerun" || operation === "resume")
+    ) {
+      const outcome = await dispatchFeedJobWorkflow(ctx, jobId, {
+        ...(opts?.userLogin ? { userLogin: opts.userLogin } : {}),
+        operation:
+          operation === "run"
+            ? "runStage"
+            : operation === "rerun"
+              ? "rerunStage"
+              : "resumeStage",
+        nodePath,
+      });
+      return {
+        jobId,
+        stageId,
+        nodePath,
+        operation,
+        state: outcome.state,
+        runId: outcome.runId ?? null,
+      };
+    }
     if (operation === "run" || operation === "rerun") {
       const dispatch =
         operation === "run"
@@ -1687,6 +1789,22 @@ export class ScheduledAgent extends PortThink {
       opts?.stage && isJobStageId(opts.stage)
         ? jobStageNodePath(opts.stage)
         : opts?.stage;
+    // Issue #4171 — a feed replay executes in workflow residency.
+    if (this.isFeedPipelineJob(jobId)) {
+      const outcome = await dispatchFeedJobWorkflow(ctx, jobId, {
+        ...(opts?.userLogin ? { userLogin: opts.userLogin } : {}),
+        operation: nodePath ? "replayStage" : "replayRun",
+        replayRunId: runId,
+        ...(nodePath ? { nodePath } : {}),
+      });
+      return {
+        jobId,
+        replayedRunId: runId,
+        runId: outcome.runId,
+        state: outcome.state,
+        ...(opts?.stage ? { stage: opts.stage } : {}),
+      };
+    }
     const dispatch = nodePath
       ? await control.replayStage(jobId, runId, nodePath)
       : await control.replayRun(jobId, runId);
@@ -2168,8 +2286,30 @@ export class ScheduledAgent extends PortThink {
    * says why a chained schedule did not run.
    */
   async fireCompletionSchedules(event: CompletionEvent): Promise<CompletionFiringResult> {
-    const control = createScheduledAgentPipelineControl(this.pipelineContext());
-    return dispatchCompletionSchedules(control, event);
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx);
+    return dispatchCompletionSchedules(control, event, async (jobId, opts) => {
+      // Issue #4171 — a feed target starts workflow residency;
+      // every other target keeps the host dispatch.
+      if (this.isFeedPipelineJob(jobId)) {
+        // Preserve the host dispatch's refusal surface: a target
+        // already running is skipped with its reason, not fired
+        // into a workflow that can only error.
+        const view = await control.getJob(jobId);
+        const state = view.instance?.state;
+        if (state === "running" || state === "queued") {
+          throw new Error(
+            `Job "${jobId}" is ${state} (run ${view.instance?.currentRunId ?? "unknown"})`,
+          );
+        }
+        return startPipelineJobWorkflow(ctx, jobId, {
+          trigger: opts.trigger,
+          ...(opts.scopePath ? { scopePath: opts.scopePath } : {}),
+          operation: "run",
+        });
+      }
+      return control.runJob(jobId, opts);
+    });
   }
 
   /** Recorded pipeline completions, newest first. */

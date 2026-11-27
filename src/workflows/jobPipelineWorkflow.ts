@@ -70,6 +70,9 @@ import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
 import { createProviderCaptureAdapter } from "../data/createProviderCapturePorts";
 import { createR2CaptureBlobStorage } from "../data/r2CaptureBlobAdapter";
 import { createCaptureWiredFeedProvider } from "../services/feedProviderWiring";
+import { feedRunSettledObserverForEnv } from "../services/feedRunSettledObserverWiring";
+import { resolveFeedJobTimeouts } from "../services/feedJobTimeouts";
+import { resolveStageTimeoutMs } from "../services/stageTimeouts";
 import type { FeedStepDeps } from "../services/feedPipelineJobs";
 import { createEnrichedDatasetAdapter } from "../data/createEnrichedDatasetPorts";
 import { createAnalyzedDatasetPorts } from "../data/createAnalyzedDatasetPorts";
@@ -157,6 +160,7 @@ export function generateStepDepsForWorkflow(
 export function feedStepDepsForWorkflow(
   env: Env,
   stores: JobPipelineStores,
+  userLogin?: string,
 ): FeedStepDeps {
   const db = env.AGENT_DB;
   const universeStore = new D1IndexListStore(createD1IndexListDb(db as D1Database));
@@ -175,7 +179,11 @@ export function feedStepDepsForWorkflow(
         env,
         blobStorage,
         capturePort,
-        userLogin: opts?.userLogin ?? getServiceUserLogin(env) ?? undefined,
+        // Issue #4171 — the dispatch's acting login rides the
+        // payload, so per-login providers resolve exactly as
+        // they did at the host door; absent one, the service
+        // login stands (the scheduled-firing identity).
+        userLogin: opts?.userLogin ?? userLogin ?? getServiceUserLogin(env) ?? undefined,
         ...(opts?.yahooBreaker ? { yahooBreaker: opts.yahooBreaker } : {}),
       }),
     universeStore,
@@ -202,7 +210,7 @@ export function feedStepDepsForWorkflow(
     shardsFor: async (jobId) =>
       (await stores.definitions.getDefinition(jobId))?.config.processing
         .shards ?? [],
-    userLogin: getServiceUserLogin(env) ?? undefined,
+    userLogin: userLogin ?? getServiceUserLogin(env) ?? undefined,
     env,
   };
 }
@@ -284,7 +292,10 @@ export function optionsStepDepsForWorkflow(
   };
 }
 
-export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
+export function createJobPipelineWorkflowDeps(
+  env: Env,
+  opts?: { userLogin?: string },
+): JobPipelineDeps {
   if (!env.AGENT_DB) {
     throw new JobPipelineError(
       "job_stores_unavailable",
@@ -296,7 +307,7 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
   // Issue #5823: the feed deps are built once and shared — the feed
   // steps run through them, and the screener steps bind their
   // quote/history deps over the same #3941 provider construction.
-  const feedDeps = feedStepDepsForWorkflow(env, stores);
+  const feedDeps = feedStepDepsForWorkflow(env, stores, opts?.userLogin);
   const runRecords = new D1JobRunRecordStore(createD1JobRunRecordDb(db));
   const messaging = createJobPipelineMessaging(env);
   const envStrings = envStringsFromEnv(env);
@@ -308,6 +319,17 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
       latestRun: (jobId) => runRecords.latestByJob(jobId),
     },
     publisher: messaging.ports?.publisher ?? null,
+    // Issue #4171 — the feed settle observer rides this
+    // residency too, through the ONE env wiring the host uses:
+    // a workflow-resident feed run writes its Job outcomes row
+    // exactly as a host-resident one did. The control factory
+    // chains the OTel observer after it.
+    runSettledObserver: feedRunSettledObserverForEnv(env),
+    // Issue #4171 — the same env-resolved bounds the host
+    // control carries, so the execution deadline and the
+    // global stage default are identical in both residencies.
+    feedExecutionDeadlineMs: resolveFeedJobTimeouts(envStrings).executionMs,
+    stageTimeoutMs: resolveStageTimeoutMs(envStrings),
     // #3535/#3536/#3537/#3538/#3539: the workflow residency composes THE same step
     // registry as the ScheduledAgent host (one registry, every
     // residency — the composed registry includes the J1
@@ -509,7 +531,9 @@ export class JobPipelineWorkflow extends PortThinkWorkflow<
     event: WorkflowEvent<JobPipelineWorkflowPayload>,
     step: WorkflowStep,
   ): Promise<JobRunOutcome> {
-    const deps = createJobPipelineWorkflowDeps(this.env);
+    const deps = createJobPipelineWorkflowDeps(this.env, {
+      ...(event.payload.userLogin ? { userLogin: event.payload.userLogin } : {}),
+    });
     // Issue #4454 — the workflow instance id is the replay
     // proof: stable across replays of this instance, distinct
     // across instances, so a replayed flow can prove it

@@ -59,7 +59,14 @@
     },
     { "name": "payment-workflow", "binding": "PAYMENT_WORKFLOW", "class_name": "PaymentWorkflow", "concurrency": { "limit": 1 } },
     { "name": "saga-workflow", "binding": "SAGA_WORKFLOW", "class_name": "CrossDomainSagaWorkflow", "concurrency": { "limit": 1 } },
-    { "name": "job-pipeline-workflow", "binding": "JOB_PIPELINE_WORKFLOW", "class_name": "JobPipelineWorkflow", "concurrency": { "limit": 1 } }
+    // Issue #4171 — feed runs execute in this workflow residency, so
+    // the binding is sized for simultaneous multi-user invocations:
+    // 25 registered feed jobs plus headroom for resume/retry/replay
+    // instances. Same-job duplicates stay serialized by the engine's
+    // atomic dispatch claim (job_already_running), and instances
+    // beyond the limit queue rather than refuse. Supersedes the
+    // #4213 limit of 1 for this binding only.
+    { "name": "job-pipeline-workflow", "binding": "JOB_PIPELINE_WORKFLOW", "class_name": "JobPipelineWorkflow", "concurrency": { "limit": 32 } }
   ],
   // Issue #605 — report PDF blobs live in R2 (bucket provisioned by the
   // owner; reportBlobStore maps screener:*/options:* keys to stocks/*,

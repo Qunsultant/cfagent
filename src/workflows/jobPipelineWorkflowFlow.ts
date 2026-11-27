@@ -42,6 +42,21 @@ export interface JobPipelineWorkflowPayload {
   trigger?: JobRunTrigger;
   scopePath?: string;
   /**
+   * Issue #4171 — the dispatch facts a workflow-resident run
+   * needs for parity with the host door: the acting login (the
+   * per-login providers resolve through it), the firing
+   * schedule's id (the terminal record joins to it), and the
+   * operation the door dispatched (a feed resume/retry/stage
+   * action executes in workflow residency, not on the host).
+   * Ids and names only — the claim-check discipline holds.
+   */
+  userLogin?: string;
+  scheduleId?: string;
+  operation?: JobPipelineWorkflowOperation;
+  nodePath?: string;
+  /** Issue #4171 — the past run a replay operation reproduces. */
+  replayRunId?: string;
+  /**
    * Issue #6584 — the four provenance facts the start seam resolved for
    * this run (broker, data provider, mode, mode source). This is the
    * run's own fact, not configuration: the definition stays read from the
@@ -50,6 +65,40 @@ export interface JobPipelineWorkflowPayload {
    * explicit nulls (#6557's "never inferred" rule).
    */
   provenance?: JobRunProvenance;
+}
+
+/** The control-plane operation one workflow dispatch executes (#4171). */
+export type JobPipelineWorkflowOperation =
+  | "run"
+  | "resume"
+  | "retry"
+  | "runStage"
+  | "rerunStage"
+  | "resumeStage"
+  | "replayRun"
+  | "replayStage";
+
+const WORKFLOW_OPERATIONS: readonly JobPipelineWorkflowOperation[] = [
+  "run",
+  "resume",
+  "retry",
+  "runStage",
+  "rerunStage",
+  "resumeStage",
+  "replayRun",
+  "replayStage",
+];
+
+/** Fail-closed operation read: absent means a plain run; anything undeclared refuses by name. */
+function resolveWorkflowOperation(
+  raw: JobPipelineWorkflowOperation | undefined,
+): JobPipelineWorkflowOperation {
+  if (raw === undefined) return "run";
+  if ((WORKFLOW_OPERATIONS as readonly string[]).includes(raw)) return raw;
+  throw new JobPipelineError(
+    "job_config_invalid",
+    `Job pipeline workflow payload operation "${String(raw)}" is not a declared operation (${WORKFLOW_OPERATIONS.join(", ")}).`,
+  );
 }
 
 /** Minimal structural step surface the flow needs (fakeable in tests). */
@@ -108,24 +157,90 @@ export async function runJobPipelineWorkflowFlow(
     },
   }, { ...(deps.env ? { env: deps.env } : {}) });
   const workflowInstanceId = opts?.workflowInstanceId;
+  const operation = resolveWorkflowOperation(payload.operation);
+  const nodePath = payload.nodePath ?? "";
+  const dispatchOperation = async () => {
+    switch (operation) {
+      case "resume":
+        return control.resumeJob(payload.jobId, {
+          ...(workflowInstanceId ? { workflowInstanceId } : {}),
+        });
+      case "retry":
+        return control.retryJob(payload.jobId, {
+          ...(workflowInstanceId ? { workflowInstanceId } : {}),
+        });
+      case "runStage":
+        return control.runStage(payload.jobId, nodePath, {
+          ...(workflowInstanceId ? { workflowInstanceId } : {}),
+        });
+      case "rerunStage":
+        return control.rerunStage(payload.jobId, nodePath, {
+          ...(workflowInstanceId ? { workflowInstanceId } : {}),
+        });
+      case "resumeStage":
+        return control.resumeStage(payload.jobId, nodePath, {
+          ...(workflowInstanceId ? { workflowInstanceId } : {}),
+        });
+      case "replayRun":
+        if (!payload.replayRunId) {
+          throw new JobPipelineError(
+            "job_config_invalid",
+            "Job pipeline workflow replayRun operation requires a replayRunId.",
+          );
+        }
+        return control.replayRun(payload.jobId, payload.replayRunId, {
+          ...(workflowInstanceId ? { workflowInstanceId } : {}),
+        });
+      case "replayStage":
+        if (!payload.replayRunId) {
+          throw new JobPipelineError(
+            "job_config_invalid",
+            "Job pipeline workflow replayStage operation requires a replayRunId.",
+          );
+        }
+        return control.replayStage(payload.jobId, payload.replayRunId, nodePath, {
+          ...(workflowInstanceId ? { workflowInstanceId } : {}),
+        });
+      default:
+        return control.runJob(payload.jobId, {
+          // Issue #4767 — the workflow payload's trigger, all five
+          // modes, fail-closed through normalize (absent ⇒ "manual").
+          trigger: normalizeJobRunTrigger(payload.trigger),
+          ...(payload.scopePath ? { scopePath: payload.scopePath } : {}),
+          // Issue #4171 — the firing schedule's id joins the
+          // terminal record to its schedule, as on the host.
+          ...(payload.scheduleId ? { scheduleId: payload.scheduleId } : {}),
+          ...(workflowInstanceId ? { workflowInstanceId } : {}),
+          // Issue #6584 — the carrier the start seam resolved, normalized
+          // through the carrier's own rule: a malformed payload records
+          // nulls rather than a half-parsed fact, and never fails the run.
+          provenance: normalizeRunProvenance(payload.provenance),
+        });
+    }
+  };
   let dispatch;
   try {
-    dispatch = await control.runJob(payload.jobId, {
-      // Issue #4767 — the workflow payload's trigger, all five
-      // modes, fail-closed through normalize (absent ⇒ "manual").
-      trigger: normalizeJobRunTrigger(payload.trigger),
-      ...(payload.scopePath ? { scopePath: payload.scopePath } : {}),
-      ...(workflowInstanceId ? { workflowInstanceId } : {}),
-      // Issue #6584 — the carrier the start seam resolved, normalized
-      // through the carrier's own rule: a malformed payload records
-      // nulls rather than a half-parsed fact, and never fails the run.
-      provenance: normalizeRunProvenance(payload.provenance),
-    });
+    dispatch = await dispatchOperation();
   } catch (error) {
+    // Issue #4454/#4171 — eviction replay: a replayed flow
+    // re-enters against a still-running instance and its
+    // operation refuses (already running / not resumable / not
+    // retirable / stage conflict). The replay proof — the
+    // recorded workflow instance id equals this instance's —
+    // is the engine's replayJob check; every unproven case
+    // re-throws the ORIGINAL refusal.
+    const replayableCodes = new Set([
+      "job_already_running",
+      "job_not_resumable",
+      "job_not_retirable",
+      "stage_action_conflict",
+      "stage_action_in_flight",
+      "stage_not_resumable",
+    ]);
     if (
       workflowInstanceId &&
       error instanceof JobPipelineError &&
-      error.code === "job_already_running"
+      replayableCodes.has(error.code)
     ) {
       try {
         dispatch = await control.replayJob(payload.jobId, {

@@ -227,6 +227,34 @@ export async function sendManagedWorkflowEvent(
   await instance.sendEvent(event);
 }
 
+/** One workflow instance's status snapshot, read through the same seam that starts instances. */
+export interface ManagedWorkflowStatus {
+  status: string;
+  output?: unknown;
+  error?: { message: string };
+}
+
+/**
+ * Issue #4171 — read one instance's status through the seam. The
+ * feed dispatch door awaits the SPECIFIC instance it started, so
+ * simultaneous dispatches can never confuse one run's outcome
+ * with another's. Refuses by name when the instance shape cannot
+ * report status.
+ */
+export async function readManagedWorkflowStatus(
+  binding: ManagedWorkflowBinding,
+  instanceId: string,
+): Promise<ManagedWorkflowStatus> {
+  const instance = await binding.get(instanceId);
+  if (typeof instance.status !== "function") {
+    throw new WorkflowError(
+      "status_unsupported",
+      `Workflow instance "${instanceId}" does not expose status(); its outcome cannot be read.`,
+    );
+  }
+  return instance.status();
+}
+
 /**
  * Issue #5783 — instance control through the SAME seam that starts instances.
  * Each op refuses by name (`instance_control_unsupported`) when the provider's

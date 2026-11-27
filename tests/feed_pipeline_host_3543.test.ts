@@ -8,7 +8,8 @@
  *   (and, since #3536, every enrich job — the declaration set is
  *   the whole plane: 7 feed + 5 enrich) with an enabled schedule
  *   becomes a task named
- *   `pipeline-job:<jobId>` whose firing dispatches runJob on the
+ *   `pipeline-job:<jobId>` whose firing dispatches the job — a
+ *   feed job to workflow residency (#4171), any other job on the
  *   host's own control plane (a run record lands even when the
  *   run itself refuses — here no R2 capture bucket is bound, so
  *   the firing's run fails FEED_JOB_NOT_CONFIGURED BY NAME);
@@ -59,6 +60,8 @@ import {
   STAGE_IDS_BY_FAMILY,
 } from "../src/workflows/stageMessage";
 import type { Env } from "../src/types";
+import { createJobPipelineWorkflowDeps } from "../src/workflows/jobPipelineWorkflow";
+import { runJobPipelineWorkflowFlow } from "../src/workflows/jobPipelineWorkflowFlow";
 import { MockD1Database } from "./mock-d1";
 
 /** The node:sqlite DO-storage double (tests/job_pipeline_3534 idiom). */
@@ -198,10 +201,37 @@ describe("pipeline host wiring (#3543)", () => {
     }
   });
 
-  it("a firing dispatches runJob on the host plane — a run record lands", async () => {
+  it("a feed firing starts workflow residency — a run record lands", async () => {
     const { ctx, d1 } = makeHostContext();
-    const tasks = await declarePipelineTasks(ctx);
+    const starts: Array<{ jobId: string; opts: Record<string, unknown> }> = [];
+    const seamCtx: ScheduledTasksPipelineContext = {
+      ...ctx,
+      startWorkflow: async (jobId, opts) => {
+        starts.push({ jobId, opts: { ...opts } });
+        // The workflow residency executes the dispatch: run the
+        // real flow over the workflow deps, as the binding would.
+        void runJobPipelineWorkflowFlow(
+          createJobPipelineWorkflowDeps(ctx.env),
+          { do: async (_name, fn) => fn() },
+          { jobId, ...opts },
+          { workflowInstanceId: "wf-firing-1" },
+        ).catch(() => undefined);
+        return { instanceId: "wf-firing-1" };
+      },
+    };
+    const tasks = await declarePipelineTasks(seamCtx);
     await tasks[`${PIPELINE_TASK_ID_PREFIX}yahoo-nasdaq100-quotes`].handler({} as never);
+    expect(starts).toEqual([
+      {
+        jobId: "yahoo-nasdaq100-quotes",
+        opts: {
+          trigger: "scheduled",
+          scheduleId: `${PIPELINE_TASK_ID_PREFIX}yahoo-nasdaq100-quotes`,
+          userLogin: "svc-background",
+          operation: "run",
+        },
+      },
+    ]);
     const store = new D1JobRunRecordStore(createD1JobRunRecordDb(d1 as never));
     let records = await store.listByJob("yahoo-nasdaq100-quotes", 5);
     for (let i = 0; i < 40 && records.length === 0; i++) {

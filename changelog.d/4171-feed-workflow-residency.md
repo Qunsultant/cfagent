@@ -1,0 +1,3 @@
+### Feed runs execute in workflow residency (#4171)
+
+Feed jobs now dispatch to `JobPipelineWorkflow` from every ScheduledAgent door (run, scoped stage run, resume, retry, stage actions, replays, scheduled firings, and completion triggers); the ScheduledAgent host is the feed control plane/dispatcher and its feed execution path is retired — `FEED_JOB_RESIDENCY=host` refuses by name. The workflow deps carry the feed run-settled observer through the shared env wiring, so workflow-resident runs write their Job outcomes rows exactly as host-resident runs did. The `JOB_PIPELINE_WORKFLOW` concurrency limit is sized at 32 for simultaneous multi-user invocations, and host orphan settlement no longer settles workflow-resident runs.

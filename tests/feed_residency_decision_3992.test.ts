@@ -1,32 +1,30 @@
 // @vitest-environment node
 /**
  * Issue #3992 PR-5 — the feed-run residency decision is pinned, not
- * just written down.
+ * just written down. Amended by #4171, which activated workflow
+ * residency for feed runs.
  *
  * The decision doc (docs/architecture/feed-run-residency-and-scheduled-
- * silence-3992.md) records: production pipeline/feed runs STAY resident
- * in the ScheduledAgent host; the JobPipelineWorkflow residency stays
- * provisioned and uncalled; activation happens only under the
- * follow-up issue "Workflow-residency activation for pipeline runs".
+ * silence-3992.md) records: feed jobs execute in workflow residency
+ * only, dispatched by the ScheduledAgent host as control plane;
+ * non-feed pipeline jobs and chains remain host-resident; the host
+ * feed residency is retired and refuses by name.
  *
  * Pins, in the fleet's doc-pin idiom (cf. platform_decoupling_doc,
  * neutrality_live_docs_3525, alarm_inventory_3026's src walk):
  *  (a) the doc exists with its five section headings;
- *  (b) the doc names the decision, the FEED_DEADLINE_EXCEEDED code,
+ *  (b) the doc names the activation, the FEED_DEADLINE_EXCEEDED code,
  *      and #4002's orphan settlement;
- *  (c) CODE INVARIANT: no production caller of startPipelineJobWorkflow
- *      exists in src/ outside its definition file
- *      (src/agents/scheduledTasksPipeline.ts) and the Durable Object
- *      door that wraps it (src/agents/scheduled-agent.ts) — the scan
- *      counts the door file as an allowed holder, so the assertion is
- *      exactly "no caller outside those two files";
+ *  (c) CODE INVARIANT: the workflow start path's holders stay its
+ *      definition file (src/agents/scheduledTasksPipeline.ts) and
+ *      the Durable Object door that dispatches through it
+ *      (src/agents/scheduled-agent.ts) — activation moved the
+ *      dispatch, not the start path's ownership;
  *  (d) CODE INVARIANT: settleOrphanedPipelineRuns remains wired from
- *      ScheduledAgent.onStart.
- *
- * (c)/(d) are invariants, green on the base by design; (a)/(b) are the
- * change pins, red until the doc lands. If a future change activates
- * the workflow residency, (c) goes red first — amend the doc in the
- * same PR, per the doc's own rule.
+ *      ScheduledAgent.onStart;
+ *  (e) CODE INVARIANT: the feed dispatch door routes through
+ *      dispatchFeedJobWorkflow, and the workflow deps carry the
+ *      feed run-settled observer.
  */
 import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -70,18 +68,20 @@ describe("#3992 PR-5 — residency decision doc", () => {
     expect(doc).toContain("## Consequences");
   });
 
-  it("(b) names the stay decision, the deadline code, and the #4002 orphan settlement", () => {
+  it("(b) names the activation, the deadline code, and the #4002 orphan settlement", () => {
     const doc = read(DOC);
-    expect(doc).toContain("remain resident in the ScheduledAgent host");
+    expect(doc).toContain("Feed jobs execute in workflow residency");
+    expect(doc).toContain("feed_job_host_residency_retired");
     expect(doc).toContain("FEED_DEADLINE_EXCEEDED");
     expect(doc).toContain("settleOrphanedPipelineRuns");
     expect(doc).toContain("#4002");
+    expect(doc).toContain("#4171");
     expect(doc).toContain("Workflow-residency activation for pipeline runs");
   });
 });
 
 describe("#3992 PR-5 — residency code invariants", () => {
-  it("(c) no production caller of the workflow start path outside its definition and its DO door", () => {
+  it("(c) the workflow start path stays owned by its definition and its DO door", () => {
     const ALLOWED = new Set([
       "src/agents/scheduledTasksPipeline.ts",
       "src/agents/scheduled-agent.ts",
@@ -111,5 +111,15 @@ describe("#3992 PR-5 — residency code invariants", () => {
     // And the helper still delegates to the engine's settle.
     const host = read("src/agents/scheduledTasksPipeline.ts");
     expect(host).toContain("control.settleOrphanedRuns()");
+  });
+
+  it("(e) feed dispatch routes to workflow residency and the workflow deps carry the observer", () => {
+    const agent = read("src/agents/scheduled-agent.ts");
+    expect(agent).toContain("dispatchFeedJobWorkflow");
+    const host = read("src/agents/scheduledTasksPipeline.ts");
+    expect(host).toContain("export async function dispatchFeedJobWorkflow");
+    expect(host).toContain("resolveFeedJobResidency");
+    const workflow = read("src/workflows/jobPipelineWorkflow.ts");
+    expect(workflow).toContain("runSettledObserver: feedRunSettledObserverForEnv(env)");
   });
 });
