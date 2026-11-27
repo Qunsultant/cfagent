@@ -926,6 +926,14 @@ export interface FeedJobSurfaceView {
     runStartedAt: string | null;
     lastRunStatus: string | null;
     lastRunAt: string | null;
+    /**
+     * Issue #6235 — the pipeline run's terminal error/detail, so a
+     * run that settled before the feed pull stored a dataset
+     * artifact still shows its reason (the dataset lastRun remains
+     * the prior artifact's). Null when the latest run recorded
+     * neither an error nor a detail.
+     */
+    lastError: string | null;
     stages: JobStatusView["stages"];
   } | null;
   /** ISO time of the next scheduled firing, estimated as the
@@ -969,6 +977,11 @@ export async function buildFeedJobSurfaceView(args: {
         lastRunAt:
           args.pipeline.latestRun?.finished ??
           args.pipeline.latestRun?.started ??
+          null,
+        lastError:
+          args.pipeline.latestRun?.error ??
+          args.pipeline.latestRun?.detail ??
+          args.pipeline.instance?.lastError ??
           null,
         stages: args.pipeline.stages,
       }

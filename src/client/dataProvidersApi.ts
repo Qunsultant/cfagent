@@ -192,6 +192,8 @@ export interface FeedJobView {
     currentRunId: string | null;
     lastRunStatus: string | null;
     lastRunAt: string | null;
+    /** #6235 — terminal error/detail when the run stored no dataset artifact; absent on older responses. */
+    lastError?: string | null;
   } | null;
   nextScheduledRun: string | null;
   /** The stored schedule (#3530 scheduling-config). Optional here

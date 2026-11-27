@@ -11,8 +11,10 @@
  *
  * - The control plane is built over this agent's DO SQLite (the
  *   pipeline stores' DO residency), its run records go through
- *   the platform JobRunRecordStore (the DO adapter of the same
- *   port the workflow residency serves from D1), and its status
+ *   the platform JobRunRecordStore — the D1 adapter when AGENT_DB
+ *   is bound, so a settled host run is an engine D1 record the
+ *   D1-only run ledger reads (#6103/#6235), with the DO adapter
+ *   only as the unbound-deployment fallback — and its status
  *   publication rides the JOB_PIPELINE_EVENTS queue substrate.
  * - getScheduledTasks() declarations are built from the control
  *   plane's registerSchedules output over a recording
@@ -516,6 +518,31 @@ export function createScheduledAgentStageEventStore(
   return createDoSqliteJobStageEventStore(pipelineSql(ctx));
 }
 
+/**
+ * Issue #6235 — the host's run recorder. The run ledger reads D1
+ * only (#6103), so a terminal record written only to this host's
+ * DO SQLite is invisible there unless a projection carrier copies
+ * it — and the carrier is tenant configuration this host cannot
+ * assume. When AGENT_DB is bound the host therefore records
+ * through the same D1 adapter the workflow residency uses (the
+ * engine's D1 records show with no carrier configured); the DO
+ * adapter remains only for deployments with no D1 binding.
+ */
+function jobRunRecorderForScheduledAgent(
+  ctx: ScheduledTasksPipelineContext,
+  sql: SqlStorage,
+) {
+  if (!ctx.env.AGENT_DB) {
+    return jobRunRecorderFromStore(new SqlJobRunRecordStore(sql));
+  }
+  const runs = new D1JobRunRecordStore(createD1JobRunRecordDb(ctx.env.AGENT_DB));
+  return {
+    recordRun: (record: Parameters<typeof runs.record>[0]) => runs.record(record),
+    listRuns: (jobId: string, limit?: number) => runs.listByJob(jobId, limit),
+    latestRun: (jobId: string) => runs.latestByJob(jobId),
+  };
+}
+
 export function createScheduledAgentPipelineControl(
   ctx: ScheduledTasksPipelineContext,
   userLogin?: string,
@@ -540,7 +567,7 @@ export function createScheduledAgentPipelineControl(
   // per-domain j1j7 switch first and no-op when it is OFF.
   return createJobPipelineControl({
     stores,
-      runRecorder: jobRunRecorderFromStore(new SqlJobRunRecordStore(sql)),
+      runRecorder: jobRunRecorderForScheduledAgent(ctx, sql),
       runSettledObserver: feedRunSettledObserverFor(ctx),
       publisher: messaging.ports?.publisher ?? null,
     // Issue #6028 — the stage-level terminal rows land in this host's
