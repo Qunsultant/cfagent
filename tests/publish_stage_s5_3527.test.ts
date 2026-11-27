@@ -57,6 +57,8 @@ import {
   createD1AuditEventDb,
   D1AuditEventStore,
 } from "../src/data/d1AuditEventAdapter";
+import { createAuditReportAdapter } from "../src/data/createAuditReportPorts";
+import { ensureAuditReportSchema } from "../src/data/d1AuditReportAdapter";
 
 const TRACE_ID = "0123456789abcdef0123456789abcdef";
 
@@ -75,6 +77,61 @@ function makeD1Audit() {
   const mock = new MockD1Database();
   const store = new D1AuditEventStore(createD1AuditEventDb(mock as never));
   return { mock, store };
+}
+
+/**
+ * #6101 step 8 follow-up — the backfill page reads D1 when
+ * AGENT_DB is bound, so the section-C fixtures seed the report
+ * rows into the mock D1 (the DO stub's reportRows no longer feed
+ * the sweep once the binding is present). Oldest-first order:
+ * r1, r2, r3.
+ */
+async function seedD1Reports(
+  d1Mock: MockD1Database,
+  rows: Array<{ id: string; title: string; source: string; summary: string; body: string; body_r2_key: string | null }>
+) {
+  const adapter = createAuditReportAdapter({ AGENT_DB: d1Mock as never });
+  if (!adapter) throw new Error("seedD1Reports: no AGENT_DB");
+  await ensureAuditReportSchema(adapter.db);
+  let ms = 0;
+  for (const r of rows) {
+    ms += 1;
+    await adapter.recordReport({
+      tenantId: "test-tenant",
+      workspaceId: "test-workspace",
+      reportId: r.id,
+      runId: r.id,
+      generationId: r.id,
+      title: r.title,
+      source: r.source,
+      summary: r.summary,
+      body: r.body,
+      createdAtMs: ms,
+      updatedAtMs: ms,
+      version: 1,
+      provenanceWriter: "publish_stage_s5_3527.test.ts",
+      provenanceSourceDo: "test",
+      provenanceSourceVersion: "1",
+      linkedJobRunId: null,
+      userLogin: "tester",
+      bodyR2Key: r.body_r2_key,
+    });
+  }
+}
+
+/**
+ * #6101 step 8 follow-up — the D1 equivalent of the DO stub's
+ * `failReports`: the agent_reports SELECT throws "store gone"
+ * (schema CREATEs still run, so the failure lands on the read,
+ * exactly where the old DO failure did).
+ */
+function failingD1Reports(d1Mock: MockD1Database) {
+  const origPrepare = d1Mock.prepare.bind(d1Mock);
+  (d1Mock as any).prepare = (sql: string) => {
+    if (/^\s*select/i.test(sql) && sql.includes("agent_reports")) throw new Error("store gone");
+    return origPrepare(sql);
+  };
+  return d1Mock;
 }
 
 /** The stubOrmEvents().outcomePayloads() read, against the D1 store. */
@@ -525,6 +582,9 @@ describe("C. reports sweep route recording (#3527 S5)", () => {
     const orm = stubOrmEvents();
     const sql = stubSql({ reportRows });
     const { mock: d1Mock, store: d1Store } = makeD1Audit();
+    // #6101: the sweep reads D1 once AGENT_DB is bound — seed the
+    // rows there (the DO stub's reportRows no longer feed it).
+    await seedD1Reports(d1Mock, reportRows);
     const res = await callSweep({
       ensureTables: () => sql,
       env: { ...stubIndexEnv, SERVICE_USER_LOGIN: "svc-bot", AGENT_DB: d1Mock },
@@ -560,6 +620,9 @@ describe("C. reports sweep route recording (#3527 S5)", () => {
     const orm = stubOrmEvents();
     const sql = stubSql({ reportRows });
     const { mock: d1Mock, store: d1Store } = makeD1Audit();
+    // #6101: seed D1 so the first (firing) call reads real rows;
+    // the second call is guard-skipped before any read.
+    await seedD1Reports(d1Mock, reportRows);
     const ctx = {
       ensureTables: () => sql,
       env: { ...stubIndexEnv, AGENT_DB: d1Mock },
@@ -581,8 +644,13 @@ describe("C. reports sweep route recording (#3527 S5)", () => {
 
   it("a throwing sweep records failed in both stores and still answers 500 with no marker", async () => {
     const orm = stubOrmEvents();
-    const sql = stubSql({ reportRows, failReports: true });
+    const sql = stubSql({ reportRows });
     const { mock: d1Mock, store: d1Store } = makeD1Audit();
+    // #6101: seed D1, then fail the D1 read itself — the DO stub's
+    // failReports is dead once AGENT_DB is bound (the DO read is
+    // never reached), so the throw moves onto the read path.
+    await seedD1Reports(d1Mock, reportRows);
+    failingD1Reports(d1Mock);
     const res = await callSweep({
       ensureTables: () => sql,
       env: { ...stubIndexEnv, AGENT_DB: d1Mock },
