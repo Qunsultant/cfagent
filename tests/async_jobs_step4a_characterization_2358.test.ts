@@ -361,7 +361,11 @@ describe("characterization 4a: claim / execute", () => {
     await executeAsyncJob(h.ctx, { jobId: out.jobId });
     const rec = getAsyncJob(h.ctx, out.jobId)!;
     expect(rec.status).toBe("failed");
-    expect(rec.error).toContain("Unsupported async capability: bogus.capability");
+    // Issue #6554 (F1) — the refusal now comes from the engine's async
+    // mode, which names the unknown capability and the registered set
+    // (`async_capability_unknown`); the verdict is unchanged (failed,
+    // error recorded), only the message moved to the engine.
+    expect(rec.error).toContain('Unknown async capability "bogus.capability"');
   });
 
   it("executing a missing job is a silent no-op", async () => {

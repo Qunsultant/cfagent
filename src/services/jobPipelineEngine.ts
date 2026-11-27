@@ -104,6 +104,13 @@ import {
   resolveJobDefinition,
 } from "./jobPipelineConfig";
 import type { JobStepContext, JobStepRegistry } from "./jobPipelineSteps";
+import {
+  ASYNC_CAPABILITIES,
+  asyncCapabilityJobId,
+  asyncCapabilityStepName,
+  isAsyncCapability,
+  type AsyncCapability,
+} from "./asyncCapabilitySteps";
 import type { JobStageEventRecord, JobStageEventStore } from "../data/jobStageEventPorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
@@ -641,8 +648,7 @@ export interface JobPipelineDeps {
 
 export interface JobDispatchResult {
   jobId: string;
-  runId: string;
-  /** For sync delivery: the terminal (or paused) state. For async: the state at dispatch. */
+  runId: string;  /** For sync delivery: the terminal (or paused) state. For async: the state at dispatch. */
   state: JobRunState;
   /** Async delivery only: resolves with the run's outcome when it settles. */
   completion?: Promise<JobRunOutcome>;
@@ -655,6 +661,40 @@ export interface JobRunOutcome {
   descriptor?: string;
   error?: string;
   artifactKeys: string[];
+}
+
+/**
+ * Issue #6554 (F1) — the async mode's submission: the capability
+ * to execute, the step's input (the async-capability execution
+ * carrier the executor builds), and the dispatching async job's
+ * id, which the engine run record carries as its join key.
+ */
+export interface AsyncUnitRequest {
+  /**
+   * The capability to execute. A plain string, not the closed
+   * union: the queue row's capability is a string, and the
+   * engine — not the caller — is the gate that refuses an
+   * unregistered one by name (`async_capability_unknown`).
+   */
+  capability: AsyncCapability | string;
+  input: unknown;
+  asyncJobId: string;
+  trigger?: JobRunTrigger;
+}
+
+/**
+ * Issue #6554 (F1) — the async mode's outcome: the engine run's
+ * ids and terminal state, the step's output when it completed,
+ * and the failure message when it did not. A step failure is
+ * data here, never a throw — the executor turns it into the
+ * queue row's failure.
+ */
+export interface AsyncUnitOutcome {
+  jobId: string;
+  runId: string;
+  state: "completed" | "failed";
+  output?: unknown;
+  error?: string;
 }
 
 /**
@@ -1433,6 +1473,126 @@ export class JobPipelineControl {
   ): Promise<JobDispatchResult> {
     const definition = await this.requireDefinition(jobId);
     return this.dispatchResolved(definition, opts ?? {});
+  }
+
+  /**
+   * Issue #6554 (F1) — the engine's async mode: an ad-hoc
+   * single-unit submission. No registered job definition is
+   * needed per submission (the withdrawn "one-stage job per
+   * capability" shape is NOT this): the caller names the
+   * capability, the engine resolves its registered step
+   * (`async.capability.<capability>`) from the step registry,
+   * invokes it once with the caller's input, and records the
+   * unit as an engine run (`async.<capability>`, carrying the
+   * dispatching async job's id) through the run recorder + the
+   * settle observer — the same terminal-recording seam the
+   * staged runs use.
+   *
+   * The queue's guarded claim stays the atomic exactly-once
+   * gate (the executor claims before dispatching here); this
+   * mode has no single-row guard to serialize on — each
+   * submission is its own run, the F2 run-per-row foundation —
+   * and no resume path: a retry re-dispatches as a new run.
+   * The step executes inside the step journal, so the OTel
+   * journal sees the unit exactly as it sees a staged step.
+   * A step failure is returned as the outcome (never thrown):
+   * the executor turns it into the queue row's failure, so
+   * the row's coded failure derivation stays the one path.
+   * An unknown capability refuses by name before any run is
+   * recorded, exactly as an unknown definition does.
+   */
+  async runAsyncUnit(request: AsyncUnitRequest): Promise<AsyncUnitOutcome> {
+    const capability = request.capability;
+    if (!isAsyncCapability(capability)) {
+      throw new JobPipelineError(
+        "async_capability_unknown",
+        `Unknown async capability "${String(capability)}". Registered capabilities: ${ASYNC_CAPABILITIES.join(", ")}.`,
+      );
+    }
+    const jobId = asyncCapabilityJobId(capability);
+    const runId = this.newRunId();
+    const startedAt = this.iso();
+    const trigger = normalizeJobRunTrigger(request.trigger);
+    const handler = this.deps.steps.resolve(asyncCapabilityStepName(capability));
+    const stepCtx: JobStepContext = {
+      jobId,
+      runId,
+      nodePath: "",
+      kind: "async",
+      stepIndex: 0,
+      item: null,
+      itemIndex: null,
+      items: [],
+      shardKey: null,
+      params: { capability },
+      input: request.input,
+      now: startedAt,
+      trigger,
+      runKind: "original",
+    };
+    // Issue #5279 — the unit is live until it settles, under the
+    // same map the staged units report through.
+    const liveSet = this.liveUnits.get(runId) ?? new Set<string>();
+    liveSet.add(`async:${capability}`);
+    this.liveUnits.set(runId, liveSet);
+    this.liveSteps.set(runId, 1);
+    const journal = this.deps.journal ?? identityJobStepJournal;
+    let output: unknown;
+    let error: string | undefined;
+    try {
+      const result = await journal.do(
+        stepExecutionId(runId, "", 0, null, null),
+        () => handler(stepCtx),
+        { runId, jobId },
+      );
+      output = result.output;
+    } catch (caught) {
+      error = caught instanceof Error ? caught.message : String(caught);
+    } finally {
+      this.liveUnits.delete(runId);
+      this.liveSteps.delete(runId);
+    }
+    const state = error === undefined ? "completed" : "failed";
+    const record = buildJobRunRecord({
+      system: "job-pipeline",
+      jobId,
+      operation: "async",
+      started: startedAt,
+      finished: this.iso(),
+      outcome: state === "completed" ? "success" : "failure",
+      triggeredBy: trigger,
+      kind: "original",
+      originRunId: null,
+      scheduleId: null,
+      asyncJobId: request.asyncJobId,
+      workflowId: runId,
+      ...(error !== undefined ? { error } : {}),
+    });
+    await this.deps.runRecorder.recordRun(record);
+    const observer = this.deps.runSettledObserver;
+    if (observer) {
+      try {
+        await observer({
+          jobId,
+          runId,
+          trigger,
+          state,
+          ...(error ? { error } : {}),
+          kind: "original",
+          originRunId: null,
+        });
+      } catch {
+        // Best-effort by contract (see JobPipelineDeps): the
+        // observers log their own failures.
+      }
+    }
+    return {
+      jobId,
+      runId,
+      state,
+      ...(output !== undefined ? { output } : {}),
+      ...(error !== undefined ? { error } : {}),
+    };
   }
 
   /**
