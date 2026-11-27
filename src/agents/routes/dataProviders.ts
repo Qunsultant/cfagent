@@ -550,7 +550,16 @@ function codedErrorOf(error: unknown): string | null {
   }
   const message = error instanceof Error ? error.message : String(error);
   const match = message.match(/^([A-Za-z][A-Za-z0-9_]*):/);
-  return match ? match[1] : null;
+  if (match) return match[1];
+  // Issue #6235 — the engine's live-state dispatch refusal
+  // (`job_already_running`) crosses the RPC boundary as a plain
+  // message with no code prefix; recover its code from the
+  // refusal's own wording so a paused/running/queued job refuses
+  // by name instead of under the generic action-refused code.
+  if (/Job "[^"]+" is (paused|running|queued) \(run /.test(message)) {
+    return "job_already_running";
+  }
+  return null;
 }
 
 /**
@@ -603,6 +612,12 @@ function feedRunRefusalResponse(code: string | null, message: string): Response 
       { error: message, code: FEED_JOB_CODES.jobNotFound },
       { status: 404 },
     );
+  }
+  // Issue #6235 — live-state and cancelled outcomes keep the
+  // engine's own codes; collapsing them into the generic refusal
+  // is what left a paused/cancelled feed run with no reason shown.
+  if (code === "job_already_running" || code === "job_cancelled") {
+    return Response.json({ error: message, code }, { status: 409 });
   }
   return Response.json(
     { error: message, code: "FEED_JOB_ACTION_REFUSED" },
@@ -1172,15 +1187,26 @@ export async function handleDataProviderRoutes(
         .filter((artifact) => artifact.run.runId === outcome.runId);
       const run = feedRunViewFromArtifacts(outcome.runId, artifacts);
       if (!run) {
-        // The run settled without the feed service recording an
-        // artifact — it failed (or was stopped) before the pull
-        // recorded an outcome. Map its coded refusal onto this
-        // route's shapes.
-        return feedRunRefusalResponse(
-          outcomeRefusalCode(outcome.error),
+        // The run produced no feed artifact — it failed, paused,
+        // or was cancelled before the pull recorded an outcome.
+        // Map its coded refusal onto this route's shapes; a paused
+        // run is named as paused (it has not settled), and a
+        // cancelled run keeps the engine's job_cancelled reason
+        // (#6235).
+        const code =
+          outcome.state === "paused"
+            ? "job_already_running"
+            : outcome.state === "cancelled"
+              ? "job_cancelled"
+              : outcomeRefusalCode(outcome.error);
+        const message =
           outcome.error ??
-            `Pipeline run ${outcome.runId} for feed job "${def.id}" settled as "${outcome.state}" before the feed pull recorded an outcome.`,
-        );
+          (outcome.state === "paused"
+            ? `Pipeline run ${outcome.runId} for feed job "${def.id}" is paused before the feed pull recorded an outcome; resume or cancel it before dispatching a new run.`
+            : outcome.state === "cancelled"
+              ? `Pipeline run ${outcome.runId} for feed job "${def.id}" was cancelled before the feed pull recorded an outcome (job_cancelled).`
+              : `Pipeline run ${outcome.runId} for feed job "${def.id}" settled as "${outcome.state}" before the feed pull recorded an outcome.`);
+        return feedRunRefusalResponse(code, message);
       }
       await ctx.recordAudit("data_provider.feed_run", "orchestrator", {
         actor: ctx.userLogin,
@@ -1391,12 +1417,12 @@ export async function handleDataProviderRoutes(
           status: await door.getFeedJobSurfaceStatus(jobId),
         });
       } catch (error) {
-        return Response.json(
-          {
-            error: error instanceof Error ? error.message : String(error),
-            code: "FEED_JOB_ACTION_REFUSED",
-          },
-          { status: 409 },
+        // Issue #6235 — the same refusal mapping as the feed-run
+        // route, so a paused job's run refusal keeps the engine's
+        // job_already_running code instead of the generic one.
+        return feedRunRefusalResponse(
+          codedErrorOf(error),
+          error instanceof Error ? error.message : String(error),
         );
       }
     }

@@ -1,0 +1,3 @@
+### Fixed
+
+- **Accepted feed runs settle with a visible terminal record (#6235):** the ScheduledAgent pipeline host now records terminal run records through the D1 job-run-record adapter when `AGENT_DB` is bound — the same engine D1 records the workflow residency writes and the D1-only run ledger reads — instead of leaving them in host DO SQLite where only a configured projection carrier could make them visible. A paused feed job refuses dispatch with the engine's `job_already_running` code naming the paused state, a run that pauses or is cancelled before storing a dataset artifact keeps its paused/`job_cancelled` reason, and the Data Providers feed-job row renders a pipeline run newer than the dataset artifact with its terminal error. #CAIO-quns

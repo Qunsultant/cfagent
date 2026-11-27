@@ -786,6 +786,13 @@ export function DataProvidersPanel() {
             {jobs.map((job) => {
               const state = job.pipeline?.state ?? "unknown";
               const lastRun = job.feed?.lastRun ?? null;
+              // #6235 — a pipeline run that settled before storing a
+              // dataset artifact is newer than the dataset lastRun;
+              // render it (and its reason) instead of leaving the
+              // prior artifact as the only visible run.
+              const pipelineRunIsLatest =
+                job.pipeline?.lastRunAt != null &&
+                (!lastRun || job.pipeline.lastRunAt > lastRun.finishedAt);
               const snapshot = job.feed?.snapshot ?? null;
               const ageLabel = snapshot
                 ? snapshot.ageSeconds < 90
@@ -817,6 +824,14 @@ export function DataProvidersPanel() {
                     )}
                     {job.nextScheduledRun && (
                       <span>{`Next run: ${fmtDataProviderTime(job.nextScheduledRun)}`}</span>
+                    )}
+                    {pipelineRunIsLatest && (
+                      <span>
+                        {`Pipeline run: ${job.pipeline?.lastRunStatus ?? state} · ${fmtDataProviderTime(job.pipeline?.lastRunAt ?? null)}`}
+                      </span>
+                    )}
+                    {pipelineRunIsLatest && job.pipeline?.lastError && (
+                      <span className="ui-danger">{job.pipeline.lastError}</span>
                     )}
                     {lastRun?.codedError && (
                       <span className="ui-danger">{lastRun.codedError}</span>
