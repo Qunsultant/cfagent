@@ -118,6 +118,7 @@ import {
   FEED_JOB_TIMEOUT_KNOBS,
   FEED_JOB_TIMEOUTS,
   resolveFeedJobTimeoutMs,
+  withFeedDeadline,
 } from "../../services/feedJobTimeouts";
 import {
   FEED_PIPELINE_CATALOG,
@@ -531,6 +532,54 @@ function feedPipelineDoorFor(
   return ns.get(ns.idFromName("default")) as unknown as FeedPipelineDoorLike;
 }
 
+/**
+ * Issue #6705 — the panel read bound. The Data Providers panel's
+ * one read (GET /data-providers) awaits host-door list RPCs; a
+ * bare await on a host that never answers hangs the route and
+ * the panel spins forever (the try/catch around the reads only
+ * handles a rejected RPC, never an unsettled one). Every door
+ * list read therefore races this bound — the feed deadline
+ * idiom (withFeedDeadline) with its own externalized knob — and
+ * a timed-out read degrades to the existing honest fallbacks
+ * (feed catalog #6046, empty family lists) with the timeout
+ * logged by name. Basis for the default: a status list is a
+ * seconds-scale D1 read; 10s sits far above it and far below
+ * any operator's patience for a settings panel.
+ */
+const PANEL_READ_TIMEOUT_CODE = "DATA_PROVIDERS_PANEL_READ_TIMEOUT";
+const PANEL_READ_KNOB = "DATA_PROVIDERS_PANEL_READ_MS";
+const PANEL_READ_DEFAULT_MS = 10_000;
+
+function panelReadBoundMs(ctx: DataProviderRoutesContext): number {
+  return resolveFeedJobTimeoutMs(
+    ctx.env as unknown as Record<string, unknown>,
+    PANEL_READ_KNOB,
+    PANEL_READ_DEFAULT_MS,
+  );
+}
+
+/**
+ * One bounded door list read: the list, or null when the read
+ * failed or exceeded the panel read bound. Never throws — the
+ * callers' existing fallbacks decide what a null means.
+ */
+async function boundedDoorList<T>(
+  ctx: DataProviderRoutesContext,
+  label: string,
+  work: () => Promise<T[]>,
+): Promise<T[] | null> {
+  try {
+    return await withFeedDeadline(work(), panelReadBoundMs(ctx), PANEL_READ_TIMEOUT_CODE);
+  } catch (error) {
+    structuredLog.warn("data_providers.panel_read_failed", {
+      message: `[data-providers] ${label} status read failed: ${error instanceof Error ? error.message : String(error)}`,
+      label,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* #3578 — the feed-run route's convergence onto the door above:      */
 /* the outcome read + the refusal mapping onto S1's shapes            */
@@ -673,22 +722,29 @@ async function feedJobsViewFor(
   providerId: DataProviderId,
 ): Promise<FeedJobSurfaceView[]> {
   const door = feedPipelineDoorFor(ctx);
-  if (door) {
-    try {
-      const all = await door.listFeedJobSurfaceStatuses();
-      const mine = all.filter((v) => v.sourceId === providerId);
-      if (mine.length > 0) return mine;
-    } catch (error) {
-      structuredLog.warn("data_providers.feed_jobs_status_read_failed", {
-        message: `[data-providers] feed-jobs status read for "${providerId}" failed: ${error instanceof Error ? error.message : String(error)}`,
-        providerId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
+  const all = door
+    ? await boundedDoorList(ctx, "feed-jobs", () => door.listFeedJobSurfaceStatuses())
+    : null;
+  return feedJobsFromList(ctx, providerId, all);
+}
+
+/**
+ * One provider's feed jobs from an already-fetched door list
+ * (null = the read failed or timed out). Issue #6046 — an
+ * unbound, empty, or timed-out door read must not render "no
+ * jobs": the catalog is the truth of which jobs exist, and the
+ * dataset store is the truth of what each stored. Pipeline-only
+ * fields stay honestly null.
+ */
+async function feedJobsFromList(
+  ctx: DataProviderRoutesContext,
+  providerId: DataProviderId,
+  all: FeedJobSurfaceView[] | null,
+): Promise<FeedJobSurfaceView[]> {
+  if (all) {
+    const mine = all.filter((v) => v.sourceId === providerId);
+    if (mine.length > 0) return mine;
   }
-  // Issue #6046 — an unbound or empty door read must not render "no jobs":
-  // the catalog is the truth of which jobs exist, and the dataset store is
-  // the truth of what each stored. Pipeline-only fields stay honestly null.
   const rows = await buildCatalogFeedJobSurfaceViews({
     providerId,
     registry: feedRegistryFor(ctx),
@@ -745,17 +801,8 @@ async function enrichJobsViewFor(
 ): Promise<EnrichJobSurfaceView[]> {
   const door = feedPipelineDoorFor(ctx);
   if (!door) return [];
-  try {
-    const all = await door.listEnrichJobSurfaceStatuses();
-    return all.filter((v) => v.sourceId === providerId);
-  } catch (error) {
-    structuredLog.warn("data_providers.enrich_jobs_status_read_failed", {
-      message: `[data-providers] enrich-jobs status read for "${providerId}" failed: ${error instanceof Error ? error.message : String(error)}`,
-      providerId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return [];
-  }
+  const all = await boundedDoorList(ctx, "enrich-jobs", () => door.listEnrichJobSurfaceStatuses());
+  return all ? all.filter((v) => v.sourceId === providerId) : [];
 }
 
 /**
@@ -770,17 +817,8 @@ async function analyzeJobsViewFor(
 ): Promise<AnalyzeJobSurfaceView[]> {
   const door = feedPipelineDoorFor(ctx);
   if (!door) return [];
-  try {
-    const all = await door.listAnalyzeJobSurfaceStatuses();
-    return all.filter((v) => v.sourceId === providerId);
-  } catch (error) {
-    structuredLog.warn("data_providers.analyze_jobs_status_read_failed", {
-      message: `[data-providers] analyze-jobs status read for "${providerId}" failed: ${error instanceof Error ? error.message : String(error)}`,
-      providerId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return [];
-  }
+  const all = await boundedDoorList(ctx, "analyze-jobs", () => door.listAnalyzeJobSurfaceStatuses());
+  return all ? all.filter((v) => v.sourceId === providerId) : [];
 }
 
 /**
@@ -795,17 +833,8 @@ async function generateJobsViewFor(
 ): Promise<GenerateJobSurfaceView[]> {
   const door = feedPipelineDoorFor(ctx);
   if (!door) return [];
-  try {
-    const all = await door.listGenerateJobSurfaceStatuses();
-    return all.filter((v) => v.sourceId === providerId);
-  } catch (error) {
-    structuredLog.warn("data_providers.generate_jobs_status_read_failed", {
-      message: `[data-providers] generate-jobs status read for "${providerId}" failed: ${error instanceof Error ? error.message : String(error)}`,
-      providerId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return [];
-  }
+  const all = await boundedDoorList(ctx, "generate-jobs", () => door.listGenerateJobSurfaceStatuses());
+  return all ? all.filter((v) => v.sourceId === providerId) : [];
 }
 
 /**
@@ -820,17 +849,8 @@ async function deliverJobsViewFor(
 ): Promise<DeliverJobSurfaceView[]> {
   const door = feedPipelineDoorFor(ctx);
   if (!door) return [];
-  try {
-    const all = await door.listDeliverJobSurfaceStatuses();
-    return all.filter((v) => v.sourceId === providerId);
-  } catch (error) {
-    structuredLog.warn("data_providers.deliver_jobs_status_read_failed", {
-      message: `[data-providers] deliver-jobs status read for "${providerId}" failed: ${error instanceof Error ? error.message : String(error)}`,
-      providerId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return [];
-  }
+  const all = await boundedDoorList(ctx, "deliver-jobs", () => door.listDeliverJobSurfaceStatuses());
+  return all ? all.filter((v) => v.sourceId === providerId) : [];
 }
 
 /**
@@ -845,17 +865,8 @@ async function pipelineChainsViewFor(
 ): Promise<PipelineChainSurfaceView[]> {
   const door = feedPipelineDoorFor(ctx);
   if (!door) return [];
-  try {
-    const all = await door.listPipelineChainSurfaceStatuses();
-    return all.filter((v) => v.sourceId === providerId);
-  } catch (error) {
-    structuredLog.warn("data_providers.pipeline_chains_status_read_failed", {
-      message: `[data-providers] pipeline-chains status read for "${providerId}" failed: ${error instanceof Error ? error.message : String(error)}`,
-      providerId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return [];
-  }
+  const all = await boundedDoorList(ctx, "pipeline-chains", () => door.listPipelineChainSurfaceStatuses());
+  return all ? all.filter((v) => v.sourceId === providerId) : [];
 }
 
 /**
@@ -961,6 +972,22 @@ export async function handleDataProviderRoutes(
       const routes = await readRoutes();
       const registry = buildPlatformRegistry(ctx);
       const routeViews = routeServability(registry, configs, routes);
+      // Issue #6705 — each door list is fetched once per request
+      // (in parallel, each under the panel read bound), never
+      // once per provider: the per-provider repeats multiplied
+      // both the host load and the hang surface.
+      const door = feedPipelineDoorFor(ctx);
+      const [feedAll, enrichAll, analyzeAll, generateAll, deliverAll, chainsAll] =
+        door
+          ? await Promise.all([
+              boundedDoorList(ctx, "feed-jobs", () => door.listFeedJobSurfaceStatuses()),
+              boundedDoorList(ctx, "enrich-jobs", () => door.listEnrichJobSurfaceStatuses()),
+              boundedDoorList(ctx, "analyze-jobs", () => door.listAnalyzeJobSurfaceStatuses()),
+              boundedDoorList(ctx, "generate-jobs", () => door.listGenerateJobSurfaceStatuses()),
+              boundedDoorList(ctx, "deliver-jobs", () => door.listDeliverJobSurfaceStatuses()),
+              boundedDoorList(ctx, "pipeline-chains", () => door.listPipelineChainSurfaceStatuses()),
+            ])
+          : [null, null, null, null, null, null];
       return Response.json({
         providers: await Promise.all(
           configs.map(async (c) =>
@@ -971,12 +998,12 @@ export async function handleDataProviderRoutes(
               ctx.sql,
               ctx.capturePort,
               await feedViewFor(ctx, c.id),
-              await feedJobsViewFor(ctx, c.id),
-              await enrichJobsViewFor(ctx, c.id),
-              await analyzeJobsViewFor(ctx, c.id),
-              await generateJobsViewFor(ctx, c.id),
-              await deliverJobsViewFor(ctx, c.id),
-              await pipelineChainsViewFor(ctx, c.id),
+              await feedJobsFromList(ctx, c.id, feedAll),
+              (enrichAll ?? []).filter((v) => v.sourceId === c.id),
+              (analyzeAll ?? []).filter((v) => v.sourceId === c.id),
+              (generateAll ?? []).filter((v) => v.sourceId === c.id),
+              (deliverAll ?? []).filter((v) => v.sourceId === c.id),
+              (chainsAll ?? []).filter((v) => v.sourceId === c.id),
             )
           )
         ),
