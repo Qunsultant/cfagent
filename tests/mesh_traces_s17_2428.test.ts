@@ -49,6 +49,7 @@ import type {
   WorkflowPort,
 } from "../src/workflows/workflowPorts";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 
 /* ------------------------------------------------------------------ */
 /* The S8-path harness (mirrors tests/mesh_g2_chat_screen_workflow)    */
@@ -99,8 +100,11 @@ function makeHarness(): Harness {
   const trace = newTraceContext();
   const traceparent = formatTraceparent(trace);
 
+  // #6101: the screen run's canonical row lands in D1 — the
+  // report write env and the port ctx env share one binding.
+  const d1 = new MockD1Database();
   const reportCtx = {
-    env: {},
+    env: { AGENT_DB: d1 },
     ensureTables: () => sql,
   } as unknown as ReportDispatchContext;
 
@@ -157,7 +161,7 @@ function makeHarness(): Harness {
     // environment.config.json; the chat screen would fail closed on
     // the paid gate. These tests pin trace propagation through the
     // chat screen path, not payment, so the paid gate stays off.
-    env: { MONETIZATION_ENABLED: "false" } as NlqPortsContext["env"],
+    env: { MONETIZATION_ENABLED: "false", AGENT_DB: d1 } as NlqPortsContext["env"],
     ensureTables: () => sql as never,
     workflowPort: recordingPort,
     readWorkflowJobHistory: (tenantId, chainId) =>

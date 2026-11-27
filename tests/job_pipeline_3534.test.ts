@@ -7,15 +7,20 @@
  * with every transition published — and no job code written.
  * Plus the substrate proofs: run records through the platform
  * machinery (system "job-pipeline"), the DO-SQLite adapters over
- * a node:sqlite double, the queue composition root's named
- * unconfigured state, and the workflow flow's step.do journal.
+ * a node:sqlite double, the D1 run-record store (#6101 — the DO
+ * run-record adapter is deleted), the queue composition root's
+ * named unconfigured state, and the workflow flow's step.do journal.
  */
 import { describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { createInMemoryJobPipelineStores } from "../src/data/inMemoryJobPipelineAdapter";
 import { DoSqliteJobPipelineStores } from "../src/data/doSqliteJobPipelineAdapter";
 import { InMemoryJobRunRecordStore } from "../src/data/inMemoryJobRunRecordAdapter";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
+import { jobRunRecorderFromD1 } from "../src/data/createJobRunRecordPorts";
 import type { JobPipelineStores } from "../src/data/jobPipelinePorts";
 import type { JobRunRecordStore } from "../src/data/jobRunRecordPorts";
 import {
@@ -50,6 +55,44 @@ class SqliteTestStorage {
     }
     stmt.run(...(params as never[]));
     return [];
+  }
+}
+
+
+/** Minimal D1Database stand-in over node:sqlite (the #6101 suite's double). */
+class MockD1Database {
+  readonly sqlite = new DatabaseSync(":memory:");
+  prepare(sql: string) {
+    const db = this.sqlite;
+    return {
+      bind(...params: unknown[]) {
+        return {
+          async run() {
+            const info = db.prepare(sql).run(...(params as any[]));
+            return {
+              success: true,
+              meta: { changes: info.changes, last_row_id: info.lastInsertRowid },
+              results: [],
+            };
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...(params as any[])) };
+          },
+          async first() {
+            return db.prepare(sql).get(...(params as any[])) ?? null;
+          },
+          async raw() {
+            return db
+              .prepare(sql)
+              .all(...(params as any[]))
+              .map((row: any) => Object.values(row));
+          },
+        };
+      },
+    };
+  }
+  async batch(stmts: { run: () => Promise<unknown> }[]) {
+    return Promise.all(stmts.map((stmt) => stmt.run()));
   }
 }
 
@@ -575,19 +618,26 @@ describe("J1 scheduling, configuration, and processing options", () => {
 });
 
 describe("J1 substrates — DO adapters, queue composition root, workflow flow", () => {
-  it("runs the dummy job end-to-end over the DO-SQLite adapters and the platform run-record store", async () => {
+  it("runs the dummy job end-to-end over the DO-SQLite adapters and the D1 run-record store", async () => {
+    // Issue #6101 — the pipeline stores stay DO-SQLite; the run
+    // record lands in D1 (the DO run-record adapter is deleted),
+    // through the jobRunRecorderFromD1 engine seam.
     const storage = new SqliteTestStorage();
     const stores = new DoSqliteJobPipelineStores(
       storage as unknown as ConstructorParameters<typeof DoSqliteJobPipelineStores>[0],
     );
-    const runStore = new SqlJobRunRecordStore(
-      storage as unknown as ConstructorParameters<typeof SqlJobRunRecordStore>[0],
+    const d1 = new MockD1Database();
+    const runStore = new D1JobRunRecordStore(
+      createD1JobRunRecordDb(d1 as unknown as D1Database),
     );
     let tick = 0;
     const base = Date.parse("2026-11-06T12:00:00.000Z");
     const control = createJobPipelineControl({
       stores,
-      runRecorder: jobRunRecorderFromStore(runStore),
+      runRecorder: jobRunRecorderFromD1(runStore, {
+        tenantId: "primary",
+        platformId: "cfagent",
+      }),
       publisher: null,
       steps: createBuiltinStepRegistry(),
       now: () => new Date(base + tick++ * 1000),
@@ -599,7 +649,7 @@ describe("J1 substrates — DO adapters, queue composition root, workflow flow",
     const view = await control.getJob("dummy");
     expect(view.history).toHaveLength(1);
     expect(view.history[0].system).toBe("job-pipeline");
-    expect(runStore.latestByJob("dummy")?.outcome).toBe("success");
+    expect((await runStore.latestByJob("dummy"))?.outcome).toBe("success");
   });
 
   it("names the unconfigured queue state and builds ports when the binding exists", async () => {

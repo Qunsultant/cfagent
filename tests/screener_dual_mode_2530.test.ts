@@ -516,6 +516,7 @@ import {
 } from "../src/agents/orchestrator/meshScreenDoor";
 import type { WorkflowPort } from "../src/workflows/workflowPorts";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 
 interface DoorHarness {
   started: WorkflowJobCommand[];
@@ -783,8 +784,11 @@ function makeGoldenHarness(ndGateOn: boolean): GoldenHarness {
     interpretCalls: 0,
     audits,
   };
+  // #6101: the screen run's canonical row lands in D1 — the
+  // write env and the door env share one binding.
+  const d1 = new MockD1Database();
   const reportCtx = {
-    env: {},
+    env: { AGENT_DB: d1 },
     ensureTables: () => sql,
   } as unknown as ReportDispatchContext;
   const deps: ScreenerWorkflowDeps = {
@@ -843,8 +847,8 @@ function makeGoldenHarness(ndGateOn: boolean): GoldenHarness {
     // environment.config.json; the golden pair pins mode selection,
     // not payment, so the paid gate stays off in both branches.
     env: (ndGateOn
-      ? { SCREENER_ND_MODE: "on", MONETIZATION_ENABLED: "false" }
-      : { MONETIZATION_ENABLED: "false" }) as MeshScreenDoorContext["env"],
+      ? { SCREENER_ND_MODE: "on", MONETIZATION_ENABLED: "false", AGENT_DB: d1 }
+      : { MONETIZATION_ENABLED: "false", AGENT_DB: d1 }) as MeshScreenDoorContext["env"],
     ensureTables: () => sql as never,
     workflowPort: recordingPort,
     readWorkflowJobHistory: (tenantId, chainId) => shardStore.listJobsForChain(tenantId, chainId),

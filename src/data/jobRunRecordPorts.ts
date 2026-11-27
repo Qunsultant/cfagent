@@ -1,21 +1,24 @@
 /**
  * Issue #2964 — per-run result record port: one record per job run,
- * for the unified Jobs UI. The record is one half of a single
- * mechanism whose other half — the Agents SDK schedule table, or the
- * ScheduledAgent goals key — lives in the same Durable Object's
- * storage, so the record stays DO-resident by the same ADR D-0
- * reasoning as the paused-schedule port (issue #2337): it is
- * execution machinery of the instance, not read cross-instance.
+ * for the unified Jobs UI.
+ *
+ * Issue #6101 overturns the #2964 NEVER-EITHER/OR decision with
+ * evidence: the record IS read cross-instance — the unified Jobs
+ * UI reads the D1 ledger, the reports routes read D1 run records,
+ * and the trading routes merge orchestrator + goal runs from the
+ * one ledger — so the record lives in D1, not DO-resident. The
+ * DO `job_run_records` table is frozen pre-cutover history (DROP
+ * in #6627); the ScheduledAgent KV `"jobRunRecords"` key is
+ * retired (step 9) — the ScheduledAgent posts its rows to the
+ * shared ledger through the ledger post instead. The old
+ * DO-resident reasoning (ADR D-0, same-DO execution machinery)
+ * no longer holds for this record: it is the cross-instance
+ * ledger, and D1 is its home.
  *
  * This module carries the record types, the table name, the
  * per-job cap, and the store interface ONLY (ADR 0002 R1/R2).
- * Adapters: doSqliteJobRunRecordAdapter.ts (production, DO SQLite),
- * inMemoryJobRunRecordAdapter.ts (test double). The ScheduledAgent
- * side stores the same record shape under its own DO key-value key
- * ("jobRunRecords") — the stores are NOT merged (issue #2964
- * NEVER-EITHER/OR: the management surface unifies, the stores stay
- * separate, and scheduleSystems.ts carries the merge as a separate
- * slice, not smuggled in here).
+ * Adapters: d1JobRunRecordAdapter.ts (production, D1),
+ * inMemoryJobRunRecordAdapter.ts (test double).
  *
  * Outcome vocabulary is deliberately three-valued: success,
  * failure, and skipped. Goal executors and scheduled callbacks
@@ -27,7 +30,7 @@
  * failure.
  */
 
-/** The DO-SQLite table for orchestrator-schedule run records. */
+/** The D1 table for run records (D1 since #6101; the DO table of the same name is frozen pre-cutover history). */
 export const JOB_RUN_RECORDS_TABLE = "job_run_records";
 
 /** Newest-first runs kept per orchestrator schedule. */
@@ -42,7 +45,7 @@ export const JOB_RUN_RECORDS_PER_JOB_CAP = 100;
  *  pipeline jobs record their terminal runs through this same
  *  machinery — no second run store. "job-outcome" is the #6006
  *  outcome-fold system: a D1 row created from a mas_job_outcomes
- *  row that has no engine/DO job_run_records twin (the twin-less
+ *  row that has no engine D1 job_run_records twin (the twin-less
  *  kinds — corpus, reports, trading — and any outcome whose run
  *  left no job record). Its jobId IS the outcome id, so the row
  *  stays addressable by the run it records; started == finished ==
@@ -241,9 +244,9 @@ export interface JobRunRecord {
    * Issue #3655: broker + data-provider + mode provenance for the run,
    * stamped from the firing schedule payload (recorded at creation).
    * Absent on rows recorded before provenance existed — never
-   * backfilled from the currently selected broker. D1-backed rows do
-   * not carry these fields yet (no migration adds the columns there);
-   * the DO-SQLite ledger is the surface that stores them.
+   * backfilled from the currently selected broker. D1-backed rows
+   * carry these fields too (issue #6557); the DO table carried them
+   * first, and is frozen now.
    */
   brokerId?: string | null;
   dataProviderId?: string | null;
@@ -262,6 +265,22 @@ export interface JobRunRecord {
   accountId?: string | null;
   bindingScope?: string | null;
   bindingSource?: string | null;
+  /**
+   * Issue #6101 — the identity columns (D1 migration 0093): the
+   * FK-spine columns for platform/user/session plus the plain
+   * correlation/trace columns. Optional so rows recorded before
+   * the cutover still parse; absent reads as null, never
+   * backfilled. No master tables exist yet (#6427), so the
+   * REFERENCES constraints wait on the masters — the columns are
+   * the spine, and the ER relationships are declared in
+   * docs/architecture/data/data-model.md §2.2.
+   */
+  tenantId?: string | null;
+  platformId?: string | null;
+  userId?: string | null;
+  sessionId?: string | null;
+  correlationId?: string | null;
+  traceId?: string | null;
   /**
    * Issue #6006 — the outcome facts a folded mas_job_outcomes row
    * carries on the one run source (D1 migration 0086). Optional so
@@ -284,7 +303,7 @@ export interface JobRunRecord {
   reportUrl?: string | null;
 }
 
-/** The per-run record store surface (synchronous: DO SQLite is sync). */
+/** The per-run record store surface (synchronous: the in-memory store and the retired DO adapter; the D1 writer is async — see createJobRunRecordPorts.ts). */
 export interface JobRunRecordStore {
   /** Insert the record, then prune that job to the per-job cap. */
   record(record: JobRunRecord): void;

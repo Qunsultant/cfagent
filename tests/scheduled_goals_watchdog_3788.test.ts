@@ -38,6 +38,7 @@ import { SCHEDULE_WATCHDOG_FIRST_SEEN_KEY } from "../src/services/scheduleWatchd
 import { MockD1Database } from "./mock-d1";
 import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import { goalToRecord } from "../src/services/unifiedScheduleManagement";
+import { makeLedgerStub } from "./ledger-stub";
 
 /**
  * Issue #6503 — the fixture goal is planted in the D1 schedule
@@ -67,6 +68,12 @@ function makeStore() {
 }
 
 function makeEnv(mockD1?: MockD1Database) {
+  // Issue #6101 (step 9) — the KV "jobRunRecords" key is retired:
+  // the watchdog's missed-fire + heartbeat rows land only through
+  // the ledger post, so every env binds a fresh ledger stub as
+  // ORCHESTRATOR_AGENT. The stub rides on the env as `ledgerStub`
+  // (test-only handle: seed/inspect its `runs`).
+  const ledger = makeLedgerStub();
   return {
     PAYMENTS_AGENT: {
       idFromName: () => "payments-default",
@@ -74,6 +81,8 @@ function makeEnv(mockD1?: MockD1Database) {
     },
     SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/T/test",
     MISSED_SCHEDULE_GRACE_MINUTES: "0.01",
+    ORCHESTRATOR_AGENT: ledger.namespace,
+    ledgerStub: ledger,
     ...(mockD1 ? { AGENT_DB: mockD1 } : {}),
   } as any;
 }
@@ -172,26 +181,28 @@ describe("ScheduledAgent schedule watchdog (#3788)", () => {
     const mockD1 = new MockD1Database();
     const goal = missedGoal();
     await plantGoals(mockD1, [goal]);
-    const agent = new (ScheduledAgent as any)(ctx, makeEnv(mockD1));
+    const env = makeEnv(mockD1);
+    const agent = new (ScheduledAgent as any)(ctx, env);
     store.set(SCHEDULE_WATCHDOG_FIRST_SEEN_KEY, {
       "daily-qa-sweep": new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
     });
-    // A run 30 minutes ago covers the hour-ago tick.
-    store.set("jobRunRecords", [
-      {
-        system: "scheduled-agent-goal",
-        jobId: "daily-qa-sweep",
-        operation: "search.query",
-        started: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-        finished: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-        outcome: "success",
-        triggeredBy: "scheduled",
-        trigger: "scheduled",
-        scheduleId: "daily-qa-sweep",
-        asyncJobId: null,
-        workflowId: null,
-      },
-    ]);
+    // A run 30 minutes ago covers the hour-ago tick. Issue #6101
+    // (step 9): the KV "jobRunRecords" key is retired, so the run
+    // is seeded into the ledger stub's rows instead — same row,
+    // same assertions, new home.
+    env.ledgerStub.runs.unshift({
+      system: "scheduled-agent-goal",
+      jobId: "daily-qa-sweep",
+      operation: "search.query",
+      started: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+      finished: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+      outcome: "success",
+      triggeredBy: "scheduled",
+      trigger: "scheduled",
+      scheduleId: "daily-qa-sweep",
+      asyncJobId: null,
+      workflowId: null,
+    });
     const capturingPost = vi.fn(async () => ({ status: 200 }));
     await agent.onCron({ watchdogSlackPost: capturingPost });
 

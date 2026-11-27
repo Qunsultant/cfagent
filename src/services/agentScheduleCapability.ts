@@ -58,10 +58,13 @@ import { createKvMembershipStore } from "../security/iaaaMembershipStore";
 import { createKvPermissionDenialStore } from "../security/iaaaPermissionDenialStore";
 import { sessionStore } from "../security/session";
 import { buildJobRunRecord, type JobRunRecord } from "./jobRunRecords";
-import { recordLedgerRun } from "./unifiedLedger";
+import {
+  createJobRunRecordAdapter,
+  recordLedgerRunD1,
+  resolveLedgerAttribution,
+} from "../data/createJobRunRecordPorts";
 import type { AgentScheduleItem } from "../types";
 import type { Env } from "../types";
-import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
 import { createPendingScheduleApprovalPort } from "../data/doSqlitePendingScheduleApprovalsAdapter";
 import type {
   ResolvedScheduleTiming,
@@ -1873,7 +1876,12 @@ export function createAgentScheduleExecutorDepsForDo(
   stores: AgentScheduleExecutorDeps["stores"],
 ): AgentScheduleExecutorDeps {
   const pdpDeps = createAgentSchedulePdpDeps(env);
-  const ledgerStore = new SqlJobRunRecordStore(sql);
+  // Issue #6101 — the ledger store is the D1 store (built
+  // synchronously; its schema ensures lazily on first use). The
+  // attribution rides the host env (tenant + platform); the user
+  // is the record's own when the caller stamped one.
+  const ledgerStore = createJobRunRecordAdapter(env);
+  const ledgerAttribution = resolveLedgerAttribution(env);
   // Issue #6482 — the executor's floor is the EFFECTIVE floor
   // (managed setting > env carrier > fail-closed default, monthly),
   // resolved from this DO's own store, so a floor set in the
@@ -1887,10 +1895,18 @@ export function createAgentScheduleExecutorDepsForDo(
     nowMs: () => Date.now(),
     nowIso: () => new Date().toISOString(),
     // Issue #5085 (S6): the one write entry — agent-schedule action
-    // rows go through recordLedgerRun (validate + store) like every
-    // other DO-SQLite writer, never a direct store.record call.
-    recordLedger: (record) => {
-      recordLedgerRun(ledgerStore, record);
+    // rows go through recordLedgerRunD1 (validate + store) like every
+    // other D1 writer, never a direct store.record call. Issue
+    // #6101: the store is D1; an unbound AGENT_DB throws a named
+    // error (the deps contract already lets recordLedger reject —
+    // the awaiter sees the same failure the sync throw was).
+    recordLedger: async (record) => {
+      if (!ledgerStore) {
+        throw new Error(
+          "[run-ledger] D1 run-ledger binding unbound (AGENT_DB): the agent-schedule run cannot be recorded; configure the binding rather than recording nowhere (#6101).",
+        );
+      }
+      await recordLedgerRunD1(ledgerStore, record, ledgerAttribution);
     },
     audit,
     pendingApprovals: createPendingScheduleApprovalPort(sql),

@@ -170,8 +170,36 @@ export interface ReportReader {
   /** Latest row per report for one tenant, newest first. */
   listReports(
     tenantId: string,
+    opts?: { userLogin?: string; limit?: number; source?: string },
+  ): Promise<CanonicalReportRow[]>;
+  /**
+   * Issue #6101 (step 8) — token LIKE search over title/summary/body,
+   * one LIKE group per token, OR-joined (the DO searchRows parity).
+   * Newest first, latest version per report.
+   */
+  searchReports(
+    tenantId: string,
+    tokens: string[],
     opts?: { userLogin?: string; limit?: number },
   ): Promise<CanonicalReportRow[]>;
+  /**
+   * Issue #6101 (step 8) — newest version for a generation id, or null.
+   * The writer dedupe: one canonical row per generation id.
+   */
+  latestReportByGeneration(
+    tenantId: string,
+    generationId: string,
+    userLogin?: string,
+  ): Promise<CanonicalReportRow | null>;
+  /**
+   * Issue #6101 (step 8) — newest row for a run id (a duplicated run
+   * id resolves to the latest canonical copy), or null.
+   */
+  latestReportByRunId(
+    tenantId: string,
+    runId: string,
+    userLogin?: string,
+  ): Promise<CanonicalReportRow | null>;
 }
 
 /** Idempotent versioned writes over the report projection. */

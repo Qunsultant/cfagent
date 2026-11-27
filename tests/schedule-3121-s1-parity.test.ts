@@ -99,6 +99,7 @@ vi.mock("../src/security/etradeOAuth", () => ({
 import { createJob } from "../src/orchestrate";
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
 import { MockD1Database } from "./mock-d1";
+import { makeLedgerStub } from "./ledger-stub";
 import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 import {
@@ -107,7 +108,10 @@ import {
   resolveScheduleRunJobId,
   type JobRunRecord,
 } from "../src/services/jobRunRecords";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
 import { JOB_RUN_RECORD_FIELDS } from "../src/services/scheduleSystems";
 import {
   LEDGER_TRIGGERS,
@@ -181,6 +185,15 @@ function makeCtx(initialGoals?: any[]) {
   };
 }
 
+/** Issue #6101 — the D1 run ledger over a fresh in-memory mock binding. */
+function ledgerD1() {
+  const d1 = new MockD1Database();
+  const store = new D1JobRunRecordStore(
+    createD1JobRunRecordDb(d1 as unknown as D1Database),
+  );
+  return { d1, store };
+}
+
 /**
  * Issue #6503 — the fixture goal is planted in the D1 schedule
  * store, not the DO KV "goals" key (which the agent no longer
@@ -202,6 +215,11 @@ function makeEnv(mockD1?: MockD1Database) {
       get: () => ({ budgetCheck: async () => ({ allowed: true }) }),
     },
     SESSION_STORE: null,
+    // Issue #6101 step 9 — the KV "jobRunRecords" key is retired:
+    // fired goals post their runs to the shared ledger through
+    // ORCHESTRATOR_AGENT, so bind a fresh in-memory ledger stub —
+    // listJobRuns/getLatestJobRun read the posted runs back.
+    ORCHESTRATOR_AGENT: makeLedgerStub().namespace,
     ...(mockD1 ? { AGENT_DB: mockD1 } : {}),
   };
 }
@@ -451,15 +469,17 @@ describe("S1-P04 linkage resolvers (#3121)", () => {
 describe("S1-P05 write site — SDK firings and manual triggers (#3121)", () => {
   it("stamps the SDK schedule id on a scheduled firing", async () => {
     const storage = new SqliteTestStorage();
+    const { d1, store } = ledgerD1();
     await recordScheduleCallbackRun(
       storage.sql as never,
       "autonomousMarketScreen",
       {},
       { id: "sdk-9" },
       async () => ({ outcome: "success" }),
+      // Issue #6101 — the recorder resolves the D1 store from env.
+      { env: { AGENT_DB: d1 } },
     );
-    const store = new SqlJobRunRecordStore(storage.sql as never);
-    const runs = store.listByJob("sdk-9");
+    const runs = await store.listByJob("sdk-9");
     expect(runs).toHaveLength(1);
     expect(runs[0].triggeredBy).toBe("scheduled");
     expect(runs[0].trigger).toBe("scheduled");
@@ -470,15 +490,17 @@ describe("S1-P05 write site — SDK firings and manual triggers (#3121)", () => 
 
   it("stamps the payload trigger + schedule id on a manual trigger", async () => {
     const storage = new SqliteTestStorage();
+    const { d1, store } = ledgerD1();
     await recordScheduleCallbackRun(
       storage.sql as never,
       "autonomousMarketScreen",
       { trigger: "manual", scheduleId: "manual-4" },
       { id: "sched-9" },
       async () => ({ outcome: "success" }),
+      // Issue #6101 — the recorder resolves the D1 store from env.
+      { env: { AGENT_DB: d1 } },
     );
-    const store = new SqlJobRunRecordStore(storage.sql as never);
-    const runs = store.listByJob("sched-9");
+    const runs = await store.listByJob("sched-9");
     expect(runs).toHaveLength(1);
     expect(runs[0].triggeredBy).toBe("manual");
     expect(runs[0].trigger).toBe("manual");
@@ -487,15 +509,17 @@ describe("S1-P05 write site — SDK firings and manual triggers (#3121)", () => 
 
   it("records explicit nulls when a firing has no schedule", async () => {
     const storage = new SqliteTestStorage();
+    const { d1, store } = ledgerD1();
     await recordScheduleCallbackRun(
       storage.sql as never,
       "collectIvHistory",
       {},
       undefined,
       async () => ({ outcome: "success" }),
+      // Issue #6101 — the recorder resolves the D1 store from env.
+      { env: { AGENT_DB: d1 } },
     );
-    const store = new SqlJobRunRecordStore(storage.sql as never);
-    const runs = store.listByJob("callback:collectIvHistory");
+    const runs = await store.listByJob("callback:collectIvHistory");
     expect(runs).toHaveLength(1);
     expect(runs[0].trigger).toBe("scheduled");
     expect(runs[0].scheduleId).toBeNull();
@@ -506,6 +530,7 @@ describe("S1-P05 write site — SDK firings and manual triggers (#3121)", () => 
 
   it("stamps linkage on a failed firing too", async () => {
     const storage = new SqliteTestStorage();
+    const { d1, store } = ledgerD1();
     await expect(
       recordScheduleCallbackRun(
         storage.sql as never,
@@ -515,10 +540,11 @@ describe("S1-P05 write site — SDK firings and manual triggers (#3121)", () => 
         async () => {
           throw new Error("callback down");
         },
+        // Issue #6101 — the recorder resolves the D1 store from env.
+        { env: { AGENT_DB: d1 } },
       ),
     ).rejects.toThrow(/callback down/);
-    const store = new SqlJobRunRecordStore(storage.sql as never);
-    const runs = store.listByJob("sched-9");
+    const runs = await store.listByJob("sched-9");
     expect(runs).toHaveLength(1);
     expect(runs[0].outcome).toBe("failure");
     expect(runs[0].trigger).toBe("manual");
@@ -967,10 +993,10 @@ describe("S1-P13 follow-up linkage — async-chain (#3121)", () => {
 });
 
 describe("S1-P14 SQL adapter round-trip incl. legacy NULL row (#3121)", () => {
-  it("persists the four columns and reads them back", () => {
-    const storage = new SqliteTestStorage();
-    const store = new SqlJobRunRecordStore(storage.sql as never);
-    store.record(
+  it("persists the four columns and reads them back", async () => {
+    // Issue #6101 — the round-trip runs against the D1 store now.
+    const { store } = ledgerD1();
+    await store.record(
       buildJobRunRecord(
         baseRecord({
           trigger: "async-chain",
@@ -980,7 +1006,7 @@ describe("S1-P14 SQL adapter round-trip incl. legacy NULL row (#3121)", () => {
         }),
       ),
     );
-    const runs = store.listByJob("g");
+    const runs = await store.listByJob("g");
     expect(runs).toHaveLength(1);
     expect(runs[0].trigger).toBe("async-chain");
     expect(runs[0].scheduleId).toBe("sched-1");
@@ -988,14 +1014,15 @@ describe("S1-P14 SQL adapter round-trip incl. legacy NULL row (#3121)", () => {
     expect(runs[0].workflowId).toBe("wf-1");
   });
 
-  it("a row stored with NULL linkage columns reads back as unknown + nulls", () => {
-    const storage = new SqliteTestStorage();
-    const store = new SqlJobRunRecordStore(storage.sql as never);
+  it("a row stored with NULL linkage columns reads back as unknown + nulls", async () => {
+    // Issue #6101 — the legacy row is inserted raw into the D1
+    // table (same columns, same NULLs), not the DO table.
+    const { d1, store } = ledgerD1();
     // Force table creation, then insert a pre-S1-shaped row directly:
     // all four linkage columns NULL, as the probed ADD COLUMN leaves
     // them on a table created before S1.
-    store.record(buildJobRunRecord(baseRecord({ jobId: "seed" })));
-    storage.sqlite
+    await store.record(buildJobRunRecord(baseRecord({ jobId: "seed" })));
+    d1.sqlite
       .prepare(
         "INSERT INTO job_run_records (system, job_id, operation, started, finished, outcome, triggered_by, trigger_text, schedule_id, async_job_id, workflow_id) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)",
       )
@@ -1008,14 +1035,14 @@ describe("S1-P14 SQL adapter round-trip incl. legacy NULL row (#3121)", () => {
         "success",
         "scheduled",
       );
-    const runs = store.listByJob("legacy-1");
+    const runs = await store.listByJob("legacy-1");
     expect(runs).toHaveLength(1);
     expect(runs[0].trigger).toBe("unknown");
     expect(runs[0].scheduleId).toBeNull();
     expect(runs[0].asyncJobId).toBeNull();
     expect(runs[0].workflowId).toBeNull();
     // The stored row is untouched: still NULL in the table.
-    const raw = storage.sqlite
+    const raw = d1.sqlite
       .prepare("SELECT trigger_text FROM job_run_records WHERE job_id = ?")
       .get("legacy-1") as { trigger_text: unknown };
     expect(raw.trigger_text).toBeNull();
@@ -1025,15 +1052,17 @@ describe("S1-P14 SQL adapter round-trip incl. legacy NULL row (#3121)", () => {
 describe("S1-P15 joinability — correlation ID (#3121, owner decision 6659352046)", () => {
   it("an SDK firing joins to its schedule by scheduleId", async () => {
     const storage = new SqliteTestStorage();
+    const { d1, store } = ledgerD1();
     await recordScheduleCallbackRun(
       storage.sql as never,
       "autonomousMarketScreen",
       {},
       { id: "sdk-9" },
       async () => ({ outcome: "success" }),
+      // Issue #6101 — the recorder resolves the D1 store from env.
+      { env: { AGENT_DB: d1 } },
     );
-    const store = new SqlJobRunRecordStore(storage.sql as never);
-    const [run] = store.listByJob("sdk-9");
+    const [run] = await store.listByJob("sdk-9");
     // The join key: run.scheduleId === the schedule's id.
     expect(run.scheduleId).toBe("sdk-9");
     expect(run.trigger).toBe("scheduled");
@@ -1041,15 +1070,17 @@ describe("S1-P15 joinability — correlation ID (#3121, owner decision 665935204
 
   it("a manual trigger joins to its schedule by the stamped scheduleId", async () => {
     const storage = new SqliteTestStorage();
+    const { d1, store } = ledgerD1();
     await recordScheduleCallbackRun(
       storage.sql as never,
       "autonomousMarketScreen",
       { trigger: "manual", scheduleId: "manual-4" },
       { id: "sched-9" },
       async () => ({ outcome: "success" }),
+      // Issue #6101 — the recorder resolves the D1 store from env.
+      { env: { AGENT_DB: d1 } },
     );
-    const store = new SqlJobRunRecordStore(storage.sql as never);
-    const [run] = store.listByJob("sched-9");
+    const [run] = await store.listByJob("sched-9");
     expect(run.scheduleId).toBe("manual-4");
     expect(run.trigger).toBe("manual");
   });
@@ -1096,15 +1127,17 @@ describe("S1-P15 joinability — correlation ID (#3121, owner decision 665935204
 
   it("a firing with no schedule/workflow/job records all three nulls explicitly", async () => {
     const storage = new SqliteTestStorage();
+    const { d1, store } = ledgerD1();
     await recordScheduleCallbackRun(
       storage.sql as never,
       "collectIvHistory",
       {},
       undefined,
       async () => ({ outcome: "success" }),
+      // Issue #6101 — the recorder resolves the D1 store from env.
+      { env: { AGENT_DB: d1 } },
     );
-    const store = new SqlJobRunRecordStore(storage.sql as never);
-    const [run] = store.listByJob("callback:collectIvHistory");
+    const [run] = await store.listByJob("callback:collectIvHistory");
     expect(run.scheduleId).toBeNull();
     expect(run.asyncJobId).toBeNull();
     expect(run.workflowId).toBeNull();
