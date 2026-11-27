@@ -183,6 +183,24 @@ export class InMemoryJobPipelineStores implements JobPipelineStores {
     saveInstance: async (record: JobInstanceRecord): Promise<void> => {
       this.instancesRepo.save(instanceToRow(record));
     },
+    claimInstance: async (record: JobInstanceRecord): Promise<boolean> => {
+      // Synchronous read-check-write: no await between the
+      // check and the write, so a second claim cannot
+      // interleave (the D1 residency's conditional UPDATE is
+      // the same claim across writers).
+      const row = instanceToRow(record);
+      const existing = this.instancesRepo.findById(row.jobId);
+      if (
+        existing &&
+        (existing.state === "queued" ||
+          existing.state === "running" ||
+          existing.state === "paused")
+      ) {
+        return false;
+      }
+      this.instancesRepo.save(row);
+      return true;
+    },
   };
 
   readonly artifacts = {
