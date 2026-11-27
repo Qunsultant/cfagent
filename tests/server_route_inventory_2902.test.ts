@@ -534,7 +534,9 @@ const EXPECTED_ROUTES: string[] = [
   "ANY /api/audit/history",
   "ANY /api/reports/list",
   "ANY /api/reports/seed-canonical",
-  "ANY /api/ops/run-ledger-reconcile",
+  // #6101 (step 5) retired POST /api/ops/run-ledger-reconcile (the
+  // DO→D1 backfill+repair route — copying existing rows is forbidden
+  // by the replacement ruling), so it leaves the inventory.
   "ANY /api/ops/usage-events-reconcile",
   "ANY /api/retrieval/populate-market-graph",
   "ANY /api/iaaa/access-request",
@@ -879,7 +881,10 @@ describe("core dispatch smoke (#2902 Slice 2)", () => {
       ["/api/retention/purge", 503],
       ["/api/audit/history", 401],
       ["/api/reports/list", 401],
-      ["/api/reports/seed-canonical", 503],
+      // #6101 retired POST /api/reports/seed-canonical to a 410
+      // tombstone; unauthenticated callers are gated 401 before the
+      // tombstone answers.
+      ["/api/reports/seed-canonical", 401],
     ];
     for (const [p, status] of expected) {
       expect((await fetchWorker(p)).status).toBe(status);

@@ -30,6 +30,7 @@ import { runOptionsStrategyAction } from "../src/agents/nlqOptionsStrategy";
 import { optionsEngineStoresFromSql } from "../src/workflows/optionsScreenEngine";
 import { runManualPanelViaPipeline } from "../src/workflows/manualPanelScreen";
 import type { OptionsStageStorage } from "../src/workflows/optionsScreenPorts";
+import { MockD1Database } from "./mock-d1";
 
 function expiryAtDte(dte: number): ETradeOptionExpireDate {
   const now = new Date();
@@ -117,8 +118,8 @@ function baseStrategyRequest() {
   };
 }
 
-async function assertStrategyJobOnly(sql: SqliteTestStorage) {
-  const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage);
+async function assertStrategyJobOnly(sql: SqliteTestStorage, d1: MockD1Database) {
+  const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage, { AGENT_DB: d1 });
   const definitions = await engineStores.stores.definitions.listDefinitions();
   const strategyJobs = definitions.filter(
     (definition) => (definition.root as { kind?: string }).kind === "strategy-screen",
@@ -145,6 +146,7 @@ describe("strategy entry-point routing (#4273)", () => {
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: makeChain("AAPL") });
     const storage = memoryStorage();
     const sql = new SqliteTestStorage();
+    const d1 = new MockD1Database();
     const res = await runOptionsStrategyAction(
       etradeStub(),
       "options_strategies",
@@ -159,6 +161,7 @@ describe("strategy entry-point routing (#4273)", () => {
         userLogin: "owner@example.com",
         pipelineStorage: storage,
         engineSql: sql as unknown as SqlStorage,
+        env: { AGENT_DB: d1 },
       },
     );
     // The engine over a two-contract fixture may rank nothing; the
@@ -166,13 +169,14 @@ describe("strategy entry-point routing (#4273)", () => {
     // not a candidate.
     expect(["ranked_candidates", "no_candidates"]).toContain(res.status);
     expect(res.summary).toContain("AAPL");
-    await assertStrategyJobOnly(sql);
+    await assertStrategyJobOnly(sql, d1);
   });
 
   it("the NLQ scan leg defines a strategy job (not an options job), durably", async () => {
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: makeChain("AAPL"), MSFT: makeChain("MSFT") });
     const storage = memoryStorage();
     const sql = new SqliteTestStorage();
+    const d1 = new MockD1Database();
     const saved: Array<Record<string, unknown>> = [];
     const scanRunStore = {
       save: async (result: unknown) => {
@@ -211,25 +215,28 @@ describe("strategy entry-point routing (#4273)", () => {
         pipelineStorage: storage,
         scanRunStore: scanRunStore as never,
         engineSql: sql as unknown as SqlStorage,
+        env: { AGENT_DB: d1 },
       },
     );
     expect(["ranked_opportunities", "no_opportunities"]).toContain(res.status);
     expect(res.summary).toContain("AAPL");
     expect(saved).toHaveLength(1);
-    await assertStrategyJobOnly(sql);
+    await assertStrategyJobOnly(sql, d1);
   });
 
   it("the manual panel route defines a strategy job (not an options job), durably", async () => {
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: makeChain("AAPL") });
     const sql = new SqliteTestStorage();
+    const d1 = new MockD1Database();
     const result = await runManualPanelViaPipeline({
       userLogin: "owner@example.com",
       strategyRequest: baseStrategyRequest() as never,
       dataAgent: new OptionsDataAgent(new DynamicOptionsScreener(undefined)),
       getSql: () => sql as unknown as SqlStorage,
+      env: { AGENT_DB: d1 },
     });
     expect(result).toBeDefined();
     expect(Array.isArray(result.ranked)).toBe(true);
-    await assertStrategyJobOnly(sql);
+    await assertStrategyJobOnly(sql, d1);
   });
 });

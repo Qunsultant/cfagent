@@ -21,11 +21,12 @@
  * The history-row write is attempted even when the canonical write
  * fails — one record landing beats neither.
  */
+import { createJobRunRecordAdapter } from "../data/createJobRunRecordPorts";
+import { resolveIaaaTenant } from "../security/iaaaGithubEndToEnd";
+
 
 import { recordOptionsRun } from "../agents/optionsRuns";
 import { vocabularyDefaults } from "../config/vocabulary";
-import { recordJobOutcome } from "./jobOutcomes";
-import { projectJobOutcomeBestEffort } from "./runLedgerProjectionHooks";
 import type { Env } from "../types";
 import {
   classifyChainFreshness,
@@ -46,11 +47,18 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 
 export interface OptionsServeRecordDeps {
   orm: {
-    storeCanonicalReport: (input: Record<string, unknown>) => { reportId: string; created: boolean } | null;
-    /** The DO SQLite behind the ORM — the job-outcome sink lives there. */
+    // Issue #6101 — the optional env is the D1 door: AGENT_DB rides it;
+    // without it storeCanonicalReport fails closed and the row is dropped.
+    storeCanonicalReport: (
+      input: Record<string, unknown>,
+      env?: Partial<Env>
+    ) => Promise<{ reportId: string; created: boolean } | null>;
+    /** The DO SQLite behind the ORM (kept for call compatibility; the job-outcome sink is gone, #6101). */
     getSql?: () => unknown;
   };
   storage: unknown;
+  /** Issue #6101 — the D1 door the options outcome folds through. */
+  env?: Partial<Env>;
 }
 
 /** The canonical store slice every options path needs. */
@@ -62,14 +70,14 @@ export interface OptionsCanonicalStore {
   storeCanonicalReport: (
     input: any,
     env?: { AI?: any; VECTOR_MEMORY?: any }
-  ) => { reportId: string; created: boolean } | null;
+  ) => Promise<{ reportId: string; created: boolean } | null>;
 }
 
 /**
  * The one owner-aware canonical write for options runs (options run-record fix).
  *
- * `mas_reports` rows are owner-scoped on read (`user_login = ?` in
- * listScheduledReports / `/api/runs` / report detail). A write without
+ * D1 `agent_reports` rows are owner-scoped on read (`user_login = ?` in
+ * listScheduledReports / `/api/runs` / report detail, #6101 step 8). A write without
  * `userLogin` stores the row under the `default` owner, which no signed-in
  * user can then see — the report exists in the table and in R2, but the
  * Reports tab renders nothing. Every options canonical write goes through
@@ -78,15 +86,15 @@ export interface OptionsCanonicalStore {
  * Never throws: a report that was generated must not fail because its
  * index row could not be written.
  */
-export function storeOptionsCanonicalReport(
+export async function storeOptionsCanonicalReport(
   orm: OptionsCanonicalStore | null | undefined,
   input: Record<string, unknown>,
   env?: { AI?: any; VECTOR_MEMORY?: any },
-): { reportId: string; created: boolean } | null {
+): Promise<{ reportId: string; created: boolean } | null> {
   if (!orm || typeof orm.storeCanonicalReport !== "function") return null;
   const { userLogin, ...rest } = input as Record<string, unknown> & { userLogin?: unknown };
   try {
-    return orm.storeCanonicalReport(
+    return await orm.storeCanonicalReport(
       {
         ...rest,
         ...(typeof userLogin === "string" && userLogin ? { userLogin } : {}),
@@ -225,11 +233,11 @@ export function unifiedOptionsRunRecordToStoreInput(
   };
 }
 
-export function recordUnifiedOptionsRun(
+export async function recordUnifiedOptionsRun(
   orm: OptionsCanonicalStore | null | undefined,
   input: UnifiedOptionsRunRecord,
   env?: { AI?: any; VECTOR_MEMORY?: any },
-): { reportId: string; created: boolean } | null {
+): Promise<{ reportId: string; created: boolean } | null> {
   return storeOptionsCanonicalReport(
     orm,
     unifiedOptionsRunRecordToStoreInput(input),
@@ -270,31 +278,40 @@ export async function recordOptionsRunOutcome(
   run: OptionsRunOutcomeRecord,
   project?: { env: Partial<Env>; userLogin?: string | null },
 ): Promise<void> {
-  if (!sql) return;
+  // Issue #6101 — `sql` is kept for call compatibility only; the
+  // outcome no longer touches the DO. The fold runs when the
+  // caller passes `project` (its env).
+  void sql;
   try {
-    recordJobOutcome(sql, {
-      id: run.id,
-      kind: "options",
-      trigger: normalizeJobRunTrigger(run.trigger),
-      status: run.status,
-      scanned: run.scanned,
-      matched: run.matched,
-      codedError: run.error,
-      reportUrl: run.reportUrl,
-      pdfKey: run.pdfKey,
-      xlsxKey: run.xlsxKey,
-      csvKey: run.csvKey,
-      deliveryStates: run.deliveryStates,
-      origin: run.origin,
-      createdAt: run.createdAt,
-    });
+    // Issue #6101 — the outcome folds directly onto D1 (no DO row,
+    // no projection); best-effort, never fails the run. Without a
+    // project env there is no D1 door, and the outcome is not
+    // recorded anywhere — the DO sink is gone.
     if (project?.env) {
-      await projectJobOutcomeBestEffort({
-        env: project.env,
-        sql,
-        outcomeId: run.id,
-        userLogin: project.userLogin ?? null,
-      });
+      const ledgerStore = createJobRunRecordAdapter(project.env);
+      if (!ledgerStore) {
+        throw new Error("[run-ledger] D1 run-ledger binding unbound (AGENT_DB) (#6101).");
+      }
+      await ledgerStore.foldJobOutcome(
+        {
+          id: run.id,
+          kind: "options",
+          trigger: normalizeJobRunTrigger(run.trigger),
+          status: run.status,
+          scanned: run.scanned,
+          matched: run.matched,
+          codedError: run.error,
+          reportUrl: run.reportUrl,
+          pdfKey: run.pdfKey,
+          xlsxKey: run.xlsxKey,
+          csvKey: run.csvKey,
+          deliveryStates: run.deliveryStates,
+          origin: run.origin,
+          createdAt: run.createdAt,
+        },
+        resolveIaaaTenant(project.env),
+        Date.now(),
+      );
     }
   } catch (err) {
     structuredLog.warn("optionsServeRecord.outcome_write_failed", {
@@ -556,10 +573,13 @@ export function buildUnifiedStrategyStages(
   ];
 }
 
-export function recordStrategyScreenRun(
+export async function recordStrategyScreenRun(
   orm: (OptionsCanonicalStore & { getSql?: () => unknown }) | null | undefined,
   input: StrategyScreenRecordInput,
-): { reportId: string; created: boolean } | null {
+  // Issue #6101 — the options outcome folds onto D1; without the
+  // caller's env there is no D1 door and the outcome is not recorded.
+  project?: { env: Partial<Env>; userLogin?: string | null },
+): Promise<{ reportId: string; created: boolean } | null> {
   const createdAt = input.createdAt ?? new Date().toISOString();
   // Issue #2599 (F1): derive the chain-freshness label here, in
   // the record layer, from the snapshot's scan timestamp — never
@@ -589,7 +609,7 @@ export function recordStrategyScreenRun(
   const feed = stages[0];
   const strategyMode = input.strategyMode ?? "thesis";
   const submittedVia = input.submittedVia ?? `ui — POST /trading/options/${input.mode === "best-trade" ? "best-trade" : "strategies"} (options-strategy-panel)`;
-  const stored = storeOptionsCanonicalReport(orm, {
+  const stored = await storeOptionsCanonicalReport(orm, {
     runId: generationId,
     generationId,
     title: `${input.mode === "best-trade" ? "Best trade" : "Strategy screen"} — ${input.symbol} (${input.trigger})`,
@@ -686,8 +706,10 @@ export function recordStrategyScreenRun(
     createdAt,
     userLogin: input.userLogin,
   });
-  const sql = orm && typeof orm.getSql === "function" ? (orm.getSql() as any) : undefined;
-  recordOptionsRunOutcome(sql, {
+  // #6101 step 8: awaited — the fold must land before the caller
+  // returns, or Workflow Runs has nothing to attach the run's
+  // artifacts to (the fold never throws; it logs and continues).
+  await recordOptionsRunOutcome(undefined, {
     // When the route runs as an async job, the outcome twins that job
     // so the ledger attaches it instead of inventing a second run.
     id: input.asyncJobId ?? generationId,
@@ -700,7 +722,7 @@ export function recordStrategyScreenRun(
     csvKey: input.csvKey,
     origin: "options-strategy-screener",
     createdAt,
-  });
+  }, project);
   return stored;
 }
 
@@ -722,7 +744,7 @@ export async function recordOptionsServeReport(
   const csvStatus = outcome.csvStatus ?? (csvKey ? "generated" : undefined);
   let canonicalOk = false;
   try {
-    const stored = storeOptionsCanonicalReport(deps.orm, {
+    const stored = await storeOptionsCanonicalReport(deps.orm, {
       runId: `options:${timestamp}`,
       generationId: `options:${timestamp}`,
       title: `Options scanner — ${outcome.thesis ?? "bullish"}`,
@@ -794,8 +816,8 @@ export async function recordOptionsServeReport(
   // without this row the run's artifacts exist but Workflow Runs has
   // nothing to attach them to. Keyed by the run's delivery id when one
   // exists, so a replayed serve converges on the same row.
-  const sql = typeof deps.orm.getSql === "function" ? (deps.orm.getSql() as SqlStorage | undefined) : undefined;
-  recordOptionsRunOutcome(sql, {
+  // #6101 step 8: awaited — same reason as the strategy site above.
+  await recordOptionsRunOutcome(undefined, {
     id: outcome.deliveryId ?? `options:${timestamp}`,
     trigger: outcome.trigger,
     status: outcome.success ? "completed" : "failed",
@@ -808,7 +830,7 @@ export async function recordOptionsServeReport(
     csvKey: csvKey ?? undefined,
     origin: "options-serve",
     createdAt: timestamp,
-  });
+  }, { env: deps.env ?? {}, userLogin: outcome.userLogin });
   return canonicalOk && historyOk;
 }
 
@@ -877,7 +899,7 @@ export async function recordOptionsOrchestratorRun(
   }
   if (run.canonicalReportId) return;
   try {
-    deps.orm.storeCanonicalReport({
+    await deps.orm.storeCanonicalReport({
       runId: `options:${run.timestamp}`,
       generationId: `options:${run.timestamp}`,
       title: `Autonomous options analysis — ${run.thesis} (${run.trigger})`,
@@ -902,7 +924,7 @@ export async function recordOptionsOrchestratorRun(
       },
       createdAt: new Date().toISOString(),
       ...(run.userLogin ? { userLogin: run.userLogin } : {}),
-    });
+    }, deps.env);
   } catch (err) {
     structuredLog.warn("optionsServeRecord.orchestrator_store_canonical_failed", {
       message: `[OrchestratorAgent] Could not store options report canonical: ${err instanceof Error ? err.message : String(err)}`,

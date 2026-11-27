@@ -15,6 +15,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { DatabaseSync } from "node:sqlite";
+import { MockD1Database } from "./mock-d1";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -117,8 +118,8 @@ class SqliteTestStorage {
   }
 }
 
-async function assertStrategyJobOnly(sql: SqliteTestStorage, expectedJobs = 1) {
-  const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage);
+async function assertStrategyJobOnly(sql: SqliteTestStorage, d1: MockD1Database, expectedJobs = 1) {
+  const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage, { AGENT_DB: d1 });
   const definitions = await engineStores.stores.definitions.listDefinitions();
   const strategyJobs = definitions.filter(
     (definition) => (definition.root as { kind?: string }).kind === "strategy-screen",
@@ -172,13 +173,14 @@ describe("scheduled firer routing (#4275)", () => {
 
   it("a scheduled live screen defines a strategy job (not an options job), durably", async () => {
     const sql = new SqliteTestStorage();
+    const d1 = new MockD1Database();
     const runStore = new InMemoryDiscoveryRunStore({ idFactory: () => "run-firer-live" });
     // Constructor positions: env, orm, userLogin, scanRunStore,
     // ivHistoryStore, discoveryRunStore, strategyProfileStore,
     // followupScheduler, platformDeps, feedSnapshotStore,
     // stageQueue, runStockScreenViaEngine, engineSql.
     const service = new ScheduledTasksService(
-      makeEnv(), makeOrm(), USER, undefined, undefined, runStore,
+      { ...makeEnv(), AGENT_DB: d1 }, makeOrm(), USER, undefined, undefined, runStore,
       undefined, undefined, undefined, undefined,
       undefined, undefined, sql as unknown as SqlStorage,
     );
@@ -194,7 +196,7 @@ describe("scheduled firer routing (#4275)", () => {
     expect(stored!.outcomes).toHaveLength(1);
     expect(stored!.outcomes[0].status).toBe("completed");
     expect(stored!.outcomes[0].snapshot?.dataSource).toBe("live");
-    const latest = await assertStrategyJobOnly(sql);
+    const latest = await assertStrategyJobOnly(sql, d1);
     expect(latest?.triggeredBy).toBe("scheduled");
   });
 
@@ -215,8 +217,9 @@ describe("scheduled firer routing (#4275)", () => {
     });
     DynamicOptionsScreener.clearTestChainsFixture();
     const runStore = new InMemoryDiscoveryRunStore({ idFactory: () => "run-firer-snap" });
+    const d1 = new MockD1Database();
     const service = new ScheduledTasksService(
-      makeEnv(), orm, USER, undefined, undefined, runStore,
+      { ...makeEnv(), AGENT_DB: d1 }, orm, USER, undefined, undefined, runStore,
       undefined, undefined, undefined, feedStore,
       undefined, undefined, sql as unknown as SqlStorage,
     );
@@ -234,7 +237,7 @@ describe("scheduled firer routing (#4275)", () => {
     expect(stored!.outcomes[0].status).toBe("completed");
     expect(stored!.outcomes[0].snapshotInput).toMatchObject({ artifactId, stale: false });
     expect(stored!.outcomes[0].snapshot?.dataSource).toBe("live");
-    await assertStrategyJobOnly(sql);
+    await assertStrategyJobOnly(sql, d1);
   });
 
   it("the caller-agents panel helper honors a snapshot override without live-loading", async () => {
@@ -242,7 +245,8 @@ describe("scheduled firer routing (#4275)", () => {
     const snapshot = await agent.loadSnapshot({ symbol: "NVDA" });
     DynamicOptionsScreener.clearTestChainsFixture();
     const sql = new SqliteTestStorage();
-    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage);
+    const d1 = new MockD1Database();
+    const engineStores = optionsEngineStoresFromSql(sql as unknown as SqlStorage, { AGENT_DB: d1 });
     const result = await runOptionsPanelViaEngineWithAgents(
       {
         data: new OptionsDataAgent(new DynamicOptionsScreener(undefined)),
@@ -261,6 +265,6 @@ describe("scheduled firer routing (#4275)", () => {
     expect(result.snapshot.contracts.length).toBeGreaterThan(0);
     expect(result.snapshot.dataSource).toBe(snapshot.dataSource);
     expect(Array.isArray(result.ranked)).toBe(true);
-    await assertStrategyJobOnly(sql);
+    await assertStrategyJobOnly(sql, d1);
   });
 });

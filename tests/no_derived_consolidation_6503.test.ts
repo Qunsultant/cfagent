@@ -50,7 +50,10 @@ import {
 } from "../src/services/consolidatedCronEntries";
 import { watchdogMissedSchedules } from "../src/agents/orchestrator/scheduleWatchdog";
 import { recordScheduleCallbackRun } from "../src/agents/orchestrator/scheduleCallbackRunRecords";
-import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../src/data/d1JobRunRecordAdapter";
 import { TickerAgent } from "../src/agents/ticker-agent";
 import { liveMarketCache } from "../src/services/marketStream";
 import { createPausedAgentSdkScheduleRecord } from "../src/services/agentScheduleCapability";
@@ -809,21 +812,24 @@ describe("6503 control routes enforce the level rule (G1 matrix)", () => {
 });
 
 describe("6503 start-paused is a managed control (default paused)", () => {
-  it("the controls view carries startPaused, effective true by default", () => {
+  it("the controls view carries startPaused, effective true by default", async () => {
     const sql = new SqliteTestStorage();
-    const view = resolveScheduleControlsView(sql.sql as never, {}, [], Date.parse(NOW));
+    // Issue #6101 — the controls view is async now (the firing-rate
+    // read behind it is a D1 read).
+    const view = await resolveScheduleControlsView(sql.sql as never, {}, [], Date.parse(NOW));
     expect((view as unknown as Record<string, unknown>).startPaused).toBe(true);
   });
 });
 
 describe("6503 firing-rate thresholds are managed settings", () => {
-  it("a managed threshold overrides the env default in the controls view", () => {
+  it("a managed threshold overrides the env default in the controls view", async () => {
     const sql = new SqliteTestStorage();
     const port = createSettingsPort(sql.sql as never);
     port.ensureSchema();
     port.set("schedule.firingRateAlertThreshold", "5");
     port.set("schedule.firingRateAlertWindowMinutes", "10");
-    const view = resolveScheduleControlsView(sql.sql as never, {}, [], Date.parse(NOW));
+    // Issue #6101 — the controls view is async now (see above).
+    const view = await resolveScheduleControlsView(sql.sql as never, {}, [], Date.parse(NOW));
     expect(view.firingRate.threshold).toBe(5);
     expect(view.firingRate.windowMinutes).toBe(10);
   });
@@ -1398,7 +1404,10 @@ describe("6503 paused is enforced on every scheduled firing path (G3)", () => {
       { env: { AGENT_DB: mockD1 }, audit: audit as never },
     );
     expect(delegate).not.toHaveBeenCalled();
-    const runs = new SqlJobRunRecordStore(storage.sql as never).listByJob("alarm-stale-1");
+    // Issue #6101 — the paused-skip row lands in the D1 ledger.
+    const runs = await new D1JobRunRecordStore(
+      createD1JobRunRecordDb(mockD1 as unknown as D1Database),
+    ).listByJob("alarm-stale-1");
     expect(runs).toHaveLength(1);
     expect(runs[0]!.outcome).toBe("skipped");
     expect(runs[0]!.detail).toMatch(/paused/);
@@ -1423,7 +1432,10 @@ describe("6503 paused is enforced on every scheduled firing path (G3)", () => {
       { env: { AGENT_DB: mockD1 } },
     );
     expect(delegate).toHaveBeenCalledTimes(1);
-    const runs = new SqlJobRunRecordStore(storage.sql as never).listByJob("alarm-live-1");
+    // Issue #6101 — the firing lands in the D1 ledger.
+    const runs = await new D1JobRunRecordStore(
+      createD1JobRunRecordDb(mockD1 as unknown as D1Database),
+    ).listByJob("alarm-live-1");
     expect(runs).toHaveLength(1);
     expect(runs[0]!.outcome).toBe("success");
   });
@@ -1488,7 +1500,10 @@ describe("6503 paused is enforced on every scheduled firing path (G3)", () => {
       { env: { AGENT_DB: mockD1 } },
     );
     expect(delegate).not.toHaveBeenCalled();
-    const runs = new SqlJobRunRecordStore(storage.sql as never).listByJob("alarm-research-stale");
+    // Issue #6101 — the paused-skip row lands in the D1 ledger.
+    const runs = await new D1JobRunRecordStore(
+      createD1JobRunRecordDb(mockD1 as unknown as D1Database),
+    ).listByJob("alarm-research-stale");
     expect(runs).toHaveLength(1);
     expect(runs[0]!.outcome).toBe("skipped");
     expect(runs[0]!.detail).toMatch(/nightly-research.*paused|paused/);

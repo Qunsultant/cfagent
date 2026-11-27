@@ -64,18 +64,28 @@ import type { NLQStockScreenPort } from "../src/agents/nlq";
 import { DynamicOptionsScreener } from "../src/trading/optionsScreener";
 import { UnifiedOptionsService } from "../src/trading/options/unifiedOptionsService";
 import { listScheduledReports } from "../src/services/scheduledReports";
+import { MockD1Database } from "./mock-d1";
 import { handlePremiumRoutes, type PremiumRouteContext } from "../src/agents/routes/premium";
 import { ETradeAgenticPaymentService } from "../src/services/agenticPayments";
 import { PaidOptionsScreenerCommand } from "../src/mcps/openaimp/agenticPaymentCommands";
 import { resolveScheduleUpdate } from "../src/services/unifiedScheduleManagement";
 import type { Env } from "../src/types";
 
-const mockEnv = {
-  ETRADE_API_KEY: "synthetic-test-key",
-  ETRADE_API_SECRET: "synthetic-test-secret",
-  ETRADE_ENV: "SANDBOX",
-  ETRADE_ACCOUNT_ID: "00000000",
-} as unknown as Env;
+// #6101 step 8: the canonical seam writes D1 agent_reports, so the
+// env the NLQ/premium paths persist through binds a fresh
+// MockD1Database per test (shared across (i)/(iii) would twin the
+// options_scanner rows in the list assertions).
+let env: Env;
+
+function freshEnv(): Env {
+  return {
+    ETRADE_API_KEY: "synthetic-test-key",
+    ETRADE_API_SECRET: "synthetic-test-secret",
+    ETRADE_ENV: "SANDBOX",
+    ETRADE_ACCOUNT_ID: "00000000",
+    AGENT_DB: new MockD1Database() as any,
+  } as unknown as Env;
+}
 
 function nvdaChainFixture() {
   const expiryDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
@@ -136,6 +146,7 @@ describe("#982 S2: one execution path for NLQ / MCP / premium", () => {
   beforeEach(() => {
     sql = new MockSqlStorage();
     orm = new DatabaseORM(sql as never);
+    env = freshEnv();
     DynamicOptionsScreener.setTestChainsFixture(nvdaChainFixture());
   });
 
@@ -146,10 +157,10 @@ describe("#982 S2: one execution path for NLQ / MCP / premium", () => {
 
   it("(i) NLQ options screen runs through the service and persists a canonical run", async () => {
     const executeSpy = vi.spyOn(UnifiedOptionsService.prototype, "execute");
-    const plan = await planNLQ(mockEnv, "Screen call options for NVDA with delta over 0.40");
+    const plan = await planNLQ(env, "Screen call options for NVDA with delta over 0.40");
     expect(plan.tradingData?.action).toBe("options_screen");
 
-    const res = await executeNLQQueryAsync(orm, "trader_user", plan, mockEnv, "trader_user");
+    const res = await executeNLQQueryAsync(orm, "trader_user", plan, env, "trader_user");
     expect(res.targetTable).toBe("etrade_options_screener");
     expect(res.count).toBeGreaterThan(0);
 
@@ -159,7 +170,7 @@ describe("#982 S2: one execution path for NLQ / MCP / premium", () => {
 
     // The canonical run is in mas_reports and retrievable via the
     // reports read path, with entry-point provenance recorded.
-    const reports = listScheduledReports(sql as never, { sourceFilter: "options_scanner" });
+    const reports = await listScheduledReports(env, { sourceFilter: "options_scanner" });
     expect(reports).toHaveLength(1);
     expect(reports[0].title).toContain("NVDA");
     const body = JSON.parse(reports[0].body || "{}");
@@ -193,7 +204,7 @@ describe("#982 S2: one execution path for NLQ / MCP / premium", () => {
       tradingData: { action: "screen", filters: { minPrice: 10 } },
     } as unknown as NLQPlan;
 
-    const res = await executeNLQQueryAsync(orm, "trader_user", plan, mockEnv, "trader_user", undefined, { stockScreenPort: port });
+    const res = await executeNLQQueryAsync(orm, "trader_user", plan, env, "trader_user", undefined, { stockScreenPort: port });
 
     // The port (ScreenerAgent service seam) received the validated
     // filters and the caller's login.
@@ -209,7 +220,7 @@ describe("#982 S2: one execution path for NLQ / MCP / premium", () => {
     expect(res.rows[0].price).toBe("$50.00");
 
     // The canonical run persisted with screener provenance + nlq trigger.
-    const reports = listScheduledReports(sql as never, { sourceFilter: "screener" });
+    const reports = await listScheduledReports(env, { sourceFilter: "screener" });
     expect(reports).toHaveLength(1);
     expect(reports[0].title).toContain("NASDAQ100");
     const body = JSON.parse(reports[0].body || "{}");
@@ -238,7 +249,7 @@ describe("#982 S2: one execution path for NLQ / MCP / premium", () => {
       tradingData: { action: "watchlist_save", watchlistName: "Port Picks", symbols: [] },
     } as unknown as NLQPlan;
 
-    const res = await executeNLQQueryAsync(orm, "trader_user", plan, mockEnv, "trader_user", undefined, { stockScreenPort: port });
+    const res = await executeNLQQueryAsync(orm, "trader_user", plan, env, "trader_user", undefined, { stockScreenPort: port });
     expect(runScreen).toHaveBeenCalledTimes(1);
     expect(res.targetTable).toBe("mas_watchlists");
     expect(res.rows[0].status).toBe("SAVED");
@@ -259,7 +270,7 @@ describe("#982 S2: one execution path for NLQ / MCP / premium", () => {
         return Response.json(out as Record<string, unknown>);
       }
     );
-    const ctx: PremiumRouteContext = { env: mockEnv, getOrm: () => orm };
+    const ctx: PremiumRouteContext = { env, getOrm: () => orm };
     const request = new Request("https://agent.internal/api/premium/options-scan?symbol=NVDA", { method: "GET" });
     const response = await handlePremiumRoutes(request, new URL(request.url), "/api/premium/options-scan", "session-1", ctx);
     expect(response).not.toBeNull();
@@ -280,7 +291,7 @@ describe("#982 S2: one execution path for NLQ / MCP / premium", () => {
     expect((body.screenResult as { matchedCount: number }).matchedCount).toBeGreaterThan(0);
 
     // Canonical persistence still happens in the route, as before.
-    const reports = listScheduledReports(sql as never, { sourceFilter: "options_scanner" });
+    const reports = await listScheduledReports(env, { sourceFilter: "options_scanner" });
     expect(reports).toHaveLength(1);
     expect(reports[0].title).toContain("NVDA");
   });
@@ -294,7 +305,7 @@ describe("#982 S2: one execution path for NLQ / MCP / premium", () => {
     const cmd = new PaidOptionsScreenerCommand();
     const out = (await cmd.execute(
       { underlying: "NVDA", contractType: "CALL", paymentSignature: "synthetic-signature" },
-      { env: mockEnv, orm, sessionId: "mcp-session", audit: vi.fn() } as never
+      { env, orm, sessionId: "mcp-session", audit: vi.fn() } as never
     )) as Record<string, unknown>;
 
     expect(executeSpy).toHaveBeenCalledTimes(1);

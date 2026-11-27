@@ -130,7 +130,7 @@ import { isTenantAdminForTenant } from "../../data/referralCodePorts";
 import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
 import { createKvMembershipStore } from "../../security/iaaaMembershipStore";
 import { sessionStore } from "../../security/session";
-import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
+
 import { nameLedgerWriteFailure, recordScheduleCallbackRun } from "../orchestrator/scheduleCallbackRunRecords";
 import {
   buildSnapshotManifest,
@@ -200,8 +200,12 @@ import { actorGateway } from "../../services/cloudflareActorGateway";
 import type { TickerPushRecordStub } from "../../services/actorGatewayPorts";
 import { createD1UnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
 import type { ScheduleStore, UnifiedScheduleRecord } from "../../data/unifiedSchedulePorts";
-import { recordLedgerRun } from "../../services/unifiedLedger";
-import { projectJobRunRecordBestEffort } from "../../services/runLedgerProjectionHooks";
+import {
+  createJobRunRecordAdapter,
+  recordLedgerRunD1,
+  resolveLedgerAttribution,
+  type D1JobRunRecordStore,
+} from "../../data/createJobRunRecordPorts";
 import { buildJobRunRecord, scheduleIdToLedgerJobId, type JobRunRecordInput } from "../../services/jobRunRecords";
 import { RENEWAL_DISPATCH_CRON, RETENTION_DISPATCH_CRON } from "../../services/heartbeatDueChecks";
 import { resolveActorAttribution } from "../../security/backgroundAttribution";
@@ -563,16 +567,16 @@ export async function readTickerPushListItem(
  * row: nothing is synthesized. Best-effort on the ledger read: a
  * failed ledger read renders the stored row without a last run and
  * logs a warning — the list never fails, and the row never vanishes,
- * because the ledger cannot be read. The `sql` is the agent's
- * SqlStorage (the same seam the runs routes read through).
+ * because the ledger cannot be read. The `store` is the D1
+ * job-run-records store (#6101); null reads as "no last run".
  */
 export async function readTokenRenewalListItem(
-  sql: ConstructorParameters<typeof SqlJobRunRecordStore>[0],
+  store: D1JobRunRecordStore | null | undefined,
   record?: UnifiedScheduleRecord | null,
 ): Promise<ReturnType<typeof tokenRenewalRecordToListItem> | null> {
   if (!record) return null;
   try {
-    const lastRun = new SqlJobRunRecordStore(sql).latestByJob(RENEWAL_DISPATCH_CRON);
+    const lastRun = store ? await store.latestByJob(RENEWAL_DISPATCH_CRON) : undefined;
     return tokenRenewalRecordToListItem(
       record,
       lastRun ? { started: lastRun.started, finished: lastRun.finished, outcome: lastRun.outcome } : undefined,
@@ -598,12 +602,12 @@ export async function readTokenRenewalListItem(
  * renders without a last run when the ledger cannot be read.
  */
 export async function readRetentionListItem(
-  sql: ConstructorParameters<typeof SqlJobRunRecordStore>[0],
+  store: D1JobRunRecordStore | null | undefined,
   record?: UnifiedScheduleRecord | null,
 ): Promise<ReturnType<typeof retentionRecordToListItem> | null> {
   if (!record) return null;
   try {
-    const lastRun = new SqlJobRunRecordStore(sql).latestByJob(RETENTION_DISPATCH_CRON);
+    const lastRun = store ? await store.latestByJob(RETENTION_DISPATCH_CRON) : undefined;
     return retentionRecordToListItem(
       record,
       lastRun ? { started: lastRun.started, finished: lastRun.finished, outcome: lastRun.outcome, detail: lastRun.detail } : undefined,
@@ -627,12 +631,12 @@ export async function readRetentionListItem(
  * row. Best-effort on the ledger read, like its siblings.
  */
 export async function readNightlyResearchListItem(
-  sql: ConstructorParameters<typeof SqlJobRunRecordStore>[0],
+  store: D1JobRunRecordStore | null | undefined,
   record?: UnifiedScheduleRecord | null,
 ): Promise<ReturnType<typeof nightlyResearchRecordToListItem> | null> {
   if (!record) return null;
   try {
-    const lastRun = new SqlJobRunRecordStore(sql).latestByJob(NIGHTLY_RESEARCH_RECORD_ID);
+    const lastRun = store ? await store.latestByJob(NIGHTLY_RESEARCH_RECORD_ID) : undefined;
     return nightlyResearchRecordToListItem(
       record,
       lastRun ? { started: lastRun.started, finished: lastRun.finished, outcome: lastRun.outcome } : undefined,
@@ -657,12 +661,12 @@ export async function readNightlyResearchListItem(
  * its siblings.
  */
 export async function readStaleLedgerSweepListItem(
-  sql: ConstructorParameters<typeof SqlJobRunRecordStore>[0],
+  store: D1JobRunRecordStore | null | undefined,
   record?: UnifiedScheduleRecord | null,
 ): Promise<ReturnType<typeof staleLedgerSweepRecordToListItem> | null> {
   if (!record) return null;
   try {
-    const lastRun = new SqlJobRunRecordStore(sql).latestByJob(STALE_LEDGER_SWEEP_RECORD_ID);
+    const lastRun = store ? await store.latestByJob(STALE_LEDGER_SWEEP_RECORD_ID) : undefined;
     return staleLedgerSweepRecordToListItem(
       record,
       lastRun ? { started: lastRun.started, finished: lastRun.finished, outcome: lastRun.outcome, detail: lastRun.detail } : undefined,
@@ -684,12 +688,12 @@ export async function readStaleLedgerSweepListItem(
  * No stored record means no row. Best-effort like its siblings.
  */
 export async function readStaleAsyncJobSweepListItem(
-  sql: ConstructorParameters<typeof SqlJobRunRecordStore>[0],
+  store: D1JobRunRecordStore | null | undefined,
   record?: UnifiedScheduleRecord | null,
 ): Promise<ReturnType<typeof staleAsyncJobSweepRecordToListItem> | null> {
   if (!record) return null;
   try {
-    const lastRun = new SqlJobRunRecordStore(sql).latestByJob(STALE_ASYNC_JOB_SWEEP_RECORD_ID);
+    const lastRun = store ? await store.latestByJob(STALE_ASYNC_JOB_SWEEP_RECORD_ID) : undefined;
     return staleAsyncJobSweepRecordToListItem(
       record,
       lastRun ? { started: lastRun.started, finished: lastRun.finished, outcome: lastRun.outcome, detail: lastRun.detail } : undefined,
@@ -713,12 +717,12 @@ export async function readStaleAsyncJobSweepListItem(
  * Best-effort like its siblings.
  */
 export async function readScheduleWatchdogListItem(
-  sql: ConstructorParameters<typeof SqlJobRunRecordStore>[0],
+  store: D1JobRunRecordStore | null | undefined,
   record?: UnifiedScheduleRecord | null,
 ): Promise<ReturnType<typeof scheduleWatchdogRecordToListItem> | null> {
   if (!record) return null;
   try {
-    const lastRun = new SqlJobRunRecordStore(sql).latestByJob(SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID);
+    const lastRun = store ? await store.latestByJob(SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID) : undefined;
     return scheduleWatchdogRecordToListItem(
       record,
       lastRun ? { started: lastRun.started, finished: lastRun.finished, outcome: lastRun.outcome, detail: lastRun.detail } : undefined,
@@ -1281,7 +1285,7 @@ export async function handleSchedulesRoutes(
         const at = items.findIndex((item) => item.id === id);
         if (at === -1) continue;
         const record = await unifiedStore().get(id);
-        const joined = await reader(ctx.agentCtx.storage.sql, record);
+        const joined = await reader(createJobRunRecordAdapter(ctx.env), record);
         if (joined) items[at] = joined;
       }
       // Issue #5890 — one row per job: a stored system record and
@@ -1645,10 +1649,23 @@ export async function handleSchedulesRoutes(
         }
         const nowIso = new Date().toISOString();
         try {
-          recordLedgerRun(new SqlJobRunRecordStore(ctx.agentCtx.storage.sql), {
-            system: "orchestrator-schedule",
-            ...buildScheduleWebhookMintRecord({ jobId: submitted.jobId, body: validBody, nowIso }),
-          });
+          // Issue #6101 — the mint row lands in D1; an unbound
+          // ledger is the named error, audited below like any
+          // other write failure. Recording never breaks the mint.
+          const ledgerStore = createJobRunRecordAdapter(ctx.env);
+          if (!ledgerStore) {
+            throw new Error(
+              "[run-ledger] D1 run-ledger binding unbound (AGENT_DB) (#6101).",
+            );
+          }
+          await recordLedgerRunD1(
+            ledgerStore,
+            {
+              system: "orchestrator-schedule",
+              ...buildScheduleWebhookMintRecord({ jobId: submitted.jobId, body: validBody, nowIso }),
+            },
+            resolveLedgerAttribution(ctx.env, { userId: userLogin }),
+          );
         } catch (err) {
           // Recording never breaks the mint — but a swallowed store
           // failure is unobservable, so it is audited instead.
@@ -1897,7 +1914,7 @@ export async function handleSchedulesRoutes(
     if (request.method === "GET" && (path.endsWith("/schedules/controls") || path.endsWith("/api/schedules/controls"))) {
       try {
         const items = await listUnifiedScheduleItems({ store: unifiedStore(), alarms });
-        const view = resolveScheduleControlsView(ctx.agentCtx.storage.sql, ctx.env, items);
+        const view = await resolveScheduleControlsView(ctx.agentCtx.storage.sql, ctx.env, items);
         const caller = await resolveScheduleFlagsCaller(request, ctx);
         return Response.json({ ...view, canToggle: caller.kind === "admin" });
       } catch (err: any) {
@@ -2024,7 +2041,7 @@ export async function handleSchedulesRoutes(
         changedBy: caller.login,
       });
       const items = await listUnifiedScheduleItems({ store: unifiedStore(), alarms });
-      const view = resolveScheduleControlsView(ctx.agentCtx.storage.sql, ctx.env, items);
+      const view = await resolveScheduleControlsView(ctx.agentCtx.storage.sql, ctx.env, items);
       return Response.json({ ...view, canToggle: true });
     }
     const approvalsMatch = path.match(/\/schedules\/approvals\/([^/]+)\/(approve|reject)$/);
@@ -2336,10 +2353,18 @@ export async function handleSchedulesRoutes(
         const params = new URL(request.url).searchParams;
         const scheduleId = params.get("scheduleId") || undefined;
         const limit = Number(params.get("limit") || 50);
-        const store = new SqlJobRunRecordStore(ctx.agentCtx.storage.sql);
+        // Issue #6101 — the runs list reads the D1 ledger.
+        const store = createJobRunRecordAdapter(ctx.env);
+        if (!store) {
+          throw new Error(
+            "[run-ledger] D1 run-ledger binding unbound (AGENT_DB) (#6101).",
+          );
+        }
         // Issue #6503 — a stored system id reads its ledger rows
         // under its dispatch job id (token-renewal → its cron).
-        const runs = scheduleId ? store.listByJob(scheduleIdToLedgerJobId(scheduleId), limit) : store.listRecent(limit);
+        const runs = scheduleId
+          ? await store.listByJob(scheduleIdToLedgerJobId(scheduleId), limit)
+          : await store.listRecent(limit);
         return Response.json({ ok: true, runs });
       } catch (err: any) {
         return Response.json({ error: err.message || "Failed to list job runs" }, { status: 500 });
@@ -2349,9 +2374,15 @@ export async function handleSchedulesRoutes(
     if (scheduleRunsMatch && request.method === "GET") {
       try {
         const limit = Number(new URL(request.url).searchParams.get("limit") || 50);
-        const store = new SqlJobRunRecordStore(ctx.agentCtx.storage.sql);
+        // Issue #6101 — the runs list reads the D1 ledger.
+        const store = createJobRunRecordAdapter(ctx.env);
+        if (!store) {
+          throw new Error(
+            "[run-ledger] D1 run-ledger binding unbound (AGENT_DB) (#6101).",
+          );
+        }
         // Issue #4239 — see the /schedules/runs branch above.
-        return Response.json({ ok: true, runs: store.listByJob(scheduleIdToLedgerJobId(scheduleRunsMatch[1]), limit) });
+        return Response.json({ ok: true, runs: await store.listByJob(scheduleIdToLedgerJobId(scheduleRunsMatch[1]), limit) });
       } catch (err: any) {
         return Response.json({ error: err.message || "Failed to list job runs" }, { status: 500 });
       }
@@ -2359,7 +2390,7 @@ export async function handleSchedulesRoutes(
 
     // Issue #3121 Phase 2 (#3123) — ledger record route. The
     // ScheduledAgent posts goal rows to the one physical ledger
-    // (this instance's job_run_records) through this background-
+    // (the D1 job_run_records, #6101) through this background-
     // gated route (same gate as record-cron-dispatch, §12 of the
     // S5 design). Placed here, next to the runs reads: no earlier
     // branch can swallow it — the earlier POST branches match only
@@ -2394,21 +2425,21 @@ export async function handleSchedulesRoutes(
         );
       }
       try {
-        const store = new SqlJobRunRecordStore(ctx.agentCtx.storage.sql);
-        const built = recordLedgerRun(store, body as JobRunRecordInput);
-        // Issue #6099 — project the just-stored row into D1. This
-        // route is the one hookable door: it has env, unlike the
-        // sync in-agent writers (those rows reach D1 through the
-        // sweep). The hook never throws — a projection failure
-        // never fails the record response. The queue carrier
-        // routes under the service-user login (the background
-        // attribution above); without it the queue is skipped
-        // with the named log and ORM + sweep still cover the row.
-        await projectJobRunRecordBestEffort({
-          env: ctx.env,
-          row: built,
-          userLogin: getServiceUserLogin(ctx.env),
-        });
+        // Issue #6101 — the record lands in D1 directly; there is
+        // no projection to hook any more (the #6099 projector is
+        // deleted). The attribution stamps the service-user login
+        // as the run's user.
+        const store = createJobRunRecordAdapter(ctx.env);
+        if (!store) {
+          throw new Error(
+            "[run-ledger] D1 run-ledger binding unbound (AGENT_DB) (#6101).",
+          );
+        }
+        const built = await recordLedgerRunD1(
+          store,
+          body as JobRunRecordInput,
+          resolveLedgerAttribution(ctx.env, { userId: getServiceUserLogin(ctx.env) ?? undefined }),
+        );
         return Response.json({ success: true, jobId: built.jobId, scheduleId: built.scheduleId ?? null });
       } catch (err) {
         return Response.json(
@@ -2462,7 +2493,7 @@ export async function handleSchedulesRoutes(
                     : scheduleId === STALE_ASYNC_JOB_SWEEP_RECORD_ID
                       ? readStaleAsyncJobSweepListItem
                       : readScheduleWatchdogListItem;
-          const item = await reader(ctx.agentCtx.storage.sql, record);
+          const item = await reader(createJobRunRecordAdapter(ctx.env), record);
           return Response.json(item ?? unifiedRecordToListItem(record));
         }
         const detail = await getUnifiedScheduleDetail({ store: unifiedStore(), alarms }, scheduleId);
@@ -3574,6 +3605,7 @@ export async function handleSchedulesRoutes(
         const result = auditChainPruneSkipped
           ? { skipped: true, pruned: 0 }
           : await runStorageRetention(ctx.getOrm(), {
+              env: ctx.env,
               retentionDays: ctx.env.MAS_MESSAGES_RETENTION_DAYS,
               eventsRetentionDays: ctx.env.MAS_EVENTS_RETENTION_DAYS,
               memoryRetentionDays: ctx.env.MAS_MEMORY_RETENTION_DAYS,

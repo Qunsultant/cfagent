@@ -43,8 +43,8 @@ import {
 import { resolveEffectiveScheduleFloor, resolveEffectiveScheduleStartPaused } from "../../services/scheduleControls";
 import { buildFeedJobRegistry } from "../../services/feedJobs";
 import { FEED_PIPELINE_CATALOG, resolveFeedJob } from "../../services/feedPipelineJobs";
-import { recordJobOutcome } from "../../services/jobOutcomes";
-import { projectAsyncJobBestEffort, projectJobOutcomeBestEffort } from "../../services/runLedgerProjectionHooks";
+import { createJobRunRecordAdapter } from "../../data/createJobRunRecordPorts";
+import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
 import {
   buildLedgerLinkage,
   recoveryProvenance,
@@ -260,22 +260,6 @@ const PIPELINE_STAGES: readonly PipelineStage[] = ["feed", "generate", "store", 
 /** The family's ports over the context's sql handle (#2358). */
 function ports(ctx: AsyncJobsContext): AsyncJobPorts {
   return createAsyncJobPorts(ctx.agentCtx.storage.sql as never);
-}
-
-/**
- * Issue #4116 — project one mas_async_jobs row after a write or a
- * transition (submit, terminal insert, complete, fail). Re-reads
- * the stored row so the projection carries what landed; the hook
- * itself never throws, so a projection failure cannot fail the
- * job or its transition — the sweep carrier backstops a miss.
- */
-async function projectAsyncJobTransition(ctx: AsyncJobsContext, jobId: string): Promise<void> {
-  try {
-    const row = ports(ctx).read.getRow(jobId, ctx.sessionKey());
-    if (row) await projectAsyncJobBestEffort({ env: ctx.env, row });
-  } catch {
-    // Never fails the transition; the hook logs its own failures.
-  }
 }
 
 /**
@@ -585,11 +569,6 @@ export async function submitAsyncJob(ctx: AsyncJobsContext,
     tenantId,
   });
 
-  // Issue #4116 — project the queued row into D1 (ORM + queue
-  // carriers, per the tenant's config). The hook re-reads the
-  // stored row and never throws, so a projection failure cannot
-  // fail the submission; the sweep backstops a miss.
-  await projectAsyncJobTransition(ctx, jobId);
 
   try {
     // Consolidation C3 (#1277): a job with a not-before time is armed
@@ -2074,41 +2053,38 @@ export async function recordScreenerRunMainJob(
     scheduleId: outcome.scheduleId ?? null,
   });
   ctx.audit("screener.run_bridged", "orchestrator", { jobId, kind: outcome.kind, success: outcome.success });
-  // Issue #4116 — project the terminal row into D1 (ORM + queue
-  // carriers, per the tenant's config). Never throws; the sweep
-  // backstops a miss.
-  await projectAsyncJobTransition(ctx, jobId);
   // Issue #1333: every bridged run lands in the job-outcome sink
   // Autopilot Control renders as its job feed. The id is the run's
   // deliveryId when one exists (shared with any bus re-record, so a
   // run recorded twice converges to one row), else this main job's
   // id. Never throws: a sink failure must not fail the run.
   try {
-    const outcomeSql = ctx.ensureTables();
-    recordJobOutcome(outcomeSql, {
-      id: outcome.deliveryId ?? jobId,
-      kind: outcome.kind,
-      trigger: outcome.trigger,
-      status: outcome.success ? "completed" : "failed",
-      scanned: outcome.totalScanned,
-      matched: outcome.matchedCount,
-      codedError: outcome.success ? undefined : outcome.error ?? undefined,
-      reportUrl: outcome.reportUrl,
-      pdfKey: outcome.pdfKeys?.[0],
-      xlsxKey: outcome.xlsxKey,
-      csvKey: outcome.csvKey,
-      origin: "job-tree",
-      createdAt: now,
-    });
-    // Issue #6006 — fold the outcome facts into the one run source
-    // (D1) through the shared projector; best-effort, never fails
-    // the run (the hook itself never throws).
-    await projectJobOutcomeBestEffort({
-      env: ctx.env,
-      sql: outcomeSql,
-      outcomeId: outcome.deliveryId ?? jobId,
-      userLogin,
-    });
+    // Issue #6101 — the outcome folds directly onto D1 (no DO row,
+    // no projection). Best-effort, never fails the run; an unbound
+    // ledger is the named error, logged by the catch below.
+    const ledgerStore = createJobRunRecordAdapter(ctx.env);
+    if (!ledgerStore) {
+      throw new Error("[run-ledger] D1 run-ledger binding unbound (AGENT_DB) (#6101).");
+    }
+    await ledgerStore.foldJobOutcome(
+      {
+        id: outcome.deliveryId ?? jobId,
+        kind: outcome.kind,
+        trigger: outcome.trigger,
+        status: outcome.success ? "completed" : "failed",
+        scanned: outcome.totalScanned,
+        matched: outcome.matchedCount,
+        codedError: outcome.success ? undefined : outcome.error ?? undefined,
+        reportUrl: outcome.reportUrl,
+        pdfKey: outcome.pdfKeys?.[0],
+        xlsxKey: outcome.xlsxKey,
+        csvKey: outcome.csvKey,
+        origin: "job-tree",
+        createdAt: now,
+      },
+      resolveIaaaTenant(ctx.env),
+      Date.now(),
+    );
   } catch (err) {
     structuredLog.warn("asyncJobs.job_outcome_record_failed", {
       message: "[AsyncJobs] job outcome record failed:",
@@ -2344,7 +2320,7 @@ async function recordKeylessOptionsServe(
   const xlsx = normalize(outcome.xlsxStatus, outcome.xlsxKey, outcome.xlsxError);
   const csv = normalize(outcome.csvStatus, outcome.csvKey, outcome.csvError);
   await recordOptionsServeReport(
-    { orm: ctx.getOrm() as never, storage: ctx.agentCtx.storage },
+    { orm: ctx.getOrm() as never, storage: ctx.agentCtx.storage, env: ctx.env },
     {
       ...outcome,
       pdfStatus: pdf.status,
@@ -3439,10 +3415,6 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
     const completedAt = new Date().toISOString();
     family.queue.complete(jobId, serializedResult, responseStatus ?? null, completedAt);
     ctx.audit("async_job.completed", "orchestrator", { jobId, capability: job.capability });
-    // Issue #4116 — project the completed row into D1 (ORM + queue
-    // carriers, per the tenant's config). Never throws; the sweep
-    // backstops a miss.
-    await projectAsyncJobTransition(ctx, jobId);
     // Consolidation C3 (#1277): a stage job's terminal state is
     // recorded per stage — a skipped or held stage says so, with its
     // reason, instead of reading as a plain completion.
@@ -3699,10 +3671,6 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
     const errorCode = resolveJobFailureCode(error);
     family.queue.failRunning(jobId, message, completedAt, errorCode);
     ctx.audit("async_job.failed", "orchestrator", { jobId, capability: job.capability, error: message, errorCode });
-    // Issue #4116 — project the failed row into D1 (ORM + queue
-    // carriers, per the tenant's config). Never throws; the sweep
-    // backstops a miss.
-    await projectAsyncJobTransition(ctx, jobId);
     // Consolidation C3 (#1277): a failed stage is the chain's stop
     // point — recorded per stage with its reason; nothing downstream
     // was scheduled (the completion hooks above never ran).

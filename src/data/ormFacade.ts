@@ -783,11 +783,13 @@ export class DatabaseORM {
    * Issue #1169 S4-1: the optional env threads the AI/Vectorize
    * bindings to the index hook; callers without bindings omit it and
    * their rows are covered by the backfill route instead.
+   * Issue #6101 (step 8): the seam writes D1 agent_reports directly
+   * (no DO row, no projector); async — callers must await it.
    */
-  storeCanonicalReport(
+  async storeCanonicalReport(
     input: ScheduledReportInput,
-    env?: IndexEnv
-  ): CanonicalStoreResult | null {
-    return storeReportAtGeneration(this.sql, input, env);
+    env?: IndexEnv,
+  ): Promise<CanonicalStoreResult | null> {
+    return storeReportAtGeneration(input, env);
   }
 }

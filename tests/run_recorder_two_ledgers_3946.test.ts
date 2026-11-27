@@ -36,8 +36,6 @@
  *     storeErrors — there is no DO fallback that renders anything.
  */
 import { describe, it, expect } from "vitest";
-import { DatabaseSync } from "node:sqlite";
-
 import { buildJobRunRecord, type JobRunRecord } from "../src/services/jobRunRecords";
 import {
   d1JobRunRecordId,
@@ -54,63 +52,14 @@ import { handleReportsRoutes, type ReportsRouteContext } from "../src/agents/rou
 import { handleWorkflowRunsRoutes } from "../src/agents/routes/workflowRuns";
 import { MockSqlStorage } from "./mock-sql";
 import {
-  ensureScheduledReportsTable,
-  listScheduledReports,
-  persistScheduledReportSql,
+  storeReportAtGeneration,
 } from "../src/services/scheduledReports";
 import {
   createD1JobRunRecordDb,
   D1JobRunRecordStore,
   ensureJobRunRecordsSchema,
 } from "../src/data/d1JobRunRecordAdapter";
-import { createRunLedgerAdapter, ensureRunLedgerTables } from "../src/data/createRunLedgerPorts";
-import { postRunLedgerBestEffort } from "../src/services/runLedgerProjectionPosting";
-
-/** Minimal D1Database stand-in over node:sqlite (the J1 suite's double). */
-class MockD1Database {
-  readonly sqlite = new DatabaseSync(":memory:");
-  prepare(sql: string) {
-    const db = this.sqlite;
-    return {
-      bind(...params: unknown[]) {
-        return {
-          async run() {
-            const info = db.prepare(sql).run(...(params as any[]));
-            return {
-              success: true,
-              meta: { changes: info.changes, last_row_id: info.lastInsertRowid },
-              results: [],
-            };
-          },
-          async all() {
-            return { results: db.prepare(sql).all(...(params as any[])) };
-          },
-          async first() {
-            return db.prepare(sql).get(...(params as any[])) ?? null;
-          },
-          async raw() {
-            return db
-              .prepare(sql)
-              .all(...(params as any[]))
-              .map((row: any) => Object.values(row));
-          },
-        };
-      },
-    };
-  }
-  async batch(statements: any[]) {
-    const results: any[] = [];
-    this.sqlite.exec("BEGIN");
-    try {
-      for (const stmt of statements) results.push(await stmt.run());
-      this.sqlite.exec("COMMIT");
-    } catch (err) {
-      this.sqlite.exec("ROLLBACK");
-      throw err;
-    }
-    return results;
-  }
-}
+import { MockD1Database } from "./mock-d1";
 
 function d1Record(overrides: Partial<JobRunRecord> = {}): JobRunRecord {
   return buildJobRunRecord({
@@ -295,14 +244,13 @@ describe("listD1JobRunRecords (#3946)", () => {
 
 /**
  * Issue #6103 — the D1-only route fixture (the #4116 parity
- * fixture's shape): the engine's D1 row is recorded in D1 for real,
- * the canonical row is written through the canonical write path and
- * projected at write time via postRunLedgerBestEffort using the
- * sweep's own input mapping. The sweep itself is never run — it
- * copies existing DO rows into D1, which the replacement ruling
- * forbids. The tenant's carrier row is set so storeErrors.runs stays
- * unset. No jobRunRecordReader is injected: the routes read D1 for
- * real.
+ * fixture's shape): the engine's D1 row is recorded in D1 for real.
+ * Issue #6101 — the canonical row is seeded in D1 directly via
+ * the seam (storeReportAtGeneration): the projector is deleted, so
+ * there is no postRunLedgerBestEffort and no carrier row anymore.
+ * The seed keeps the fixture's shape (a canonical report with no
+ * exact join to the D1 job record, so the merge pin still bites).
+ * No jobRunRecordReader is injected: the routes read D1 for real.
  */
 async function d1Fixture() {
   const mock = new MockD1Database();
@@ -310,44 +258,13 @@ async function d1Fixture() {
   const jobDb = createD1JobRunRecordDb(mock as never);
   await ensureJobRunRecordsSchema(jobDb);
   await new D1JobRunRecordStore(jobDb).record(d1Record());
-  const canonicalId = seedCanonical(sql);
-  const adapter = createRunLedgerAdapter({ AGENT_DB: mock as never })!;
-  await ensureRunLedgerTables(adapter);
-  await adapter.setTenantProjectionCarriers(
-    "primary",
-    { queues: true, orm: true, sweep: true },
-    "merged",
-    Date.now(),
-  );
+  // Issue #6101 — the canonical row is seeded in D1 directly via
+  // the seam (the projector is deleted, and the DO mas_reports
+  // table is frozen). Version 1, no twin link: the fixture's D1
+  // job record and this report share no exact join, which is what
+  // the merge pin below asserts.
   const env = { AGENT_DB: mock as never, IAAA_TENANT_ID: "primary" };
-  const nowMs = Date.now();
-  for (const hit of listScheduledReports(sql as never, { limit: 100 })) {
-    const createdAtMs = Date.parse(hit.createdAt);
-    const posted = await postRunLedgerBestEffort(
-      env,
-      "primary",
-      {
-        ledger: "reports",
-        row: {
-          reportId: hit.id,
-          tenantId: "primary",
-          workspaceId: "primary",
-          runId: hit.runId,
-          generationId: hit.generationId,
-          title: hit.title,
-          source: hit.source,
-          summary: hit.summary,
-          body: hit.body,
-          createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : nowMs,
-          updatedAtMs: Number.isFinite(createdAtMs) ? createdAtMs : nowMs,
-          userLogin: hit.userLogin,
-          bodyR2Key: hit.bodyR2Key,
-        },
-      },
-      nowMs,
-    );
-    expect(posted.projected).toBe(true);
-  }
+  const canonicalId = await seedCanonical(env);
   return { mock, sql, env, canonicalId, d1Id: d1JobRunRecordId(d1Record()) };
 }
 
@@ -366,18 +283,21 @@ function unboundReportsCtx(sql: MockSqlStorage): ReportsRouteContext {
   } as ReportsRouteContext;
 }
 
-function seedCanonical(sql: MockSqlStorage): string {
-  ensureScheduledReportsTable(sql as any);
-  return persistScheduledReportSql(sql as any, {
-    runId: "screener:2026-11-11T09:00:00.000Z",
-    generationId: "screener:2026-11-11T09:00:00.000Z",
-    userLogin: "alice",
-    title: "Market screen — NASDAQ100 (scheduled)",
-    source: "screener",
-    summary: "Scanned 100 symbols, 5 matched.",
-    body: { trigger: "scheduled", success: true, matchedCount: 5, timestamp: "2026-11-11T09:00:00.000Z" },
-    createdAt: "2026-11-11T09:00:00.000Z",
-  });
+async function seedCanonical(env: { AGENT_DB: unknown }): Promise<string> {
+  const stored = await storeReportAtGeneration(
+    {
+      runId: "screener:2026-11-11T09:00:00.000Z",
+      generationId: "screener:2026-11-11T09:00:00.000Z",
+      userLogin: "alice",
+      title: "Market screen — NASDAQ100 (scheduled)",
+      source: "screener",
+      summary: "Scanned 100 symbols, 5 matched.",
+      body: { trigger: "scheduled", success: true, matchedCount: 5, timestamp: "2026-11-11T09:00:00.000Z" },
+      createdAt: "2026-11-11T09:00:00.000Z",
+    },
+    env as never,
+  );
+  return stored!.reportId;
 }
 
 describe("GET /api/runs merges D1 records (#3946, D1-only #6103)", () => {
@@ -426,7 +346,7 @@ describe("GET /api/runs merges D1 records (#3946, D1-only #6103)", () => {
 
   it("names an unbound D1 ledger in storeErrors and renders NOTHING — D1-only, no DO fallback (#6103)", async () => {
     const sql = new MockSqlStorage();
-    const canonicalId = seedCanonical(sql);
+    const canonicalId = await seedCanonical({ AGENT_DB: new MockD1Database() as never });
     const res = await handleReportsRoutes(
       new Request("https://x/api/runs?kind=all", { headers: { "x-user-login": "alice" } }),
       new URL("https://x/api/runs?kind=all"),

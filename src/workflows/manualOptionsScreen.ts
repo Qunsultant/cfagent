@@ -25,13 +25,14 @@
  *     send; a pair that cannot be attempted never claims.
  */
 import { deliverGatedSlack } from "../services/gatedSlackDelivery";
+import { createJobRunRecordAdapter } from "../data/createJobRunRecordPorts";
+import { resolveIaaaTenant } from "../security/iaaaGithubEndToEnd";
 import {
   createDeliverySuppressor,
   deliveryDestinationFor,
   type DeliverySuppressor,
 } from "./screenDeliverySuppression";
 import { screenerOutcomeFromRunResult } from "../services/screenerFollowups";
-import { recordJobOutcome } from "../services/jobOutcomes";
 import {
   recordUnifiedOptionsRun,
   type UnifiedOptionsRunRecord,
@@ -222,7 +223,7 @@ export function createManualOptionsScreenDelivery(input: ManualOptionsScreenInpu
         reportUrl,
       });
     } else {
-      recordUnifiedOptionsRun(ctx.getOrm() as never, {
+      await recordUnifiedOptionsRun(ctx.getOrm() as never, {
         ...canonical.record,
         pdfKey,
         pdfStatus,
@@ -443,27 +444,38 @@ export function createManualOptionsScreenDelivery(input: ManualOptionsScreenInpu
     // The inline manual-options outcome - recorded here ONLY when the
     // bridge did not take the run (bridged runs record through the
     // job-tree hook; recording both would double the feed). Never
-    // throws: a sink failure must not fail the run.
+    // throws: a fold failure must not fail the run.
     if (!(shouldNotifySlack && ctx.scheduleScreenerFollowups)) {
       try {
-        recordJobOutcome(ctx.ensureTables() as never, {
-          id: `options-manual:${runId}`,
-          kind: "options",
-          trigger: "manual",
-          status: "completed",
-          scanned: shaped["totalUnderlyingsScanned"] as number | undefined,
-          matched: shaped["matchedCount"] as number | undefined,
-          reportUrl: shaped["reportUrl"] as string | undefined,
-          pdfKey: shaped["pdfKey"] as string | undefined,
-          xlsxKey: shaped["xlsxKey"] as string | undefined,
-          csvKey: shaped["csvKey"] as string | undefined,
-          deliveryStates: {
-            ...(slackState ? { slack: slackState } : {}),
-            ...(emailState ? { email: emailState } : {}),
+        // Issue #6101 — the outcome folds directly onto D1 (no DO
+        // row, no projection); an unbound ledger is the named error,
+        // logged by the catch below.
+        const ledgerStore = createJobRunRecordAdapter(ctx.env as { AGENT_DB?: unknown });
+        if (!ledgerStore) {
+          throw new Error("[run-ledger] D1 run-ledger binding unbound (AGENT_DB) (#6101).");
+        }
+        await ledgerStore.foldJobOutcome(
+          {
+            id: `options-manual:${runId}`,
+            kind: "options",
+            trigger: "manual",
+            status: "completed",
+            scanned: shaped["totalUnderlyingsScanned"] as number | undefined,
+            matched: shaped["matchedCount"] as number | undefined,
+            reportUrl: shaped["reportUrl"] as string | undefined,
+            pdfKey: shaped["pdfKey"] as string | undefined,
+            xlsxKey: shaped["xlsxKey"] as string | undefined,
+            csvKey: shaped["csvKey"] as string | undefined,
+            deliveryStates: {
+              ...(slackState ? { slack: slackState } : {}),
+              ...(emailState ? { email: emailState } : {}),
+            },
+            origin: "manual-options-inline",
+            createdAt: new Date().toISOString(),
           },
-          origin: "manual-options-inline",
-          createdAt: new Date().toISOString(),
-        });
+          resolveIaaaTenant({ IAAA_TENANT_ID: (ctx.env as { IAAA_TENANT_ID?: string } | null | undefined)?.IAAA_TENANT_ID }),
+          Date.now(),
+        );
       } catch (outcomeErr) {
         structuredLog.warn("manualOptionsScreen.outcome_record_failed", {
           message: "[Orchestrator] Manual options outcome record failed",

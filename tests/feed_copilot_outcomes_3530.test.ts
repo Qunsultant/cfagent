@@ -57,11 +57,11 @@ import {
   buildFeedJobOutcomeInput,
   FEED_JOB_OUTCOME_ORIGIN,
 } from "../src/services/feedJobOutcomes";
-import {
-  recordJobOutcome,
-  listJobOutcomes,
-} from "../src/services/jobOutcomes";
 import { handleAutopilotRoutes } from "../src/agents/routes/autopilot";
+import { MockD1Database } from "./mock-d1";
+import { createJobRunRecordAdapter } from "../src/data/createJobRunRecordPorts";
+import { resolveIaaaTenant } from "../src/security/iaaaGithubEndToEnd";
+import { listD1JobOutcomes } from "../src/services/runLedgerReads";
 import type { JobOutcomeInput } from "../src/data/jobOutcomePorts";
 import type { DataProvider, DataResult, QuoteResult } from "../src/trading/dataProviders/contract";
 import type { MarketDataResearchQuote } from "../src/types";
@@ -255,15 +255,24 @@ describe("feed outcomes at settle (#3530 slice B)", () => {
 
   it("residency: the store the Autopilot route reads contains the feed outcome after a host-settled run", async () => {
     const readerSql = new MockSqlStorage();
+    // #6101: the Autopilot route reads D1, so the settled outcome
+    // folds onto D1 (same env object for the fold and the route ctx,
+    // so the tenant resolves identically).
+    const d1 = new MockD1Database();
+    const env = { AGENT_DB: d1 };
+    const ledger = createJobRunRecordAdapter(env as never);
     const { control } = await makeOutcomeHarness({
-      record: (input) => void recordJobOutcome(readerSql, input),
+      record: async (input) => {
+        await ledger!.foldJobOutcome(input as never, resolveIaaaTenant(env as never), Date.now());
+      },
     });
     const dispatch = await control.runJob("yahoo-nasdaq100-quotes", { trigger: "manual" });
     await dispatch.completion!;
-    const stored = listJobOutcomes(readerSql, 10).filter((r) => r.kind === "feed");
+    const stored = (await listD1JobOutcomes(env as never, { limit: 10 })).filter((r) => r.kind === "feed");
     expect(stored).toHaveLength(1);
     const ctx = {
       ensureTables: () => readerSql,
+      env,
       audit: () => {},
       getAutopilotState: () => ({}),
       writeAutopilotState: (p: any) => p,

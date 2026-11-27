@@ -47,6 +47,7 @@ vi.mock("../src/orchestrate", () => ({
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
 import { createSocialBriefStoreFromNamespace } from "../src/agents/social/briefStore";
 import { MockD1Database } from "./mock-d1";
+import { makeLedgerStub } from "./ledger-stub";
 import { createD1UnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
 import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 
@@ -118,6 +119,7 @@ function makeEnv(sessionStore: unknown, extra: Record<string, unknown> = {}) {
     // #6503 — goals live in the D1 unified store only (fail-closed
     // without AGENT_DB); the agent never reads the "goals" KV key.
     AGENT_DB: new MockD1Database(),
+    ORCHESTRATOR_AGENT: makeLedgerStub().namespace,
     PAYMENTS_AGENT: { idFromName: () => "payments-default", get: () => makePayments() },
     SESSION_STORE: sessionStore,
     SOCIAL_POSTING_ENABLED: "1",
