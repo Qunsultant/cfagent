@@ -1,0 +1,3 @@
+### One run-input carrier for all surfaces (#6682)
+
+Run inputs (universe, symbols, source/dataset) now travel one carrier at dispatch: the feed spec declares a `symbols` parameter bound through the one symbols normalizer, dispatch surfaces (Data Providers run, `run_feed_job`, schedules/API bodies) bind inputs through the existing spec binder into an ephemeral per-run definition, and the manual stock screen carries form tickers as a symbols shard so the feed fetches exactly the named symbols. A `sources` input resolves the registered feed job for that provider/dataset (broker-neutral) and refuses by name when none serves it; absent inputs run the job's own definition unchanged.

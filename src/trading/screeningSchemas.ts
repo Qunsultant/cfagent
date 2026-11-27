@@ -175,6 +175,13 @@ export function parseStockScreenerFilter(input: unknown): ScreeningValidationRes
 
 export interface StockScreenRequest {
   filters: StockScreenerFilter;
+  /**
+   * Issue #6682: explicit tickers the run screens. Envelope only,
+   * split out here; never forwarded into the engine filter. Present
+   * ⇒ the run's feed fetches exactly these symbols (the symbols
+   * shard); absent ⇒ the universe's stored list.
+   */
+  symbols?: string[];
   /** Universe the screen runs over; "NASDAQ100" when the caller omitted
    *  one (the interactive routes' documented default), or "ALL" for the
    *  sharded all-universes run. */
@@ -235,6 +242,7 @@ export interface StockScreenRequest {
 const stockScreenRequestSchema = z.strictObject({
   ...stockScreenerFilterFields,
   universe: universeNameSchema.optional(),
+  symbols: z.array(tickerSchema).min(1).optional(),
   minScore: fin().optional(),
   emailTo: z.string().optional(),
   pushToSlack: z.boolean().optional(),
@@ -252,12 +260,19 @@ const stockScreenRequestSchema = z.strictObject({
 export function parseStockScreenRequest(input: unknown): ScreeningValidationResult<StockScreenRequest> {
   const parsed = parseWith("stock screen request", stockScreenRequestSchema, input);
   if (!parsed.ok) return parsed;
-  const { universe, minScore, emailTo, pushToSlack, slackChannel, webhookUrl, generatePdf, patternRef, patternQualifications, providerId, brokerId, ...filters } = parsed.value as Record<string, unknown>;
+  const { universe, symbols, minScore, emailTo, pushToSlack, slackChannel, webhookUrl, generatePdf, patternRef, patternQualifications, providerId, brokerId, ...filters } = parsed.value as Record<string, unknown>;
   return {
     ok: true,
     value: {
       filters: filters as StockScreenerFilter,
       universe: (universe as string | undefined) ?? defaultUniverseId(),
+      ...(symbols !== undefined
+        ? {
+            symbols: Array.from(
+              new Set((symbols as string[]).map((s) => s.toUpperCase().trim()).filter(Boolean)),
+            ),
+          }
+        : {}),
       ...(minScore !== undefined ? { minScore: minScore as number } : {}),
       ...(emailTo !== undefined ? { emailTo: emailTo as string } : {}),
       ...(pushToSlack !== undefined ? { pushToSlack: pushToSlack as boolean } : {}),

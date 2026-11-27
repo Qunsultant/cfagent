@@ -34,6 +34,13 @@ export const PARAM_DERIVATIONS: Readonly<Record<string, ParamDerivationFn>> = {
   shardsForUniverse: (value) => ({
     shards: shardsForUniverse(String(value)),
   }),
+  // Issue #6682 — explicit symbols ride one symbols shard (the premium
+  // path's shape); bound after `universe`, so the symbols shard wins
+  // over the universe shards exactly as feed.pull's explicit-symbols
+  // precedence does.
+  symbolsShard: (value) => ({
+    shards: [{ shardId: "symbols", symbols: Array.isArray(value) ? value : [] }],
+  }),
 };
 
 export function hasEnumSource(name: string): boolean {
