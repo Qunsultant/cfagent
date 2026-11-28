@@ -119,19 +119,19 @@ export function CapabilityMapView({ onNavigateTab }: CapabilityMapViewProps) {
         <Stack gap="2">
           <Flex gap="2" align="center" wrap>
             <strong>
-              {brand.company.name} <span style={{ color: "var(--color-text-muted)" }}>· company</span>
+              {brand.company.name} <span className="ui-muted">· company</span>
             </strong>
-            <span style={{ color: "var(--color-text-muted)" }}>owns the platform</span>
+            <span className="ui-muted">owns the platform</span>
             <strong>
-              {brand.platform.name} <span style={{ color: "var(--color-text-muted)" }}>· platform</span>
+              {brand.platform.name} <span className="ui-muted">· platform</span>
             </strong>
           </Flex>
-          <p style={{ margin: 0 }}>{brand.platform.description}</p>
-          <p style={{ margin: 0 }}>
+          <p className="ui-m-0">{brand.platform.description}</p>
+          <p className="ui-m-0">
             <strong>Pipeline:</strong> {pipelineNames}
           </p>
-          <p style={{ margin: 0, color: "var(--color-text-muted)" }}>{brand.pipelineNote}</p>
-          <p style={{ margin: 0, color: "var(--color-text-muted)" }}>{brand.pipelineCaption}</p>
+          <p className="ui-m-0 ui-muted">{brand.pipelineNote}</p>
+          <p className="ui-m-0 ui-muted">{brand.pipelineCaption}</p>
         </Stack>
       </Card>
 
@@ -142,7 +142,7 @@ export function CapabilityMapView({ onNavigateTab }: CapabilityMapViewProps) {
         aria-label="Filter capabilities"
       />
 
-      <p style={{ margin: 0, color: "var(--color-text-muted)" }}>
+      <p className="ui-m-0 ui-muted">
         {capabilities.length} capabilities · {counts.available} Available · {counts.partial} Partial ·{" "}
         {counts["not-available"]} Not available
       </p>
@@ -178,7 +178,7 @@ export function CapabilityMapView({ onNavigateTab }: CapabilityMapViewProps) {
                     Link
                   </Button>
                 </Flex>
-                <span style={{ color: "var(--color-text-muted)" }}>{capability.group}</span>
+                <span className="ui-muted">{capability.group}</span>
               </Stack>
             ),
           },
@@ -188,7 +188,7 @@ export function CapabilityMapView({ onNavigateTab }: CapabilityMapViewProps) {
             render: (capability) => (
               <Stack gap="1">
                 <span>{capability.tagline}</span>
-                <span style={{ color: "var(--color-text-muted)" }}>{capability.description}</span>
+                <span className="ui-muted">{capability.description}</span>
               </Stack>
             ),
           },
@@ -204,7 +204,7 @@ export function CapabilityMapView({ onNavigateTab }: CapabilityMapViewProps) {
             header: "App surface",
             render: (capability) =>
               capability.surfaces.length === 0 ? (
-                <span style={{ color: "var(--color-text-muted)" }}>No direct user surface — map only</span>
+                <span className="ui-muted">No direct user surface — map only</span>
               ) : (
                 <Stack gap="1">
                   {capability.surfaces.map((surface) => (
