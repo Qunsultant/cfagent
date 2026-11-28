@@ -77,17 +77,19 @@
  * reason, so the decision is visible in the pin, not hidden. (Recount
  * §1.3; census seed §2.)
  *
- * Config-77 decomposition (DECISION: recorded, not recomputed):
+ * Config-78 decomposition (DECISION: recorded, not recomputed):
  * the survey's own arithmetic does not pin down which misc objects are
  * inside the 77 — §0 enumerates 70 before misc (implying 7 misc) while
  * §1.5 excludes 2 JSON files from the 18 (implying 68 + 9 misc); the total
  * is 77 either way. This pin therefore does NOT recompute the 77 from
- * parts: it asserts the 70 enumerated components exist (25 named
- * components + 45 files: 25 `*Modes` files, 18 `config/*.json` files,
+ * parts: it asserts the 71 enumerated components exist (25 named
+ * components + 46 files: 25 `*Modes` files, 19 `config/*.json` files,
  * `environment.config.json`, `wrangler.jsonc`), asserts all 24 misc
- * objects named in §1.5 exist (a superset check), and records 77 as
+ * objects named in §1.5 exist (a superset check), and records 78 as
  * census data. The §0 reading (70 + 7) is the one stated in the census
  * seed; the §1.5 reading (68 + 9) is recorded alongside it.
+ * Issue #6709 adds the 19th JSON file (`config/brand.json`) after the
+ * seed, so the enumerated count is 71 and the recorded total is 78.
  *
  * Unitemized Tier A allowance (SEED GAP, flagged not hidden):
  * the survey reports 17 Tier A definitions but itemizes 15 by name; the 2
@@ -146,8 +148,8 @@ const DISPOSITIONS: ReadonlySet<string> = new Set([
   "CONFIG-ENTRY",
 ]);
 
-/** Recorded census data (see the header — 77 and 2 are recorded, not recomputed). */
-const RECORDED_CONFIG_TOTAL = 77;
+/** Recorded census data (see the header — 78 and 2 are recorded, not recomputed). */
+const RECORDED_CONFIG_TOTAL = 78;
 const RECORDED_UNITEMIZED_TIER_A = 2;
 const RECORDED_APP_CREATED_TOTAL = 211;
 
@@ -393,9 +395,10 @@ const MODES_FILES: string[] = [
   "src/config/screenerModes.ts",
 ];
 
-/** The 18 `config/*.json` files (one entry each in the 77). */
+/** The 19 `config/*.json` files (one entry each in the 78; #6709 adds `config/brand.json`). */
 const CONFIG_JSON_FILES: string[] = [
   "config/auto-merge.json",
+  "config/brand.json",
   "config/builtin-scheduled-goals.json",
   "config/channel-brokers.json",
   "config/commercial-defaults.json",
@@ -714,9 +717,9 @@ describe("universal context census (#6528 Phase 1)", () => {
     for (const file of CONFIG_JSON_FILES) {
       if (!existsSync(file)) missing.push(`${file}: config JSON`);
     }
-    expect(CONFIG_JSON_FILES.length).toBe(18);
+    expect(CONFIG_JSON_FILES.length).toBe(19);
     const jsonOnDisk = readdirSync("config").filter((f) => f.endsWith(".json"));
-    expect(jsonOnDisk.length).toBe(18);
+    expect(jsonOnDisk.length).toBe(19);
     expect(existsSync("environment.config.json")).toBe(true);
     expect(existsSync("wrangler.jsonc")).toBe(true);
     for (const [file, name] of MISC_CONFIG) {

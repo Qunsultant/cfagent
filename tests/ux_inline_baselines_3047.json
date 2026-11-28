@@ -1,5 +1,6 @@
 {
   "src/client/AccountPanels.tsx": 4,
+  "src/client/CapabilityMapView.tsx": 11,
   "src/client/Chat.tsx": 4,
   "src/client/DataProvidersPanel.tsx": 1,
   "src/client/TradeHub.tsx": 20,
