@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import "./workflowsHub.deprecated.css";
 import { Badge, Button, Card, CardHeader, SmallHeader, KpiRibbon, Notice, PageSection, PillGroup, Table, TextInput, PageShell, Tabs, Stack, Flex, Grid, type BadgeTone } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
+import { CapabilityMapView } from "./CapabilityMapView";
 import { STRATEGY_LIBRARY } from "./options/strategyLibrary";
 import {
   FAQ_QUESTIONS,
@@ -925,17 +926,46 @@ export const PLATFORM_WORKFLOWS: WorkflowItem[] = [
 ];
 
 export interface WorkflowsHubProps {
-  onNavigateTab?: (tab: string) => void;
+  onNavigateTab?: (tab: string, view?: string) => void;
   onSendPrompt?: (prompt: string, sourceTab?: string) => void;
 }
 
-export type WorkflowsSubTab = "faq" | "workflows" | "decisioning" | "matrix" | "improvements";
+export type WorkflowsSubTab = "faq" | "workflows" | "decisioning" | "matrix" | "improvements" | "capabilities";
+
+/**
+ * The six views of the Workflows page (UX architecture §6: one named
+ * registry per page — the Tabs strip and the validators read this, never
+ * an inline literal duplicated between the page and a test).
+ */
+export const WORKFLOWS_VIEWS: readonly WorkflowsSubTab[] = [
+  "faq",
+  "workflows",
+  "decisioning",
+  "matrix",
+  "improvements",
+  "capabilities",
+];
+
+export const WORKFLOWS_VIEW_LABELS: Record<WorkflowsSubTab, string> = {
+  faq: "Quantitative Playbooks (8 Core FAQs)",
+  workflows: "Platform Workflows (14 Track A & E)",
+  decisioning: "Algorithmic Decisioning Rules (6 Engines)",
+  matrix: "Capability & Lookup Matrix",
+  improvements: "Optimization Roadmap (6 Enhancements)",
+  capabilities: "Capability Map (SupraHub)",
+};
+
+export const WORKFLOWS_VIEW_ICONS: Record<WorkflowsSubTab, string> = {
+  faq: "💡",
+  workflows: "🧭",
+  decisioning: "⚖️",
+  matrix: "📋",
+  improvements: "🚀",
+  capabilities: "🗺️",
+};
 
 export function isValidWorkflowsSubTab(tab: unknown): tab is WorkflowsSubTab {
-  return (
-    typeof tab === "string" &&
-    (["faq", "workflows", "decisioning", "matrix", "improvements"] as readonly string[]).includes(tab)
-  );
+  return typeof tab === "string" && (WORKFLOWS_VIEWS as readonly string[]).includes(tab);
 }
 
 export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps) {
@@ -1084,10 +1114,15 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
     setExpandedDecisioningId(ruleId);
   };
 
+  // Vertical scroll (issue #6709): the hub renders its PageShell inside
+  // `.ui-page-frame` — the same wrapper AgentsPanel, DocsAndReportsPanel,
+  // and OptionsFlowsHub use — so long content scrolls instead of clipping
+  // inside the host's `overflow: hidden` container.
   return (
+    <div className="ui-page-frame">
     <PageShell
         title="Platform Workflows, Playbooks & Solutions Hub"
-        scopeNote="Authoritative architectural specification of all 14 operational workflows (8 Analysis · 6 Execution), step-by-step playbooks for the 8 core quantitative scenarios, algorithmic decision rules, and capability lookup matrix."
+        scopeNote="Authoritative architectural specification of all 14 operational workflows (8 Analysis · 6 Execution), step-by-step playbooks for the 8 core quantitative scenarios, algorithmic decision rules, capability lookup matrix, and the SupraHub capability map."
       >
 
       {/* Quick Metrics Bar */}
@@ -1105,13 +1140,11 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
         <Tabs
           ariaLabel="Workflows sections"
           idBase="workflows"
-          tabs={[
-            { id: "faq", icon: "💡", label: "Quantitative Playbooks (8 Core FAQs)" },
-            { id: "workflows", icon: "🧭", label: "Platform Workflows (14 Track A & E)" },
-            { id: "decisioning", icon: "⚖️", label: "Algorithmic Decisioning Rules (6 Engines)" },
-            { id: "matrix", icon: "📋", label: "Capability & Lookup Matrix" },
-            { id: "improvements", icon: "🚀", label: "Optimization Roadmap (6 Enhancements)" },
-          ]}
+          tabs={WORKFLOWS_VIEWS.map((id) => ({
+            id,
+            label: WORKFLOWS_VIEW_LABELS[id],
+            icon: WORKFLOWS_VIEW_ICONS[id],
+          }))}
           value={activeTab}
           onChange={handleTabChange}
         />
@@ -1841,6 +1874,16 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
         </Stack>
         </PageSection>
       )}
+
+      {/* VIEW 6: SUPRAHUB CAPABILITY MAP (issue #6709) */}
+      {activeTab === "capabilities" && (
+        <PageSection title="Capability Map (SupraHub)">
+          <Stack gap="5" role="tabpanel" id="workflows-panel-capabilities" aria-labelledby="workflows-tab-capabilities">
+            <CapabilityMapView onNavigateTab={(tab, view) => onNavigateTab?.(tab, view)} />
+          </Stack>
+        </PageSection>
+      )}
     </PageShell>
+    </div>
   );
 }
