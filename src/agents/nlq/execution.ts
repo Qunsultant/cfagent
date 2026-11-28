@@ -3132,7 +3132,12 @@ export async function executeNaturalLanguageQuery(
   env: Env,
   userLoginOrOptions?: string | { context?: string; validateWithLLM?: boolean; untrustedContent?: boolean },
   userDid?: string,
-  options?: { context?: string; validateWithLLM?: boolean; untrustedContent?: boolean; scanRunStore?: ScanRunStore; profileStore?: StrategyProfileStore; schedulingPort?: NLQSchedulingPort; agentScheduleCapability?: NLQExecutionDeps["agentScheduleCapability"]; stockScreenPort?: NLQStockScreenPort; socialBriefPort?: NLQSocialBriefPort; discoveryRunner?: NLQExecutionDeps["discoveryRunner"]; fitDiscoveryRunner?: NLQExecutionDeps["fitDiscoveryRunner"]; storage?: NLQExecutionDeps["storage"] }
+  options?: { context?: string; validateWithLLM?: boolean; untrustedContent?: boolean; scanRunStore?: ScanRunStore; profileStore?: StrategyProfileStore; schedulingPort?: NLQSchedulingPort; agentScheduleCapability?: NLQExecutionDeps["agentScheduleCapability"]; stockScreenPort?: NLQStockScreenPort; socialBriefPort?: NLQSocialBriefPort; discoveryRunner?: NLQExecutionDeps["discoveryRunner"]; fitDiscoveryRunner?: NLQExecutionDeps["fitDiscoveryRunner"]; storage?: NLQExecutionDeps["storage"];
+    /** #6558: the async-job execution deadline's abort signal, when
+     *  NLQ runs as a job leg (the executor binds it). The runners
+     *  do not consume it yet — follow-up work; this field is the
+     *  seam they consume it through. */
+    signal?: AbortSignal }
 ): Promise<{ plan: NLQPlan; result: NLQQueryResult }> {
   let userLogin: string | undefined;
   let resolvedOptions = options;

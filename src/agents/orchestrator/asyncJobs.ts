@@ -243,12 +243,20 @@ export interface AsyncJobsContext {
       userLogin: string;
       outcome: import("../../services/screenerFollowups").ScreenerRunOutcome;
       artifacts: Array<{ key: string; fileName: string }>;
+      /** #6558: the execution deadline's abort signal. The
+       *  transports behind the port do not consume it yet
+       *  (follow-up work); the field is the seam they consume
+       *  it through. */
+      signal?: AbortSignal;
     }) => Promise<{ ok: boolean; error?: string; detail?: string }>;
     /** Issue #1123 S4: text-only lifecycle notifications. */
     notify: (input: {
       channel: AsyncJobChannel;
       userLogin: string;
       text: string;
+      /** #6558: the execution deadline's abort signal (same seam
+       *  as deliver above). */
+      signal?: AbortSignal;
     }) => Promise<{ ok: boolean; error?: string; detail?: string }>;
   };
 }
@@ -1573,26 +1581,43 @@ export function resolveAsyncJobMaxRuntimeMs(env: Record<string, unknown>): numbe
 /** Issue #3907: a per-job execution deadline — a promise that
  *  rejects with the cataloged timeout BusinessError after ms.
  *  The caller races the capability leg against it and cancels it
- *  on every terminal path (cancel is idempotent). The rejection
- *  abandons the hung leg, it does not abort it: the leg may still
- *  settle in the background, but the row is already terminal, so
- *  its late result is dropped and no second execution occurs. */
+ *  on every terminal path (cancel is idempotent).
+ *
+ *  Issue #6558 (transferred from #6546): the deadline also
+ *  carries an abort signal. When the deadline fires, the
+ *  controller aborts with the same timeout error as its reason,
+ *  so a leg that observes the signal stops instead of running on
+ *  after the row is terminal (the #3907 contract was
+ *  abandon-only: the leg kept running in the background, holding
+ *  the object resident on unfinished I/O). Cancel never aborts —
+ *  a settled leg needs no abort. */
 export function createExecutionDeadline(maxRuntimeMs: number): {
   promise: Promise<never>;
   cancel: () => void;
+  /** Issue #6558: aborted when the deadline fires, with the
+   *  timeout error as reason. Legs raced against the deadline
+   *  receive this signal; a leg that observes it stops. */
+  signal: AbortSignal;
 } {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let rejectFn: ((error: Error) => void) | undefined;
   const promise = new Promise<never>((_resolve, reject) => {
     rejectFn = reject;
   });
+  const controller = new AbortController();
   if (maxRuntimeMs > 0) {
     timer = setTimeout(() => {
-      rejectFn?.(new BusinessError(FAILURE_ASYNC_JOB_TIMEOUT_CODE, { maxRuntimeMs }));
+      const error = new BusinessError(FAILURE_ASYNC_JOB_TIMEOUT_CODE, { maxRuntimeMs });
+      // Issue #6558: abort first, so a leg observing the signal
+      // stops with the timeout error as its reason; the race
+      // rejection below is the same event.
+      controller.abort(error);
+      rejectFn?.(error);
     }, maxRuntimeMs);
   }
   return {
     promise,
+    signal: controller.signal,
     cancel: () => {
       if (timer) {
         clearTimeout(timer);
@@ -2390,6 +2415,11 @@ if (job.capability === "http.request") {
       method,
       headers,
       body: method === "GET" || method === "HEAD" ? undefined : body,
+      // Issue #6558: the deadline signal rides the Request — a
+      // handler that fetches with request.signal (or checks it)
+      // stops when the deadline fires instead of running on
+      // after the row is terminal.
+      signal: executionDeadline.signal,
     })),
     executionDeadline.promise,
   ]);
@@ -2442,6 +2472,11 @@ async function executeMcpToolCapability(
     // that open a bridge row stamp it as the bridge row's
     // parent (wrapper ↔ bridge link).
     asyncJobId: jobId,
+    // Issue #6558: the deadline signal rides the tool context
+    // (McpToolContext.signal) — a tool that fetches with it
+    // stops when the deadline fires; per-tool consumption is
+    // follow-up work, not this slice.
+    signal: executionDeadline.signal,
     audit: (type, agent, detail) => ctx.audit(type, agent, detail),
     // #1744: job-executor call — the external gate already ran
     // at queue time for /mcp-queued jobs; this gate is the
@@ -2532,6 +2567,11 @@ async function executeFollowupReportCapability(
     // fails the serve job explicitly (the chain's stop point),
     // exactly like a missing PDF key below.
     const { serveReportStage } = await import("../../services/unifiedReportPipeline");
+    // Issue #6558: NO deadline signal here — serveReportStage
+    // reads local ORM rows only (no outbound I/O), so there is
+    // nothing to abort; the race is a backstop. This is the one
+    // signal-less race site, pinned in
+    // tests/engine_unit_deadline_abort_6558.test.ts.
     const checked = await Promise.race([
       serveReportStage({
         canonicalReportId: outcome.canonicalReportId,
@@ -2674,6 +2714,9 @@ async function executeFollowupDeliverCapability(
           text: formatUndeliverableNotification(outcome, payload.skipReason),
           ...(channel === "email" && outcome.emailTo ? { emailTo: outcome.emailTo } : {}),
           ...(channel === "slack" && outcome.slackChannel ? { slackChannel: outcome.slackChannel } : {}),
+          // Issue #6558: the deadline signal rides the port
+          // input; transport consumption is follow-up work.
+          signal: executionDeadline.signal,
           }),
           executionDeadline.promise,
         ]);
@@ -2812,7 +2855,15 @@ async function executeFollowupDeliverCapability(
       let delivery: { ok: boolean; error?: string; detail?: string };
       try {
         delivery = await Promise.race([
-          ctx.followupDeliveryPort().deliver({ channel, userLogin, outcome, artifacts }),
+          ctx.followupDeliveryPort().deliver({
+            channel,
+            userLogin,
+            outcome,
+            artifacts,
+            // Issue #6558: the deadline signal rides the port
+            // input; transport consumption is follow-up work.
+            signal: executionDeadline.signal,
+          }),
           executionDeadline.promise,
         ]);
         if (!delivery.ok) throw new Error(codedMessage("FAILURE_DELIVERY_CHANNEL_FAILED", delivery.error || `Delivery via ${channel} failed.`));
@@ -2956,6 +3007,9 @@ async function executeFollowupNotifyCapability(
       text,
       ...(channel === "email" && outcome.emailTo ? { emailTo: outcome.emailTo } : {}),
       ...(channel === "slack" && outcome.slackChannel ? { slackChannel: outcome.slackChannel } : {}),
+      // Issue #6558: the deadline signal rides the port input;
+      // transport consumption is follow-up work.
+      signal: executionDeadline.signal,
     }),
     executionDeadline.promise,
   ]);
@@ -3006,6 +3060,10 @@ async function executeShardExecuteCapability(
           chain
         ),
       sessionId: ctx.sessionKey(),
+      // Issue #6558: the deadline signal rides the shard deps;
+      // the internal provider fetches (engine/agents/screener)
+      // do not consume it yet — follow-up work, not this slice.
+      signal: executionDeadline.signal,
       // Issue #4417: persist each failed shard attempt on the job row —
       // durable across a host restart, best-effort by contract.
       recordAttempt: (attempt: number, error: unknown) => {
@@ -3049,6 +3107,10 @@ async function executeFeedSnapshotCapability(
       createETradeService: (userLogin, environment) =>
         new ETradeService(ctx.getOrm(), ctx.env, userLogin, environment),
       sessionId: ctx.sessionKey(),
+      // Issue #6558: the deadline signal rides the feed deps;
+      // the internal provider fetches do not consume it yet —
+      // follow-up work, not this slice.
+      signal: executionDeadline.signal,
     },
     feedPayload
     ),
@@ -3127,7 +3189,11 @@ async function executeNlqExecuteCapability(
             alarms: nlqPortToScheduleAlarms(ctx.nlqSchedulingPort(), () =>
               resolveEffectiveScheduleFloor(ctx.agentCtx.storage.sql, ctx.env).seconds,
             ),
-          }) }), stockScreenPort: ctx.nlqStockScreenPort(), discoveryRunner: createDiscoveryService({ env: ctx.env, userLogin: jobUserLoginForNlq, orm: ctx.getOrm(), sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage, platform: TradingPlatformRegistry.getPlatform(await resolveTenantBroker(ctx.env), ctx.env, ctx.getOrm(), jobUserLoginForNlq), ...(nlqDpPorts?.config ? { configPort: nlqDpPorts.config } : {}), ...(nlqDpPorts?.captures ? { capturePort: nlqDpPorts.captures } : {}) }), fitDiscoveryRunner: createFitDiscoveryRunner({ env: ctx.env, userLogin: jobUserLoginForNlq, sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }) },
+          }) }), stockScreenPort: ctx.nlqStockScreenPort(), discoveryRunner: createDiscoveryService({ env: ctx.env, userLogin: jobUserLoginForNlq, orm: ctx.getOrm(), sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage, platform: TradingPlatformRegistry.getPlatform(await resolveTenantBroker(ctx.env), ctx.env, ctx.getOrm(), jobUserLoginForNlq), ...(nlqDpPorts?.config ? { configPort: nlqDpPorts.config } : {}), ...(nlqDpPorts?.captures ? { capturePort: nlqDpPorts.captures } : {}) }), fitDiscoveryRunner: createFitDiscoveryRunner({ env: ctx.env, userLogin: jobUserLoginForNlq, sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }),
+            // Issue #6558: the deadline signal rides the NLQ
+            // options; the runners do not consume it yet —
+            // follow-up work, not this slice.
+            signal: executionDeadline.signal },
     ),
     executionDeadline.promise,
   ]);
@@ -3266,8 +3332,10 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
   // ASYNC_JOB_MAX_RUNTIME_MINUTES). A hung provider fetch is
   // failed with FAILURE_ASYNC_JOB_TIMEOUT instead of running
   // until the 2h reap backstop. Cancelled at both terminal
-  // points next to stopHeartbeat; the rejection abandons the
-  // hung leg, it does not abort it.
+  // points next to stopHeartbeat. Issue #6558: the deadline
+  // also aborts its signal on fire, and every leg below
+  // receives it — a leg that observes the signal stops instead
+  // of running on after the row is terminal.
   const executionDeadline = createExecutionDeadline(resolveAsyncJobMaxRuntimeMs(ctx.env as unknown as Record<string, unknown>));
   // Consolidation C3 (#1277): stage identity for transition recording
   // (in scope for both the completion and failure paths below).
@@ -3389,10 +3457,27 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
         queue: family.queue,
       } satisfies AsyncCapabilityExecution,
       asyncJobId: jobId,
+      // Issue #6558 — the executor's deadline signal rides the
+      // engine unit: a capability step observing the step
+      // context's signal stops when the deadline fires.
+      signal: executionDeadline.signal,
       trigger: asyncJobTriggerToRunTrigger(getAsyncJob(ctx, jobId)?.trigger),
     });
     if (unit.state === "failed") {
-      throw new Error(unit.error ?? `Async capability ${job.capability} failed.`);
+      // Issue #6558 — render the unit's cataloged code into the
+      // throw (the `[CODE]` idiom `resolveJobFailureCode` reads),
+      // so the row's coded failure is the leg's code, not the
+      // generic FAILURE_ASYNC_JOB_FAILED the bare message would
+      // resolve to. A deadline-fired leg lands as
+      // FAILURE_ASYNC_JOB_TIMEOUT, exactly as before F1.
+      throw new Error(
+        unit.errorCode
+          ? codedMessage(
+              unit.errorCode,
+              unit.error ?? `Async capability ${job.capability} failed.`,
+            )
+          : (unit.error ?? `Async capability ${job.capability} failed.`),
+      );
     }
     const stepOutput = unit.output as
       | { result?: unknown; responseStatus?: number }

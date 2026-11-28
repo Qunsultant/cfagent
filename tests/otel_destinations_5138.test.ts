@@ -73,25 +73,25 @@ afterEach(() => {
 });
 
 describe("resolveOtelDestinationEnabled — the destination resolver", () => {
-  it("resolves the file defaults when env is empty (all three ON)", () => {
+  it("resolves the file defaults when env is empty (r2 OFF, Analytics Engine OFF, console ON)", () => {
     for (const destination of OTEL_DESTINATIONS) {
       const r = resolveOtelDestinationEnabled(destination, {
         file: OTEL_FILE_CONFIG.destinations[destination],
       });
-      expect(r.enabled).toBe(true);
+      expect(r.enabled).toBe(destination === "console" ? true : false);
       expect(r.invalid).toBe(false);
       expect(r.source).toBe("file");
     }
   });
 
-  it("the config file carries all three destinations ON", () => {
+  it("the config file carries r2 OFF, Analytics Engine OFF, console ON", () => {
     expect(OTEL_FILE_CONFIG.destinations).toEqual({
-      analyticsEngine: true,
-      r2: true,
+      analyticsEngine: false,
+      r2: false,
       console: true,
     });
-    expect(otelDestinationEnabledDefault("analyticsEngine")).toBe(true);
-    expect(otelDestinationEnabledDefault("r2")).toBe(true);
+    expect(otelDestinationEnabledDefault("analyticsEngine")).toBe(false);
+    expect(otelDestinationEnabledDefault("r2")).toBe(false);
     expect(otelDestinationEnabledDefault("console")).toBe(true);
   });
 
@@ -166,7 +166,10 @@ describe("createObservabilitySink — destination switches", () => {
   it("AE on + bound writes to Analytics Engine, not console", async () => {
     const dataset = fakeDataset();
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
-    const sink = createObservabilitySink({ OBSERVABILITY: dataset });
+    const sink = createObservabilitySink({
+      OBSERVABILITY: dataset,
+      OTEL_DESTINATION_ANALYTICS_ENGINE_ENABLED: "true",
+    });
     await sink.write(makeEvent());
     expect(dataset.writeDataPoint).toHaveBeenCalledTimes(1);
     expect(info).not.toHaveBeenCalled();
@@ -230,6 +233,7 @@ describe("createObservabilitySink — destination switches", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const sink = createObservabilitySink({
       OBSERVABILITY: dataset,
+      OTEL_DESTINATION_ANALYTICS_ENGINE_ENABLED: "true",
       OTEL_DESTINATION_CONSOLE_ENABLED: "false",
     });
     await sink.write(makeEvent());
@@ -271,11 +275,11 @@ describe("createObservabilitySink — destination switches", () => {
 });
 
 describe("resolveOtelLoggingConfig — destinations", () => {
-  it("resolves the file defaults (all three ON) when env is empty", () => {
+  it("resolves the file defaults (r2 OFF, Analytics Engine OFF) when env is empty", () => {
     const config = resolveOtelLoggingConfig({});
     expect(config.destinations).toEqual({
-      analyticsEngine: true,
-      r2: true,
+      analyticsEngine: false,
+      r2: false,
       console: true,
     });
   });
@@ -293,7 +297,7 @@ describe("resolveOtelLoggingConfig — destinations", () => {
   it("an invalid destination env value fails closed to OFF", () => {
     const config = resolveOtelLoggingConfig({ OTEL_DESTINATION_R2_ENABLED: "banana" });
     expect(config.destinations.r2).toBe(false);
-    expect(config.destinations.analyticsEngine).toBe(true);
+    expect(config.destinations.analyticsEngine).toBe(false);
     expect(config.destinations.console).toBe(true);
   });
 });
@@ -316,6 +320,7 @@ describe("createOtelLogging — the R2 transport respects the R2 switch", () => 
     const put = vi.fn().mockResolvedValue(undefined);
     const handle = createOtelLogging({
       REPORTS_BUCKET: { put },
+      OTEL_DESTINATION_R2_ENABLED: "true",
     } as never);
     expect(handle.sink).not.toBeNull();
     handle.sink!.write(makeEvent());

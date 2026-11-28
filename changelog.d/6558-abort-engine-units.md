@@ -1,0 +1,3 @@
+### Fixed
+
+- **Engine units now abort on stage deadline (#6558):** the stage deadline carries an abort signal into the unit's step (`JobStepContext.signal`), and the async mode (`runAsyncUnit`) carries the caller's signal the same way, so a deadline-fired unit's in-flight work stops instead of running on after the unit is terminal — the web-request leg aborts its request, and the tool, delivery, shard, feed, and query legs carry the signal at their entry seams. The report leg is recorded as un-abortable (local reads only, no outbound work), and wait steps keep their by-design deadline exemption. The run still fails with the unit `timed_out`; only the abandoned work stops.

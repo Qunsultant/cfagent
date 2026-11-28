@@ -62,6 +62,12 @@ export async function executeFeedSnapshotJob(
     orm: unknown;
     createETradeService: (userLogin: string, environment?: string) => { client: unknown };
     sessionId: string;
+    /** #6558: the async-job execution deadline's abort signal, when
+     *  the feed snapshot runs as a job leg (the executor binds it).
+     *  The internal provider fetches do not consume it yet —
+     *  follow-up work; this field is the seam they consume it
+     *  through. */
+    signal?: AbortSignal;
   },
   payload: FeedSnapshotJobPayload,
 ): Promise<FeedSnapshotJobResult> {

@@ -91,6 +91,11 @@ export interface FollowupDeliveryInput {
   userLogin: string;
   outcome: ScreenerRunOutcome;
   artifacts: Array<{ key: string; fileName: string; kind?: "pdf" | "xlsx" | "csv" }>;
+  /** #6558: the async-job execution deadline's abort signal, when
+   *  the delivery runs as a job leg. The transports behind this
+   *  port do not consume it yet (follow-up work); the field is
+   *  the seam they consume it through. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -123,6 +128,11 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
     scheduleId?: string | null;
     recipientBinding?: ChannelRecipientBinding | null;
     ownerEmail?: string | null;
+    /** #6558: the async-job execution deadline's abort signal, when
+     *  the notification runs as a job leg. The transports behind
+     *  this port do not consume it yet (follow-up work); the field
+     *  is the seam they consume it through. */
+    signal?: AbortSignal;
   }) => Promise<{ ok: boolean; error?: string; detail?: string }>;
 } {
   return {

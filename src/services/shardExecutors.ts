@@ -119,6 +119,14 @@ export interface ShardExecutorDeps {
   ) => Promise<OptionChainSource>;
   sessionId: string;
   /**
+   * Issue #6558: the async-job execution deadline's abort signal,
+   * when the shard runs as a job leg (the executor binds it).
+   * The internal provider fetches (engine/agents/screener) do
+   * not consume it yet — follow-up work; this field is the seam
+   * they consume it through. Absent in unit callers.
+   */
+  signal?: AbortSignal;
+  /**
    * Issue #1368: test seam for the nasdaq feed shard — the listings
    * fetcher the platform nasdaq adapter wraps. Production leaves it
    * unset and the shard uses the listings module, exactly as before.
