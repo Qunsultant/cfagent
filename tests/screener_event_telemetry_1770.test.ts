@@ -48,7 +48,14 @@ describe("writeScreenerEventTelemetry (#1770 slice C)", () => {
   it("writes a screener.delivery point for a completed run", async () => {
     const captured: any[] = [];
     const ok = await writeScreenerEventTelemetry(
-      { OBSERVABILITY: fakeDataset(captured) },
+      {
+        OBSERVABILITY: fakeDataset(captured),
+        // F3 #6558 OTEL fold-in: config/otel.json has the AE sink
+        // OFF, so the port would resolve to the console sink and the
+        // mock dataset would stay empty. Pin the AE path explicitly
+        // via the env override (env wins over the file).
+        OTEL_DESTINATION_ANALYTICS_ENGINE_ENABLED: "true",
+      },
       "trader1",
       completedEvent(),
     );
@@ -67,7 +74,14 @@ describe("writeScreenerEventTelemetry (#1770 slice C)", () => {
   it("writes an error-level point with the failure code for a failed run", async () => {
     const captured: any[] = [];
     const ok = await writeScreenerEventTelemetry(
-      { OBSERVABILITY: fakeDataset(captured) },
+      {
+        OBSERVABILITY: fakeDataset(captured),
+        // F3 #6558 OTEL fold-in: config/otel.json has the AE sink
+        // OFF, so the port would resolve to the console sink and the
+        // mock dataset would stay empty. Pin the AE path explicitly
+        // via the env override (env wins over the file).
+        OTEL_DESTINATION_ANALYTICS_ENGINE_ENABLED: "true",
+      },
       "trader1",
       failedEvent(),
     );
@@ -82,7 +96,14 @@ describe("writeScreenerEventTelemetry (#1770 slice C)", () => {
   it("writes nothing for an options event (the fold maps only screener.*)", async () => {
     const captured: any[] = [];
     const ok = await writeScreenerEventTelemetry(
-      { OBSERVABILITY: fakeDataset(captured) },
+      {
+        OBSERVABILITY: fakeDataset(captured),
+        // F3 #6558 OTEL fold-in: config/otel.json has the AE sink
+        // OFF, so the port would resolve to the console sink and the
+        // mock dataset would stay empty. Pin the AE path explicitly
+        // via the env override (env wins over the file).
+        OTEL_DESTINATION_ANALYTICS_ENGINE_ENABLED: "true",
+      },
       "trader1",
       {
         type: "options.completed",
