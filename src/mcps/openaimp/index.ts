@@ -277,6 +277,8 @@ export async function executeMCPTool(
     storage?: import("../../trading").NasdaqUniverseRouteBundleInput["storage"];
     /** #4357: the async job id executing this call, spread through to the tool context (the factory spread forwards it); doors that open a bridge row stamp it as the bridge row's parent. */
     asyncJobId?: string;
+    /** #6558: the async-job execution deadline's abort signal, spread through to the tool context like asyncJobId (the factory spread forwards it); tools that fetch with it stop when the deadline fires. */
+    signal?: AbortSignal;
     audit: (type: string, agent: any, payload: Record<string, unknown>) => void;
     submitJob?: (job: AsyncJobSubmission) => Promise<{
       jobId: string;

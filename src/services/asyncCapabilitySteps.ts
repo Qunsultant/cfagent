@@ -72,8 +72,14 @@ export interface AsyncCapabilityExecution {
   job: AsyncCapabilityJob;
   jobId: string;
   payload: Record<string, unknown>;
-  /** The executor's execution deadline — the race the leg runs under. */
-  deadline: { promise: Promise<never>; cancel: () => void };
+  /**
+   * The executor's execution deadline — the race the leg runs
+   * under. Issue #6558: the deadline carries the abort signal
+   * (`signal`), aborted with the timeout error when the deadline
+   * fires; every leg raced against the deadline threads it, or
+   * is recorded as un-abortable with a reason.
+   */
+  deadline: { promise: Promise<never>; cancel: () => void; signal: AbortSignal };
   /** The queue port the leg records attempts through. */
   queue: AsyncJobPorts["queue"];
 }

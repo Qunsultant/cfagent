@@ -265,13 +265,17 @@
   // still records something. 0.01 is Cloudflare's floor (1% of invocations),
   // and persist: false keeps logs streaming without storing them. To silence
   // it entirely, set enabled: false - that is the only lower step.
+  // 2026-11-24 (owner direction, sign-in RCA): raised to full capture —
+  // head_sampling_rate 1 + persist true — so the
+  // `session cap enforcement failed` line is recorded for sign-in attempts.
+  // Owner direction 2026-11-24 20:41 EST: keep sampling 1 (no dial-back).
   "observability": {
     "enabled": true,
-    "head_sampling_rate": 0.01,
+    "head_sampling_rate": 1,
     "logs": {
       "invocation_logs": true,
-      "head_sampling_rate": 0.01,
-      "persist": false
+      "head_sampling_rate": 1,
+      "persist": true
     }
   },
   // Issue #4112 (owner direction): NO duty schedules and NO duty

@@ -64,10 +64,15 @@
  * memory, so a resume in a NEW process re-executes nodes whose
  * outputs were never persisted — that volatility is exactly
  * why persisted hand-offs are the default. A unit past its
- * stage deadline is recorded timed_out and the run fails; the
- * underlying step promise is not cancellable, so its late
- * writes may still land (the workflow substrate's deadline
- * sweep has the same shape). Stage actions (runStage and
+ * stage deadline is recorded timed_out and the run fails, and
+ * the deadline aborts the unit's signal (`JobStepContext.signal`,
+ * issue #6558) so a step observing it stops its in-flight work
+ * instead of running on after the unit is terminal; a step that
+ * ignores the signal still runs on, and its late writes may
+ * still land (the workflow substrate's deadline sweep has the
+ * same shape). Wait steps (`wait.event`, `wait.sleep`) bypass
+ * the stage deadline by design — a 600s default would kill an
+ * approval wait — so they carry no abort signal. Stage actions (runStage and
  * friends) execute inline on the caller's dispatch; hosts
  * needing an async boundary dispatch runJob or the workflow.
  */
@@ -114,6 +119,7 @@ import {
 import type { JobStageEventRecord, JobStageEventStore } from "../data/jobStageEventPorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
+import { BusinessError, resolveOutcome } from "../outcomes/outcomeAspects";
 import { publishJobStatus, publishStageAction } from "./jobPipelineEvents";
 import { newRunId, runIdBody, stageIdBody, stepExecutionId } from "./executionTreeIds";
 import type { MessagePublisher, StageName } from "../messaging/messagingPorts";
@@ -675,6 +681,15 @@ export interface AsyncUnitRequest {
   capability: AsyncCapability | string;
   input: unknown;
   asyncJobId: string;
+  /**
+   * Issue #6558 — the caller's abort signal for the unit's step,
+   * stamped onto the step context when present. The executor
+   * passes its execution-deadline signal: when the deadline
+   * fires, a capability step observing the signal stops instead
+   * of running on after the queue row is terminal. Absent → the
+   * unit runs with no deadline and no abort, exactly as before.
+   */
+  signal?: AbortSignal;
   trigger?: JobRunTrigger;
 }
 
@@ -684,6 +699,15 @@ export interface AsyncUnitRequest {
  * and the failure message when it did not. A step failure is
  * data here, never a throw — the executor turns it into the
  * queue row's failure.
+ *
+ * Issue #6558 — the failure message alone cannot carry the
+ * step's cataloged outcome code (`BusinessError.message` is the
+ * business message, with no `[CODE]` bracket), so a coded step
+ * failure also carries `errorCode`: the executor renders it
+ * into the row's coded failure, and without it every coded leg
+ * failure would land on the row as the generic
+ * FAILURE_ASYNC_JOB_FAILED — including a deadline-fired leg,
+ * which must land as FAILURE_ASYNC_JOB_TIMEOUT.
  */
 export interface AsyncUnitOutcome {
   jobId: string;
@@ -691,6 +715,8 @@ export interface AsyncUnitOutcome {
   state: "completed" | "failed";
   output?: unknown;
   error?: string;
+  /** Issue #6558 — the step's cataloged outcome code, when it failed with one. */
+  errorCode?: string;
 }
 
 /**
@@ -1522,6 +1548,11 @@ export class JobPipelineControl {
       shardKey: null,
       params: { capability },
       input: request.input,
+      // Issue #6558 — the caller's abort signal rides the step
+      // context when one was submitted (the executor's deadline
+      // signal); a step observing it stops when the deadline
+      // fires. Absent → no signal field at all, exactly as before.
+      ...(request.signal ? { signal: request.signal } : {}),
       now: startedAt,
       trigger,
       runKind: "original",
@@ -1535,6 +1566,7 @@ export class JobPipelineControl {
     const journal = this.deps.journal ?? identityJobStepJournal;
     let output: unknown;
     let error: string | undefined;
+    let errorCode: string | undefined;
     try {
       const result = await journal.do(
         stepExecutionId(runId, "", 0, null, null),
@@ -1544,6 +1576,14 @@ export class JobPipelineControl {
       output = result.output;
     } catch (caught) {
       error = caught instanceof Error ? caught.message : String(caught);
+      // Issue #6558 — carry the step's cataloged outcome code
+      // across the boundary (see AsyncUnitOutcome): the message
+      // alone cannot carry it, and the executor derives the
+      // row's coded failure from it.
+      if (caught instanceof BusinessError) {
+        const resolved = resolveOutcome(caught.code);
+        if (resolved.resolved) errorCode = resolved.code;
+      }
     } finally {
       this.liveUnits.delete(runId);
       this.liveSteps.delete(runId);
@@ -1588,6 +1628,7 @@ export class JobPipelineControl {
       state,
       ...(output !== undefined ? { output } : {}),
       ...(error !== undefined ? { error } : {}),
+      ...(errorCode !== undefined ? { errorCode } : {}),
     };
   }
 
@@ -5076,7 +5117,7 @@ export class JobPipelineControl {
         };
         ctx.legTimings.push(legTiming);
         try {
-          const executed = await this.runUnit(stage, node, () =>
+          const executed = await this.runUnit(stage, node, (signal) =>
             this.execSteps(ctx, node, path, input, {
               mode: eff.mode,
               inMemory: eff.inMemory,
@@ -5085,6 +5126,10 @@ export class JobPipelineControl {
               shardIndex: eff.shardIndex,
               resumeStep: resume.stepIndex,
               resumeItem: resume.itemIndex,
+              // Issue #6558 — the unit's deadline signal rides the
+              // step execution; a step observing it stops when the
+              // deadline fires. A wait-bypassed unit passes none.
+              ...(signal ? { signal } : {}),
             }),
           );
           legTiming.endedAtMs = Date.now();
@@ -5324,13 +5369,17 @@ export class JobPipelineControl {
   private async runUnit<T>(
     stage: StageRunnerStage,
     node: JobNodeConfig,
-    fn: () => Promise<T>,
+    fn: (signal?: AbortSignal) => Promise<T>,
   ): Promise<T> {
     if (
       (node.steps ?? []).some(
         (step) => step.step === WAIT_EVENT_STEP || step.step === WAIT_SLEEP_STEP,
       )
     ) {
+      // Issue #6558 — wait steps bypass the stage deadline by
+      // design (a 600s default would kill an approval wait), so
+      // the unit runs with no signal: its steps run outside any
+      // deadline, exactly as before.
       return fn();
     }
     return this.withUnitDeadline(stage, fn);
@@ -5339,15 +5388,22 @@ export class JobPipelineControl {
   /** Race a unit's execution against its stage deadline; a unit past it is timed_out. */
   private async withUnitDeadline<T>(
     stage: StageRunnerStage,
-    fn: () => Promise<T>,
+    fn: (signal: AbortSignal) => Promise<T>,
   ): Promise<T> {
+    // Issue #6558 — the deadline carries an abort signal: when it
+    // fires, the controller aborts with the same timeout error
+    // the race rejects with, so a step observing the signal stops
+    // instead of running on after the unit is timed_out.
+    const controller = new AbortController();
     const timeout = this.sleep(stage.timeoutMs).then(() => {
-      throw new JobPipelineError(
+      const error = new JobPipelineError(
         "job_stage_timed_out",
         `Stage "${stage.stage}" exceeded its per-unit deadline of ${stage.timeoutMs}ms.`,
       );
+      controller.abort(error);
+      throw error;
     });
-    return Promise.race([fn(), timeout]);
+    return Promise.race([fn(controller.signal), timeout]);
   }
 
   /**
@@ -5668,6 +5724,8 @@ export class JobPipelineControl {
       shardIndex: number;
       resumeStep: number;
       resumeItem: number;
+      /** Issue #6558 — the unit's stage-deadline abort signal, when the unit runs under a deadline. */
+      signal?: AbortSignal;
     },
   ): Promise<{ output: unknown; resultRef?: string }> {
     const journal = this.deps.journal ?? identityJobStepJournal;
@@ -5744,6 +5802,10 @@ export class JobPipelineControl {
         shardKey: eff.shardKey,
         params: stepConfig.params ?? {},
         input: stepInput,
+        // Issue #6558 — the unit's deadline signal, when the unit
+        // runs under a deadline; a step observing it stops when
+        // the deadline fires.
+        ...(eff.signal ? { signal: eff.signal } : {}),
         now: this.iso(),
         trigger: ctx.trigger,
         runKind: ctx.kind,

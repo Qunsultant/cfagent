@@ -39,6 +39,17 @@ export interface JobStepContext {
   params: Record<string, unknown>;
   /** The previous step's output (the hand-off), or the node's input artifact. */
   input: unknown;
+  /**
+   * Issue #6558 — the unit's stage-deadline abort signal, threaded
+   * by the engine (`withUnitDeadline` aborts it when the deadline
+   * fires, with the timeout error as its reason). A step that
+   * fetches with it (or checks it) stops when the deadline fires
+   * instead of running on after the unit is timed_out; a step
+   * that ignores it is unaffected. Unset → the step runs outside
+   * any deadline (wait steps, which bypass the stage deadline by
+   * design, and async units submitted without a signal).
+   */
+  signal?: AbortSignal;
   now: string;
   /** Issue #4767 — the dispatch trigger of the run this step executes in, threaded by the engine. */
   trigger: JobRunTrigger;

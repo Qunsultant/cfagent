@@ -47,6 +47,16 @@ export interface McpToolContext {
    */
   asyncJobId?: string;
   /**
+   * #6558: the async-job execution deadline's abort signal,
+   * populated by the async-job executor (the deadline fires →
+   * the signal aborts with the timeout error as reason). Tools
+   * that fetch with it stop when the deadline fires instead of
+   * running on after the job row is terminal; tools that ignore
+   * it are unaffected. Unset → the tool runs outside any async
+   * job (sync paths, direct calls), exactly as before.
+   */
+  signal?: AbortSignal;
+  /**
    * #1722: optional session/user carriers for the NLQ_MODE switch
    * (run comes from the per-call `mode` input, global env from
    * `env`). Populated by the execution-context owner; unset carriers
