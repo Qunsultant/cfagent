@@ -306,6 +306,12 @@ function workflowGoalService(opts: { withBinding: boolean }) {
     // submission, not the paid gate, so it stays off.
     MONETIZATION_ENABLED: "false",
     FEATURE_FLAGS: JSON.stringify({ goal_workflow: true }),
+    // F3 #6558 OTEL fold-in: config/otel.json has the AE sink OFF,
+    // so the telemetry port would resolve to the console sink and
+    // the mock dataset would stay empty. D8 pins the AE stream
+    // shape, so pin the AE path explicitly via the env override
+    // (env wins over the file).
+    OTEL_DESTINATION_ANALYTICS_ENGINE_ENABLED: "true",
     ...(opts.withBinding ? { SCREENER_WORKFLOW: binding } : {}),
     AGENT_DB: d1Mock,
     OBSERVABILITY: {
