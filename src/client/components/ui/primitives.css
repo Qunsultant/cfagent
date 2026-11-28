@@ -927,6 +927,10 @@ div.ui-modal-title { font-size: inherit; font-weight: inherit; }
   color: var(--color-success);
 }
 
+.ui-muted {
+  color: var(--color-text-muted);
+}
+
 .ui-link {
   color: var(--color-primary);
   text-decoration: underline;
